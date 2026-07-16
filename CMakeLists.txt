@@ -10,6 +10,7 @@ add_executable(Server
         server_logic.c
         http_lib.c
         process.c
+        booking.c
 )
 
 target_include_directories(Server PRIVATE

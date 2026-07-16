@@ -3,6 +3,7 @@
 //
 
 #include "process.h"
+#include "booking.h"
 
 #include <time.h>
 #include <errno.h>
@@ -449,204 +450,6 @@ static string *serve_static_file(const char *request_path, bool send_body)
     return response;
 }
 
-static const char *find_request_body(const string *request, size_t *out_body_length)
-{
-    const char *data;
-    size_t length;
-
-    if (out_body_length == NULL) {
-        return NULL;
-    }
-
-    *out_body_length = 0;
-
-    if (request == NULL) {
-        return NULL;
-    }
-
-    data = get_const_char_str(request);
-    length = get_length(request);
-
-    if (data == NULL) {
-        return NULL;
-    }
-
-    for (size_t i = 0; i + 3 < length; i++) {
-        if (data[i] == '\r' &&
-            data[i + 1] == '\n' &&
-            data[i + 2] == '\r' &&
-            data[i + 3] == '\n') {
-            *out_body_length = length - (i + 4);
-            return data + i + 4;
-        }
-    }
-
-    for (size_t i = 0; i + 1 < length; i++) {
-        if (data[i] == '\n' && data[i + 1] == '\n') {
-            *out_body_length = length - (i + 2);
-            return data + i + 2;
-        }
-    }
-
-    return NULL;
-}
-
-static int hex_value(char c)
-{
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-
-    return -1;
-}
-
-static void url_decode_to_buffer(const char *src, size_t src_length, char *dest, size_t dest_size)
-{
-    size_t src_pos = 0;
-    size_t dest_pos = 0;
-
-    if (dest == NULL || dest_size == 0) {
-        return;
-    }
-
-    while (src_pos < src_length && dest_pos + 1 < dest_size) {
-        if (src[src_pos] == '+') {
-            dest[dest_pos] = ' ';
-            dest_pos++;
-            src_pos++;
-            continue;
-        }
-
-        if (src[src_pos] == '%' && src_pos + 2 < src_length) {
-            int high = hex_value(src[src_pos + 1]);
-            int low = hex_value(src[src_pos + 2]);
-
-            if (high >= 0 && low >= 0) {
-                dest[dest_pos] = (char)((high * 16) + low);
-                dest_pos++;
-                src_pos += 3;
-                continue;
-            }
-        }
-
-        dest[dest_pos] = src[src_pos];
-        dest_pos++;
-        src_pos++;
-    }
-
-    dest[dest_pos] = '\0';
-}
-
-static void get_form_value(
-        const char *body,
-        size_t body_length,
-        const char *field_name,
-        char *out,
-        size_t out_size
-)
-{
-    size_t field_length;
-
-    if (out == NULL || out_size == 0) {
-        return;
-    }
-
-    out[0] = '\0';
-
-    if (body == NULL || field_name == NULL) {
-        return;
-    }
-
-    field_length = strlen(field_name);
-
-    size_t pos = 0;
-
-    while (pos < body_length) {
-        size_t key_start = pos;
-        size_t key_end;
-        size_t value_start;
-        size_t value_end;
-
-        while (pos < body_length && body[pos] != '=' && body[pos] != '&') {
-            pos++;
-        }
-
-        key_end = pos;
-
-        if (pos >= body_length || body[pos] != '=') {
-            while (pos < body_length && body[pos] != '&') {
-                pos++;
-            }
-
-            if (pos < body_length && body[pos] == '&') {
-                pos++;
-            }
-
-            continue;
-        }
-
-        pos++;
-        value_start = pos;
-
-        while (pos < body_length && body[pos] != '&') {
-            pos++;
-        }
-
-        value_end = pos;
-
-        if (key_end - key_start == field_length &&
-            strncmp(body + key_start, field_name, field_length) == 0) {
-            url_decode_to_buffer(body + value_start, value_end - value_start, out, out_size);
-            return;
-        }
-
-        if (pos < body_length && body[pos] == '&') {
-            pos++;
-        }
-    }
-}
-
-static int save_booking_request(
-        const char *name,
-        const char *contact,
-        const char *dog_name,
-        const char *message
-)
-{
-    FILE *file;
-    time_t now = time(NULL);
-
-    /*
-     * Falls der Ordner schon existiert, ist das kein Problem.
-     */
-    mkdir("data", 0755);
-
-    file = fopen("data/bookings.txt", "a");
-
-    if (file == NULL) {
-        return -1;
-    }
-
-    fprintf(file, "----- Neue Anfrage -----\n");
-    fprintf(file, "Zeit: %ld\n", (long)now);
-    fprintf(file, "Name: %s\n", name);
-    fprintf(file, "Kontakt: %s\n", contact);
-    fprintf(file, "Hund: %s\n", dog_name);
-    fprintf(file, "Nachricht: %s\n", message);
-    fprintf(file, "\n");
-
-    fclose(file);
-    return 0;
-}
-
 static string *handle_booking_created(bool send_body)
 {
     const char *body =
@@ -674,30 +477,13 @@ static string *handle_booking_created(bool send_body)
 
 static string *handle_booking(string *request)
 {
-    const char *body;
-    size_t body_length;
+    booking_request booking;
 
-    char name[256];
-    char contact[256];
-    char dog_name[256];
-    char message[1024];
-
-    body = find_request_body(request, &body_length);
-
-    if (body == NULL) {
+    if (!parse_booking_request(request, &booking)) {
         return handle_bad_request(true);
     }
 
-    get_form_value(body, body_length, "name", name, sizeof(name));
-    get_form_value(body, body_length, "contact", contact, sizeof(contact));
-    get_form_value(body, body_length, "dog_name", dog_name, sizeof(dog_name));
-    get_form_value(body, body_length, "message", message, sizeof(message));
-
-    if (name[0] == '\0' || contact[0] == '\0') {
-        return handle_bad_request(true);
-    }
-
-    if (save_booking_request(name, contact, dog_name, message) != 0) {
+    if (save_booking_request(&booking) != 0) {
         return handle_internal_error(true);
     }
 
