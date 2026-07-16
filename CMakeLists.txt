@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.20)
 
 project(Server C)
 
@@ -9,6 +9,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 add_executable(Server
         server_logic.c
         http_lib.c
+        process.c
 )
 
 target_include_directories(Server PRIVATE
@@ -17,6 +18,7 @@ target_include_directories(Server PRIVATE
 
 target_compile_definitions(Server PRIVATE
         _POSIX_C_SOURCE=200809L
+        _XOPEN_SOURCE=700
 )
 
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -24,7 +26,6 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
             -Wall
             -Wextra
             -Wpedantic
-            -Wconversion
             -Wshadow
             -Wstrict-prototypes
     )

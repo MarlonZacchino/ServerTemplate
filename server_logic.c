@@ -10,12 +10,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 #include "http_lib.h"
+#include "process.h"
 
 /**
  * TCP-Port, auf welchem der Server hört.
@@ -41,7 +43,6 @@
  * - process() soll request nicht freigeben.
  * - process() soll idealerweise eine neue string* Response zurückgeben.
  */
-string *process(string *request);
 
 /**
  * Globale Laufvariable für die Main-Loop.
@@ -125,17 +126,10 @@ static void register_signals(void)
 #endif
 }
 
-/**
- * Prüft, ob der HTTP-Header vollständig gelesen wurde.
- *
- * Für euren PSE-Server reicht das, weil ihr hauptsächlich GET-Requests verarbeitet.
- * Falls später HTTP-Body/Post relevant wird, muss zusätzlich Content-Length
- * ausgewertet werden.
- */
-static bool has_http_header_end(const char *buffer, size_t length)
+static size_t find_http_header_end(const char *buffer, size_t length)
 {
     if (buffer == NULL || length < 2) {
-        return false;
+        return 0;
     }
 
     for (size_t i = 0; i + 3 < length; i++) {
@@ -143,17 +137,82 @@ static bool has_http_header_end(const char *buffer, size_t length)
             buffer[i + 1] == '\n' &&
             buffer[i + 2] == '\r' &&
             buffer[i + 3] == '\n') {
-            return true;
-        }
+            return i + 4;
+            }
     }
 
     for (size_t i = 0; i + 1 < length; i++) {
         if (buffer[i] == '\n' && buffer[i + 1] == '\n') {
-            return true;
+            return i + 2;
         }
     }
 
-    return false;
+    return 0;
+}
+
+static int header_name_matches(const char *buffer, size_t pos, size_t length, const char *name)
+{
+    size_t name_pos = 0;
+
+    while (name[name_pos] != '\0') {
+        if (pos + name_pos >= length) {
+            return 0;
+        }
+
+        char a = buffer[pos + name_pos];
+        char b = name[name_pos];
+
+        if (a >= 'A' && a <= 'Z') {
+            a = (char)(a - 'A' + 'a');
+        }
+
+        if (b >= 'A' && b <= 'Z') {
+            b = (char)(b - 'A' + 'a');
+        }
+
+        if (a != b) {
+            return 0;
+        }
+
+        name_pos++;
+    }
+
+    return 1;
+}
+
+static size_t get_content_length_from_header(const char *buffer, size_t header_length)
+{
+    const char *header_name = "Content-Length:";
+    size_t name_length = strlen(header_name);
+
+    for (size_t pos = 0; pos + name_length < header_length; pos++) {
+        if (!header_name_matches(buffer, pos, header_length, header_name)) {
+            continue;
+        }
+
+        pos += name_length;
+
+        while (pos < header_length && (buffer[pos] == ' ' || buffer[pos] == '\t')) {
+            pos++;
+        }
+
+        size_t value = 0;
+
+        while (pos < header_length && buffer[pos] >= '0' && buffer[pos] <= '9') {
+            size_t digit = (size_t)(buffer[pos] - '0');
+
+            if (value > (SIZE_MAX - digit) / 10) {
+                return 0;
+            }
+
+            value = value * 10 + digit;
+            pos++;
+        }
+
+        return value;
+    }
+
+    return 0;
 }
 
 /**
@@ -234,6 +293,8 @@ static ssize_t read_from_stdin(char *buffer, size_t capacity)
 static ssize_t read_from_socket(int fd, char *buffer, size_t capacity)
 {
     size_t total = 0;
+    size_t header_end = 0;
+    size_t content_length = 0;
 
     while (total < capacity) {
         ssize_t length = read(fd, buffer + total, capacity - total);
@@ -241,8 +302,24 @@ static ssize_t read_from_socket(int fd, char *buffer, size_t capacity)
         if (length > 0) {
             total += (size_t)length;
 
-            if (has_http_header_end(buffer, total)) {
-                break;
+            if (header_end == 0) {
+                header_end = find_http_header_end(buffer, total);
+
+                if (header_end > 0) {
+                    content_length = get_content_length_from_header(buffer, header_end);
+
+                    if (content_length > capacity - header_end) {
+                        break;
+                    }
+                }
+            }
+
+            if (header_end > 0) {
+                size_t expected_total = header_end + content_length;
+
+                if (total >= expected_total) {
+                    break;
+                }
             }
 
             continue;
@@ -256,12 +333,10 @@ static ssize_t read_from_socket(int fd, char *buffer, size_t capacity)
             if (!run) {
                 return -1;
             }
+
             continue;
         }
 
-        /*
-         * Bei Timeout: Wenn bereits Daten gelesen wurden, verarbeiten wir sie.
-         */
         if ((errno == EAGAIN || errno == EWOULDBLOCK) && total > 0) {
             break;
         }
@@ -484,25 +559,6 @@ static void main_loop(void)
     }
 }
 
-/**
- * Übergangsweise Echo-Implementierung.
- *
- * In eurem eigentlichen Projekt sollte diese Funktion aus process.c kommen.
- * Dann diese Funktion hier löschen und stattdessen process.h einbinden.
- */
-string *process(string *request)
-{
-    if (request == NULL) {
-        return NULL;
-    }
-
-    /*
-     * Wichtig:
-     * Nicht einfach "return request;".
-     * Sonst ist die Speicher-Verantwortung unsauber.
-     */
-    return cpy_str(get_char_str(request), get_length(request));
-}
 
 int main(int argc, char *argv[])
 {

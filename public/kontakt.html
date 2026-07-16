@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termin anfragen - Styles 4 Dogs</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <main class="page">
+        <section class="card">
+            <h1>Termin anfragen</h1>
+            <p>Schreib uns kurz, worum es geht. Wir melden uns dann zurück.</p>
+
+            <form method="post" action="/booking" class="form">
+                <label>
+                    Dein Name
+                    <input type="text" name="name" required>
+                </label>
+
+                <label>
+                    Telefonnummer oder E-Mail
+                    <input type="text" name="contact" required>
+                </label>
+
+                <label>
+                    Name des Hundes
+                    <input type="text" name="dog_name">
+                </label>
+
+                <label>
+                    Nachricht
+                    <textarea name="message" rows="5"></textarea>
+                </label>
+
+                <button class="button" type="submit">Anfrage senden</button>
+            </form>
+
+            <p><a href="/">Zurück zur Startseite</a></p>
+        </section>
+    </main>
+</body>
+</html>
