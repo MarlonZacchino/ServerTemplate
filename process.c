@@ -6,17 +6,14 @@
 #include "process.h"
 #include "booking.h"
 
-#include <time.h>
 #include <errno.h>
 #include <limits.h>
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdbool.h>
 
 #define MAX_METHOD_LENGTH 15
 #define MAX_PATH_LENGTH 512
@@ -158,7 +155,6 @@ static bool parse_request_line(
         size_t path_size
 )
 {
-    const char *data;
     size_t length;
     size_t pos = 0;
     size_t method_len = 0;
@@ -168,7 +164,7 @@ static bool parse_request_line(
         return false;
     }
 
-    data = get_const_char_str(request);
+    const char* data = get_const_char_str(request);
     length = get_length(request);
 
     if (data == NULL || length == 0 || method_size == 0 || path_size == 0) {
@@ -491,7 +487,7 @@ static string *serve_static_file(const char *request_path, bool send_body)
     return response;
 }
 
-static string *handle_booking_created(bool send_body)
+static string *handle_booking_created(void)
 {
     const char *body =
             "<!doctype html>\n"
@@ -499,21 +495,48 @@ static string *handle_booking_created(bool send_body)
             "<head>\n"
             "    <meta charset=\"utf-8\">\n"
             "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-            "    <title>Anfrage gesendet - Styles 4 Dogs</title>\n"
+            "    <title>Anfrage gesendet | Styles 4 Dogs</title>\n"
             "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
             "</head>\n"
             "<body>\n"
+            "    <header class=\"site-header\">\n"
+            "        <div class=\"container nav-wrap\">\n"
+            "            <a class=\"brand\" href=\"/\">"
+            "<span class=\"brand-mark\">S4D</span>"
+            "<span>Styles 4 Dogs</span></a>\n"
+            "            <nav class=\"site-nav\" aria-label=\"Hauptnavigation\">"
+            "<a href=\"/\">Start</a>"
+            "<a href=\"/leistungen\">Leistungen</a>"
+            "<a href=\"/preise\">Preise</a>"
+            "<a href=\"/kontakt\">Kontakt</a>"
+            "</nav>\n"
+            "        </div>\n"
+            "    </header>\n"
             "    <main class=\"page\">\n"
             "        <section class=\"card\">\n"
-            "            <h1>Anfrage gesendet</h1>\n"
-            "            <p>Danke. Deine Anfrage wurde gespeichert.</p>\n"
-            "            <p><a href=\"/\">Zurück zur Startseite</a></p>\n"
+            "            <p class=\"eyebrow\">Anfrage eingegangen</p>\n"
+            "            <h1>Vielen Dank!</h1>\n"
+            "            <p>Deine Anfrage wurde gespeichert. "
+            "Sie ist noch keine automatische Terminbestätigung. "
+            "Wir melden uns persönlich bei dir.</p>\n"
+            "            <p><a class=\"button\" href=\"/\">"
+            "Zurück zur Startseite</a></p>\n"
             "        </section>\n"
             "    </main>\n"
+            "    <footer class=\"site-footer\">"
+            "<div class=\"container footer-bottom\">"
+            "<small>&copy; 2026 Styles 4 Dogs.</small>"
+            "</div></footer>\n"
             "</body>\n"
             "</html>\n";
 
-    return build_response_text("201 Created", "text/html; charset=utf-8", NULL, body, send_body);
+    return build_response_text(
+            "201 Created",
+            "text/html; charset=utf-8",
+            NULL,
+            body,
+            true
+    );
 }
 
 static string *handle_booking(string *request)
@@ -528,7 +551,7 @@ static string *handle_booking(string *request)
         return handle_internal_error(true);
     }
 
-    return handle_booking_created(true);
+    return handle_booking_created();
 }
 
 static string *handle_admin_bookings(bool send_body)

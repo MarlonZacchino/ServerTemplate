@@ -28,8 +28,10 @@ target_include_directories(Server PRIVATE
 target_compile_definitions(Server PRIVATE
         _POSIX_C_SOURCE=200809L
         _XOPEN_SOURCE=700
-        SERVER_DOCUMENT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/public"
-        SERVER_AUTH_FILE="${CMAKE_CURRENT_SOURCE_DIR}/.secrets/admin.auth"
+        SERVER_DOCUMENT_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/public\"
+        SERVER_AUTH_FILE=\"${CMAKE_CURRENT_SOURCE_DIR}/.secrets/admin.auth\"
+        SERVER_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\"
+        SERVER_BOOKING_FILE=\"${CMAKE_CURRENT_SOURCE_DIR}/data/bookings.txt\"
 )
 
 target_link_libraries(Server PRIVATE
