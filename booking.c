@@ -437,6 +437,12 @@ string *build_booking_admin_page(void)
             "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
             "</head>\n"
             "<body>\n"
+            "    <header class=\"site-header\">\n"
+            "        <div class=\"container nav-wrap\">\n"
+            "            <a class=\"brand\" href=\"/\"><span class=\"brand-mark\">S4D</span><span>Styles 4 Dogs</span></a>\n"
+            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a></nav>\n"
+            "        </div>\n"
+            "    </header>\n"
             "    <main class=\"page admin-page\">\n"
             "        <section class=\"card admin-card\">\n"
             "            <p class=\"eyebrow\">Admin</p>\n"
@@ -452,6 +458,7 @@ string *build_booking_admin_page(void)
                 "            <p><a href=\"/\">Zurück zur Startseite</a></p>\n"
                 "        </section>\n"
                 "    </main>\n"
+                "    <footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styles 4 Dogs Admin.</small></div></footer>\n"
                 "</body>\n"
                 "</html>\n"
         );
@@ -484,6 +491,7 @@ string *build_booking_admin_page(void)
             "            <p><a href=\"/\">Zurück zur Startseite</a></p>\n"
             "        </section>\n"
             "    </main>\n"
+            "    <footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styles 4 Dogs Admin.</small></div></footer>\n"
             "</body>\n"
             "</html>\n"
     );

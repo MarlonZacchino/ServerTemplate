@@ -3,41 +3,70 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Termin anfragen - Styles 4 Dogs</title>
+    <meta name="description" content="Termin bei Styles 4 Dogs anfragen. Teile uns deine Kontaktdaten und Informationen zu deinem Hund mit.">
+    <title>Termin anfragen | Styles 4 Dogs</title>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <main class="page">
-        <section class="card">
-            <h1>Termin anfragen</h1>
-            <p>Schreib uns kurz, worum es geht. Wir melden uns dann zurück.</p>
+<header class="site-header">
+    <div class="container nav-wrap">
+        <a class="brand" href="/" aria-label="Styles 4 Dogs Startseite"><span class="brand-mark" aria-hidden="true">S4D</span><span>Styles 4 Dogs</span></a>
+        <nav class="site-nav" aria-label="Hauptnavigation">
+            <a href="/">Start</a><a href="/leistungen">Leistungen</a><a href="/preise">Preise</a><a href="/kontakt" aria-current="page">Kontakt</a>
+        </nav>
+        <a class="button button-small" href="/kontakt">Termin anfragen</a>
+    </div>
+</header>
 
-            <form method="post" action="/booking" class="form">
-                <label>
-                    Dein Name
-                    <input type="text" name="name" required>
-                </label>
+<main>
+    <section class="page-hero compact-hero">
+        <div class="container narrow">
+            <p class="eyebrow">Kontakt</p>
+            <h1>Termin unverbindlich anfragen.</h1>
+            <p class="lead">Schreib uns kurz, worum es geht. Wir melden uns persönlich zurück und klären den passenden Termin.</p>
+        </div>
+    </section>
 
-                <label>
-                    Telefonnummer oder E-Mail
-                    <input type="text" name="contact" required>
-                </label>
+    <section class="section section-first">
+        <div class="container contact-grid">
+            <div class="form-card">
+                <form method="post" action="/booking" class="form">
+                    <label for="name">Dein Name <span aria-hidden="true">*</span></label>
+                    <input id="name" type="text" name="name" autocomplete="name" maxlength="120" required>
 
-                <label>
-                    Name des Hundes
-                    <input type="text" name="dog_name">
-                </label>
+                    <label for="contact">Telefonnummer oder E-Mail <span aria-hidden="true">*</span></label>
+                    <input id="contact" type="text" name="contact" autocomplete="email" maxlength="180" required>
 
-                <label>
-                    Nachricht
-                    <textarea name="message" rows="5"></textarea>
-                </label>
+                    <label for="dog-name">Name des Hundes</label>
+                    <input id="dog-name" type="text" name="dog_name" maxlength="120">
 
-                <button class="button" type="submit">Anfrage senden</button>
-            </form>
+                    <label for="message">Worum geht es?</label>
+                    <textarea id="message" name="message" rows="7" maxlength="1500" placeholder="Zum Beispiel Rasse, Größe, Fellzustand und gewünschte Pflege"></textarea>
 
-            <p><a href="/">Zurück zur Startseite</a></p>
-        </section>
-    </main>
+                    <p class="privacy-hint">Mit dem Absenden übermittelst du uns die eingegebenen Daten zur Bearbeitung deiner Anfrage. Weitere Informationen findest du im <a href="/datenschutz">Datenschutz</a>.</p>
+                    <button class="button" type="submit">Anfrage senden</button>
+                    <p class="required-hint">* Pflichtfelder</p>
+                </form>
+            </div>
+            <aside class="contact-aside">
+                <p class="eyebrow">So geht es weiter</p>
+                <ol class="steps-list">
+                    <li><span>1</span><div><strong>Anfrage senden</strong><p>Du beschreibst kurz deinen Hund und deinen Wunsch.</p></div></li>
+                    <li><span>2</span><div><strong>Rückmeldung erhalten</strong><p>Wir klären Leistung, Preisrahmen und mögliche Termine.</p></div></li>
+                    <li><span>3</span><div><strong>Termin bestätigen</strong><p>Erst nach persönlicher Bestätigung ist der Termin verbindlich.</p></div></li>
+                </ol>
+                <div class="contact-note"><strong>Bitte beachten</strong><p>Das Formular ist aktuell eine Terminanfrage und noch keine automatische Buchungsbestätigung.</p></div>
+            </aside>
+        </div>
+    </section>
+</main>
+
+<footer class="site-footer">
+    <div class="container footer-grid">
+        <div><a class="brand brand-footer" href="/">Styles 4 Dogs</a><p>Professionelle Fellpflege mit Ruhe, Geduld und Herz.</p></div>
+        <nav class="footer-nav" aria-label="Rechtliche Navigation"><a href="/kontakt">Kontakt</a><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a></nav>
+    </div>
+    <div class="container footer-bottom"><small>&copy; 2026 Styles 4 Dogs. Alle Rechte vorbehalten.</small></div>
+</footer>
 </body>
 </html>
