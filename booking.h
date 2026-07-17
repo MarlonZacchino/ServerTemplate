@@ -1,7 +1,3 @@
-//
-// Created by Marlon on 16.07.26.
-//
-
 #ifndef SERVER_BOOKING_H
 #define SERVER_BOOKING_H
 
@@ -21,21 +17,15 @@ typedef struct booking_request {
     char message[BOOKING_MESSAGE_SIZE];
 } booking_request;
 
-/*
- * Liest die Formulardaten aus einem HTTP-Request.
- *
- * Erwartet einen Body im Format:
- * name=...&contact=...&dog_name=...&message=...
- */
 bool parse_booking_request(const string *request, booking_request *booking);
 
-/*
- * Speichert eine Buchungsanfrage in data/bookings.txt.
- *
- * Rückgabe:
- * 0  = gespeichert
- * -1 = Fehler
- */
 int save_booking_request(const booking_request *booking);
+
+/*
+ * Baut die HTML-Seite für /admin/bookings.
+ *
+ * Die Rückgabe muss später mit free_str() freigegeben werden.
+ */
+string *build_booking_admin_page(void);
 
 #endif

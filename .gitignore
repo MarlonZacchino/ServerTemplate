@@ -1,8 +1,9 @@
+.secrets/
+data/
 cmake-build-*/
 .idea/
 .vscode/
 
-data/
 *.o
 *.a
 *.so

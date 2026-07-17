@@ -2,6 +2,7 @@
 // Created by Marlon on 11.07.26.
 //
 
+#include "auth.h"
 #include "process.h"
 #include "booking.h"
 
@@ -15,10 +16,16 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #define MAX_METHOD_LENGTH 15
 #define MAX_PATH_LENGTH 512
-#define DOCUMENT_ROOT "public"
+
+#ifndef SERVER_DOCUMENT_ROOT
+#define SERVER_DOCUMENT_ROOT "public"
+#endif
+
+#define DOCUMENT_ROOT SERVER_DOCUMENT_ROOT
 
 /*
  * Content-Type anhand der Dateiendung bestimmen.
@@ -234,8 +241,24 @@ static const char *map_route_to_file(const char *path)
         return "/index.html";
     }
 
+    if (strcmp(path, "/leistungen") == 0) {
+        return "/leistungen.html";
+    }
+
+    if (strcmp(path, "/preise") == 0) {
+        return "/preise.html";
+    }
+
     if (strcmp(path, "/kontakt") == 0) {
         return "/kontakt.html";
+    }
+
+    if (strcmp(path, "/impressum") == 0) {
+        return "/impressum.html";
+    }
+
+    if (strcmp(path, "/datenschutz") == 0) {
+        return "/datenschutz.html";
     }
 
     return path;
@@ -331,13 +354,13 @@ static string *handle_method_not_allowed(bool send_body)
             "<!doctype html>\n"
             "<html lang=\"de\">\n"
             "<head><meta charset=\"utf-8\"><title>405 Method Not Allowed</title></head>\n"
-            "<body><h1>405 Method Not Allowed</h1><p>Erlaubt sind aktuell nur GET und HEAD.</p></body>\n"
+            "<body><h1>405 Method Not Allowed</h1><p>Erlaubt sind aktuell GET, HEAD und POST.</p></body>\n"
             "</html>\n";
 
     return build_response_text(
             "405 Method Not Allowed",
             "text/html; charset=utf-8",
-            "Allow: GET, HEAD\r\n",
+            "Allow: GET, HEAD, POST\r\n",
             body,
             send_body
     );
@@ -377,6 +400,24 @@ static string *handle_internal_error(bool send_body)
             "</html>\n";
 
     return build_response_text("500 Internal Server Error", "text/html; charset=utf-8", NULL, body, send_body);
+}
+
+static string *handle_unauthorized(bool send_body)
+{
+    const char *body =
+            "<!doctype html>\n"
+            "<html lang=\"de\">\n"
+            "<head><meta charset=\"utf-8\"><title>401 Unauthorized</title></head>\n"
+            "<body><h1>401 Unauthorized</h1><p>Für diesen Bereich musst du dich anmelden.</p></body>\n"
+            "</html>\n";
+
+    return build_response_text(
+            "401 Unauthorized",
+            "text/html; charset=utf-8",
+            "WWW-Authenticate: Basic realm=\"Styles 4 Dogs Admin\"\r\n",
+            body,
+            send_body
+    );
 }
 
 /*
@@ -490,6 +531,28 @@ static string *handle_booking(string *request)
     return handle_booking_created(true);
 }
 
+static string *handle_admin_bookings(bool send_body)
+{
+    string *body = build_booking_admin_page();
+
+    if (body == NULL) {
+        return handle_internal_error(send_body);
+    }
+
+    string *response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            NULL,
+            get_char_str(body),
+            get_length(body),
+            send_body
+    );
+
+    free_str(body);
+
+    return response;
+}
+
 string *process(string *request)
 {
     char method[MAX_METHOD_LENGTH + 1];
@@ -514,6 +577,18 @@ string *process(string *request)
         }
 
         return handle_not_found(true);
+    }
+
+    /*
+     * Ab hier bleiben nur noch GET und HEAD übrig.
+     * Die Admin-Seite schützen wir mit Basic Auth.
+     */
+    if (strcmp(path, "/admin/bookings") == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+
+        return handle_admin_bookings(send_body);
     }
 
     return serve_static_file(path, send_body);
