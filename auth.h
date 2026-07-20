@@ -1,7 +1,3 @@
-//
-// Created by Marlon on 17.07.26.
-//
-
 #ifndef SERVER_AUTH_H
 #define SERVER_AUTH_H
 
@@ -9,9 +5,13 @@
 
 #include "http_lib.h"
 
-/*
- * Prüft, ob der Request gültige Admin-Zugangsdaten enthält.
- */
 bool request_has_valid_admin_auth(const string *request);
+
+bool admin_auth_exists(void);
+
+int create_admin_auth(
+        const char *username,
+        const char *password
+);
 
 #endif
