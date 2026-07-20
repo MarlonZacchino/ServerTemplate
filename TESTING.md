@@ -10,7 +10,7 @@ umgestellt. Produktionsdaten und Tests sind voneinander getrennt.
 ```
 
 Der Testlauf baut und startet einen eigenen Server, verwendet isolierte
-Admin- und Buchungsdateien und beendet den Prozess anschließend automatisch.
+Admin-Dateien, SQLite-Datenbanken und TSV-Importdateien und beendet den Prozess anschließend automatisch.
 Details stehen in `tests/pewpewlaz0rt4nk/README.md`.
 
 ## AFL++

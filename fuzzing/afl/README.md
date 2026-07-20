@@ -8,13 +8,15 @@ Server stdin
 ```
 
 Es wird kein Netzwerk-Socket benötigt. Der AFL-Build verwendet eigene Secrets-
-und Datenpfade. Buchungen werden nach `/dev/null` geschrieben, damit ein langer
-Fuzzing-Lauf keine wachsende Testdatei erzeugt.
+und Datenpfade. Für jeden AFL-Prozess wird eine SQLite-Datenbank im Arbeitsspeicher verwendet.
+Dadurch schreibt ein langer Fuzzing-Lauf weder echte Buchungen noch wachsende
+Testdatenbanken auf die Festplatte. Das Startkorpus enthält außerdem einen
+strukturell gültigen Admin-Statusrequest mit ungültigen Zugangsdaten.
 
 ## Abhängigkeiten unter Arch Linux
 
 ```bash
-sudo pacman -S --needed afl++ clang cmake ninja libsodium pkgconf
+sudo pacman -S --needed afl++ clang cmake ninja libsodium sqlite pkgconf
 ```
 
 ## Instrumentierten Server bauen

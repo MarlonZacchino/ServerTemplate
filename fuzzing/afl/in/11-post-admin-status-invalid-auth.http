@@ -1,0 +1,7 @@
+POST /admin/bookings/status HTTP/1.1
+Host: localhost
+Authorization: Basic dGVzdDppbnZhbGlk
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 107
+
+booking_id=1&status=kontaktiert&csrf_token=0000000000000000000000000000000000000000000000000000000000000000

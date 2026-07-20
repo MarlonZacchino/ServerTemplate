@@ -7,6 +7,7 @@ import base64
 import os
 import re
 import socket
+import sqlite3
 import sys
 from pathlib import Path
 from urllib.parse import urlencode
@@ -107,12 +108,50 @@ def run_stateful_tests() -> int:
             raise AssertionError("HEAD und GET melden unterschiedliche Content-Length")
 
     def booking_persistence() -> None:
-        booking_file_value = os.environ.get("STYLES4DOGS_TEST_BOOKING_FILE")
-        if not booking_file_value:
-            raise AssertionError("STYLES4DOGS_TEST_BOOKING_FILE fehlt")
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
 
-        booking_file = Path(booking_file_value)
-        before = booking_file.read_text(encoding="utf-8") if booking_file.exists() else ""
+        database_file = Path(database_file_value)
+
+        with sqlite3.connect(database_file) as connection:
+            before_count = connection.execute(
+                "SELECT COUNT(*) FROM bookings"
+            ).fetchone()[0]
+
+            legacy_row = connection.execute(
+                "SELECT status, customer_name, contact, dog_name, message, legacy "
+                "FROM bookings WHERE customer_name = ?",
+                ("Legacy Test",),
+            ).fetchone()
+
+            if legacy_row != (
+                "altbestand",
+                "Legacy Test",
+                "legacy@example.invalid",
+                "Waldi",
+                "Frühere Anfrage",
+                1,
+            ):
+                raise AssertionError("Das frühere fünfspaltige TSV-Format wurde nicht korrekt importiert")
+
+            imported_v2 = connection.execute(
+                "SELECT status, dog_size, service, preferred_date, legacy "
+                "FROM bookings WHERE customer_name = ?",
+                ("TSV V2 Test",),
+            ).fetchone()
+
+            if imported_v2 != ("neu", "small", "wash_dry", "2026-08-12", 0):
+                raise AssertionError("Das TSV-v2-Format wurde nicht korrekt importiert")
+
+            migration_marker = connection.execute(
+                "SELECT value FROM app_metadata WHERE key = ?",
+                ("legacy_tsv_import_v1",),
+            ).fetchone()
+
+            if migration_marker is None or not migration_marker[0].startswith("completed:2"):
+                raise AssertionError("Der einmalige TSV-Import wurde nicht als abgeschlossen markiert")
+
         body = urlencode({
             "name": "Pew Pew Test",
             "contact": "test@example.invalid",
@@ -131,34 +170,36 @@ def run_stateful_tests() -> int:
         ).encode())
         assert_status(response, "201 Created")
 
-        after = booking_file.read_text(encoding="utf-8")
-        added = after[len(before):]
-        lines = [line for line in added.splitlines() if line]
-        if len(lines) != 1:
-            raise AssertionError(f"Erwartet genau eine neue TSV-Zeile, erhalten {len(lines)}")
+        with sqlite3.connect(database_file) as connection:
+            after_count = connection.execute(
+                "SELECT COUNT(*) FROM bookings"
+            ).fetchone()[0]
 
-        fields = lines[0].split("\t")
-        if len(fields) != 10:
-            raise AssertionError(f"V2-Buchung enthält {len(fields)} statt 10 Felder")
-        if fields[0] != "v2" or fields[2] != "neu":
-            raise AssertionError("Version oder initialer Buchungsstatus ist falsch")
-        if fields[3:9] != [
+            if after_count != before_count + 1:
+                raise AssertionError(
+                    f"Erwartet genau eine neue SQLite-Zeile, Anzahl vorher={before_count}, nachher={after_count}"
+                )
+
+            row = connection.execute(
+                "SELECT status, customer_name, contact, dog_name, dog_size, service, "
+                "preferred_date, message, legacy "
+                "FROM bookings ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        expected = (
+            "neu",
             "Pew Pew Test",
             "test@example.invalid",
             "Bello",
             "medium",
             "full_groom",
             "2026-08-20",
-        ]:
-            raise AssertionError("Die erweiterten Buchungsfelder wurden nicht korrekt gespeichert")
-        if fields[9] != "Zeile 1\\nZeile 2":
-            raise AssertionError("Zeilenumbruch wurde in der TSV-Datei nicht escaped")
+            "Zeile 1\nZeile 2",
+            0,
+        )
 
-        with booking_file.open("a", encoding="utf-8") as file:
-            file.write(
-                "2026-07-01 12:00:00\tLegacy Test\tlegacy@example.invalid"
-                "\tWaldi\tFrühere Anfrage\n"
-            )
+        if row != expected:
+            raise AssertionError(f"SQLite-Buchung wurde nicht korrekt gespeichert: {row!r}")
 
     def first_run_admin_setup() -> None:
         setup_response = raw_request(request_text("GET", "/setup/admin").encode())

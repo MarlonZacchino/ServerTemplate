@@ -31,7 +31,8 @@ cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
     -DSTYLES4DOGS_SECRETS_DIR="$RUNTIME_DIR/secrets" \
     -DSTYLES4DOGS_AUTH_FILE="$RUNTIME_DIR/secrets/admin.auth" \
     -DSTYLES4DOGS_DATA_DIR="$RUNTIME_DIR/data" \
-    -DSTYLES4DOGS_BOOKING_FILE=/dev/null
+    -DSTYLES4DOGS_DATABASE_FILE=:memory: \
+    -DSTYLES4DOGS_BOOKING_FILE="$RUNTIME_DIR/data/legacy-bookings.txt"
 
 cmake --build "$BUILD_DIR" --target Server
 

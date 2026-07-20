@@ -36,7 +36,9 @@ Vor dem Start darf kein anderer Prozess Port `31337` belegen.
 - einmaliges Browser-Setup mit CSRF-Token,
 - Sperrung der Setup-Route nach der Einrichtung,
 - Basic Auth mit falschen und korrekten Zugangsdaten,
-- TSV-Speicherung in einer isolierten Testdatei.
+- SQLite-Speicherung in einer isolierten Testdatenbank,
+- einmaliger Import von TSV-v1 und TSV-v2,
+- Schutz gegen doppelte TSV-Importe bei einem Neustart.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.
