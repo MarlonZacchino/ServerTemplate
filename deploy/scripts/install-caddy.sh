@@ -18,6 +18,7 @@ CADDY_DROPIN_DIR=/etc/systemd/system/caddy.service.d
 CADDY_DROPIN=/etc/systemd/system/caddy.service.d/styles4dogs.conf
 STYLES_CONFIG_DIR=/etc/styles4dogs
 CADDY_ENV=/etc/styles4dogs/caddy.env
+SERVER_ENV=/etc/styles4dogs/server.env
 CADDY_LOG_DIR=/var/log/caddy
 CADDY_LOG_FILE=/var/log/caddy/styles4dogs-access.log
 
@@ -131,6 +132,7 @@ DROPIN_DIR_PATH=$(rooted "$CADDY_DROPIN_DIR")
 DROPIN_PATH=$(rooted "$CADDY_DROPIN")
 STYLES_CONFIG_PATH=$(rooted "$STYLES_CONFIG_DIR")
 ENV_PATH=$(rooted "$CADDY_ENV")
+SERVER_ENV_PATH=$(rooted "$SERVER_ENV")
 LOG_PATH=$(rooted "$CADDY_LOG_DIR")
 LOG_FILE_PATH=$(rooted "$CADDY_LOG_FILE")
 
@@ -189,6 +191,22 @@ fi
 install -m 0644 -- "$PROJECT_ROOT/deploy/caddy/styles4dogs.caddy" "$SNIPPET_PATH"
 install -m 0644 -- "$PROJECT_ROOT/deploy/systemd/caddy-styles4dogs.conf" "$DROPIN_PATH"
 
+if [[ ! -r "$SERVER_ENV_PATH" ]]; then
+    fail "missing server environment: $SERVER_ENV_PATH (run install.sh first)"
+fi
+
+TRUSTED_PROXY_TOKEN=$(awk -F= '
+    $1 == "STYLES4DOGS_TRUSTED_PROXY_TOKEN" {
+        sub(/^[^=]*=/, "")
+        print
+        exit
+    }
+' "$SERVER_ENV_PATH")
+
+if [[ ! "$TRUSTED_PROXY_TOKEN" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
+    fail "server.env contains no valid STYLES4DOGS_TRUSTED_PROXY_TOKEN"
+fi
+
 if [[ -f "$ENV_PATH" ]]; then
     cp -a -- "$ENV_PATH" "$ENV_PATH.backup-$BACKUP_SUFFIX"
 fi
@@ -196,6 +214,7 @@ fi
 cat > "$ENV_PATH" <<EOF_ENV
 STYLES4DOGS_CADDY_SITE_ADDRESS=$SITE_ADDRESS
 STYLES4DOGS_CADDY_UPSTREAM=$UPSTREAM
+STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TRUSTED_PROXY_TOKEN
 EOF_ENV
 chmod 0600 "$ENV_PATH"
 if [[ -z "$ROOT_PREFIX" ]]; then

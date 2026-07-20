@@ -35,6 +35,13 @@ read_env_value() {
     || bad "missing Styles 4 Dogs Caddy snippet"
 
 if [[ -r "$ENV_FILE" ]]; then
+    PROXY_TOKEN=$(read_env_value STYLES4DOGS_TRUSTED_PROXY_TOKEN || true)
+    if [[ "$PROXY_TOKEN" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
+        ok "trusted proxy token is configured"
+    else
+        bad "trusted proxy token is missing or invalid"
+    fi
+
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"

@@ -117,7 +117,7 @@ if [[ -z "$ROOT_PREFIX" && $EUID -ne 0 ]]; then
     fail "run this installer as root"
 fi
 
-for command in cmake install pkg-config sqlite3 flock sha256sum realpath; do
+for command in cmake install pkg-config sqlite3 flock sha256sum realpath od tr grep awk; do
     command -v "$command" >/dev/null 2>&1 || fail "$command is not installed"
 done
 
@@ -193,6 +193,7 @@ install_file 0755 root root "$SCRIPT_DIR/verify-caddy.sh" "$APP_PATH/bin/styles4
 install_file 0755 root root "$SCRIPT_DIR/uninstall-caddy.sh" "$APP_PATH/bin/styles4dogs-uninstall-caddy"
 install_file 0644 root root "$PROJECT_ROOT/DEPLOYMENT.md" "$APP_PATH/share/DEPLOYMENT.md"
 install_file 0644 root root "$PROJECT_ROOT/CADDY_DEPLOYMENT.md" "$APP_PATH/share/CADDY_DEPLOYMENT.md"
+install_file 0644 root root "$PROJECT_ROOT/RATE_LIMITING.md" "$APP_PATH/share/RATE_LIMITING.md"
 
 case "$WEB_PATH" in
     */var/www/styles4dogs|*/staging/*|/var/www/styles4dogs) ;;
@@ -207,6 +208,30 @@ if [[ -z "$ROOT_PREFIX" ]]; then
 fi
 
 ENV_PATH="$CONFIG_PATH/server.env"
+
+generate_proxy_token() {
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+TRUSTED_PROXY_TOKEN=""
+if [[ -f "$ENV_PATH" ]]; then
+    TRUSTED_PROXY_TOKEN=$(awk -F= '
+        $1 == "STYLES4DOGS_TRUSTED_PROXY_TOKEN" {
+            sub(/^[^=]*=/, "")
+            print
+            exit
+        }
+    ' "$ENV_PATH")
+fi
+
+if [[ -z "$TRUSTED_PROXY_TOKEN" ]]; then
+    TRUSTED_PROXY_TOKEN=$(generate_proxy_token)
+fi
+
+if [[ ! "$TRUSTED_PROXY_TOKEN" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
+    fail "existing STYLES4DOGS_TRUSTED_PROXY_TOKEN is invalid"
+fi
+
 if [[ -f "$ENV_PATH" && "$REPLACE_ENV" -eq 1 ]]; then
     cp -a -- "$ENV_PATH" "$ENV_PATH.backup-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
@@ -221,7 +246,12 @@ STYLES4DOGS_AUTH_FILE=$SECRETS_PATH/admin.auth
 STYLES4DOGS_DATA_DIR=$STATE_PATH
 STYLES4DOGS_DATABASE_FILE=$STATE_PATH/styles4dogs.db
 STYLES4DOGS_LEGACY_BOOKING_FILE=$STATE_PATH/bookings.txt
+STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TRUSTED_PROXY_TOKEN
 EOF_ENV
+fi
+
+if ! grep -q '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=' "$ENV_PATH"; then
+    printf '\nSTYLES4DOGS_TRUSTED_PROXY_TOKEN=%s\n' "$TRUSTED_PROXY_TOKEN" >> "$ENV_PATH"
 fi
 chmod 0640 "$ENV_PATH"
 if [[ -z "$ROOT_PREFIX" ]]; then

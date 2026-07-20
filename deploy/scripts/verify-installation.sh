@@ -66,6 +66,13 @@ if [[ "$SKIP_SYSTEMD" != 1 ]]; then
 fi
 
 if [[ -r "$ENV_FILE" ]]; then
+    PROXY_TOKEN=$(read_env_value STYLES4DOGS_TRUSTED_PROXY_TOKEN || true)
+    if [[ "$PROXY_TOKEN" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
+        ok "trusted proxy token is configured"
+    else
+        bad "trusted proxy token is missing or invalid"
+    fi
+
     HOST=$(read_env_value STYLES4DOGS_BIND_ADDRESS)
     PORT=$(read_env_value STYLES4DOGS_PORT)
     HOST=${HOST:-127.0.0.1}

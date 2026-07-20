@@ -58,6 +58,11 @@
 
     handle {
         reverse_proxy {$STYLES4DOGS_CADDY_UPSTREAM:127.0.0.1:31337} {
+            # The backend trusts X-Forwarded-For only when this shared token
+            # matches the independently configured server token. header_up
+            # overwrites any client-supplied value.
+            header_up X-Styles4Dogs-Proxy-Token {$STYLES4DOGS_TRUSTED_PROXY_TOKEN}
+
             transport http {
                 dial_timeout 2s
                 response_header_timeout 30s

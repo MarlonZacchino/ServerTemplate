@@ -41,9 +41,10 @@ Der Installer:
 2. legt den Systembenutzer `styles4dogs` an,
 3. installiert Binary und Website,
 4. erhält eine bestehende `server.env`,
-5. erstellt vor einem Upgrade ein SQLite-Backup,
-6. installiert und startet Service sowie täglichen Backup-Timer,
-7. prüft Rechte und lokale HTTP-Erreichbarkeit.
+5. erzeugt bei Bedarf ein zufälliges internes Proxy-Token,
+6. erstellt vor einem Upgrade ein SQLite-Backup,
+7. installiert und startet Service sowie täglichen Backup-Timer,
+8. prüft Rechte und lokale HTTP-Erreichbarkeit.
 
 Eine vorhandene Konfiguration wird nur mit `--replace-env` ersetzt. Die alte
 Datei bleibt dabei als zeitgestempeltes Backup erhalten.
@@ -62,7 +63,9 @@ sudo ./deploy/scripts/install-caddy.sh
 Der lokale Test ist danach unter `http://127.0.0.1:8080` erreichbar. Für eine
 öffentliche Domain wird der Installer erneut mit `--site-address DOMAIN`
 ausgeführt. Vollständige Hinweise zu DNS, HTTPS, Sicherheitsheadern und Logs
-stehen in `CADDY_DEPLOYMENT.md`.
+stehen in `CADDY_DEPLOYMENT.md`. Caddy und Backend erhalten dabei automatisch
+dasselbe Proxy-Token, damit nur die eigene Proxy-Instanz Client-IP-Angaben
+weitergeben darf. Die internen Limits sind in `RATE_LIMITING.md` beschrieben.
 
 ## Ersteinrichtung des Adminzugangs
 

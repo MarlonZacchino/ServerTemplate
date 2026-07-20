@@ -9,16 +9,18 @@ Komprimierung, Sicherheitsheader, Body-Limits und datensparsame Zugriffslogs.
 Die Arch-Linux-Paketversion von Caddy enthält kein HTTP-Rate-Limit-Modul. Die
 verfügbaren Rate-Limit-Module sind nicht Bestandteil des offiziellen Builds.
 Deshalb verwendet dieses Deployment bewusst keine fremde Caddy-Erweiterung.
-Aktuell schützen stattdessen:
+Deshalb liegt das eigentliche Rate-Limit reproduzierbar im C-Server. Caddy
+übernimmt weiterhin Body-Limits und sendet die Client-IP nur zusammen mit einem
+automatisch erzeugten Proxy-Secret an den lokalen Backendprozess. Details zu
+den Limits und zur Vertrauensprüfung stehen in `RATE_LIMITING.md`.
+
+Zusammen schützen:
 
 - der ausschließlich lokale Upstream,
-- die bestehenden Request-Limits des C-Servers,
+- das interne per-IP- und globale Rate-Limit,
 - ein Body-Limit von 16 KiB für `/booking`,
 - ein Body-Limit von 8 KiB für Admin-Statusänderungen,
 - die öffentlich vollständig gesperrte Setup-Route.
-
-Ein echtes Rate-Limit wird später im C-Server selbst ergänzt, damit der
-Produktionsbuild reproduzierbar beim offiziellen Caddy-Paket bleiben kann.
 
 ## Installation auf Arch Linux
 
@@ -67,7 +69,8 @@ Die installierte Konfiguration:
 - begrenzt Formulargrößen vor dem C-Server,
 - maskiert IP-Adressen in Zugriffslogs,
 - ersetzt den Admin-Suchparameter `q` im Log durch `REDACTED`,
-- protokolliert Zugangsdaten nicht im Klartext.
+- protokolliert Zugangsdaten nicht im Klartext,
+- überschreibt den internen Proxy-Token-Header vor der Weiterleitung.
 
 Die HSTS-Antwort wird auch im lokalen HTTP-Test konfiguriert, von Browsern aber
 nur über eine sichere HTTPS-Verbindung berücksichtigt.

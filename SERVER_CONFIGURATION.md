@@ -20,6 +20,7 @@ ein Netzwerk-Socket erstellt wird.
 | `STYLES4DOGS_DATA_DIR` | `data/` | beschreibbares Laufzeitverzeichnis |
 | `STYLES4DOGS_DATABASE_FILE` | `data/styles4dogs.db` | SQLite-Datenbank oder für Tests `:memory:` |
 | `STYLES4DOGS_LEGACY_BOOKING_FILE` | `data/bookings.txt` | einmalig zu importierende TSV-Datei |
+| `STYLES4DOGS_TRUSTED_PROXY_TOKEN` | leer | gemeinsames Secret zur abgesicherten Übernahme von `X-Forwarded-For` |
 
 `STYLES4DOGS_BOOKING_FILE` wird vorläufig als rückwärtskompatibler Alias für
 `STYLES4DOGS_LEGACY_BOOKING_FILE` akzeptiert. Neue Konfigurationen sollen nur
@@ -94,4 +95,7 @@ Der Start wird unter anderem abgebrochen bei:
 - bereits vorhandenen Daten-/Secret-Pfaden, die keine Verzeichnisse sind.
 
 Passwörter und CSRF-Token gehören nicht in Umgebungsvariablen. Die
-Admin-Anmeldedaten bleiben ausschließlich in der geschützten `admin.auth`.
+Admin-Anmeldedaten bleiben ausschließlich in der geschützten `admin.auth`. Das
+Proxy-Token ist dagegen ein automatisch erzeugtes Maschinen-Secret und wird
+benötigt, damit der Backendserver weitergeleiteten Client-IP-Angaben nur von
+der eigenen Caddy-Instanz vertraut. Details stehen in `RATE_LIMITING.md`.

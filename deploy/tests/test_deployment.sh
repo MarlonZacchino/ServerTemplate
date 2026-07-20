@@ -28,8 +28,11 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/etc/systemd/system/styles4dogs.service" ]]
 [[ -x "$STAGING_ROOT/opt/styles4dogs/bin/styles4dogs-install-caddy" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CADDY_DEPLOYMENT.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/RATE_LIMITING.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
+    "$STAGING_ROOT/etc/styles4dogs/server.env"
+grep -Eq '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=[A-Za-z0-9_-]{32,128}$' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 
 # Simulate the Arch Linux package Caddyfile, which already imports the whole
@@ -61,6 +64,15 @@ grep -Fq "import /etc/caddy/conf.d/*" \
 [[ "$(stat -c '%a' "$STAGING_ROOT/var/log/caddy/styles4dogs-access.log")" == "640" ]]
 grep -Fq "STYLES4DOGS_CADDY_SITE_ADDRESS=http://127.0.0.1:18080" \
     "$STAGING_ROOT/etc/styles4dogs/caddy.env"
+grep -Eq '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=[A-Za-z0-9_-]{32,128}$' \
+    "$STAGING_ROOT/etc/styles4dogs/caddy.env"
+SERVER_TOKEN=$(awk -F= '$1 == "STYLES4DOGS_TRUSTED_PROXY_TOKEN" {print $2}' \
+    "$STAGING_ROOT/etc/styles4dogs/server.env")
+CADDY_TOKEN=$(awk -F= '$1 == "STYLES4DOGS_TRUSTED_PROXY_TOKEN" {print $2}' \
+    "$STAGING_ROOT/etc/styles4dogs/caddy.env")
+[[ "$SERVER_TOKEN" == "$CADDY_TOKEN" ]]
+grep -Fq 'header_up X-Styles4Dogs-Proxy-Token {$STYLES4DOGS_TRUSTED_PROXY_TOKEN}' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 
 if command -v systemd-analyze >/dev/null 2>&1; then
     systemd-analyze verify --recursive-errors=no --root="$STAGING_ROOT" \
