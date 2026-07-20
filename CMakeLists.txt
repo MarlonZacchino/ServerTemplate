@@ -11,6 +11,20 @@ pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 
 set(
+        STYLES4DOGS_BIND_ADDRESS
+        "127.0.0.1"
+        CACHE STRING
+        "Default IPv4 address used when STYLES4DOGS_BIND_ADDRESS is unset"
+)
+
+set(
+        STYLES4DOGS_PORT
+        "31337"
+        CACHE STRING
+        "Default TCP port used when STYLES4DOGS_PORT is unset"
+)
+
+set(
         STYLES4DOGS_DOCUMENT_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/public"
         CACHE PATH
@@ -60,6 +74,7 @@ add_executable(Server
         booking_database.c
         auth.c
         form_urlencoded.c
+        server_config.c
 )
 
 add_executable(create_admin_user
@@ -73,12 +88,14 @@ target_include_directories(Server PRIVATE
 target_compile_definitions(Server PRIVATE
         _POSIX_C_SOURCE=200809L
         _XOPEN_SOURCE=700
-        SERVER_DOCUMENT_ROOT=\"${STYLES4DOGS_DOCUMENT_ROOT}\"
-        SERVER_SECRETS_DIR=\"${STYLES4DOGS_SECRETS_DIR}\"
-        SERVER_AUTH_FILE=\"${STYLES4DOGS_AUTH_FILE}\"
-        SERVER_DATA_DIR=\"${STYLES4DOGS_DATA_DIR}\"
-        SERVER_DATABASE_FILE=\"${STYLES4DOGS_DATABASE_FILE}\"
-        SERVER_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
+        SERVER_DEFAULT_BIND_ADDRESS=\"${STYLES4DOGS_BIND_ADDRESS}\"
+        SERVER_DEFAULT_PORT=\"${STYLES4DOGS_PORT}\"
+        SERVER_DEFAULT_DOCUMENT_ROOT=\"${STYLES4DOGS_DOCUMENT_ROOT}\"
+        SERVER_DEFAULT_SECRETS_DIR=\"${STYLES4DOGS_SECRETS_DIR}\"
+        SERVER_DEFAULT_AUTH_FILE=\"${STYLES4DOGS_AUTH_FILE}\"
+        SERVER_DEFAULT_DATA_DIR=\"${STYLES4DOGS_DATA_DIR}\"
+        SERVER_DEFAULT_DATABASE_FILE=\"${STYLES4DOGS_DATABASE_FILE}\"
+        SERVER_DEFAULT_LEGACY_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
 )
 
 target_link_libraries(Server PRIVATE

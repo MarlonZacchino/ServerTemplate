@@ -3,6 +3,7 @@
 //
 
 #include "auth.h"
+#include "server_config.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,14 +14,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#ifndef SERVER_SECRETS_DIR
-#define SERVER_SECRETS_DIR ".secrets"
-#endif
-
-#ifndef SERVER_AUTH_FILE
-#define SERVER_AUTH_FILE ".secrets/admin.auth"
-#endif
 
 #define MAX_AUTH_LINE 1024
 #define MAX_USERNAME_LENGTH 128
@@ -343,7 +336,7 @@ static bool load_admin_auth_file(
         return false;
     }
 
-    file_descriptor = open(SERVER_AUTH_FILE, open_flags);
+    file_descriptor = open(server_config_auth_file(), open_flags);
 
     if (file_descriptor < 0) {
         return false;
@@ -475,7 +468,7 @@ static int ensure_secrets_directory(void)
 {
     struct stat directory_status;
 
-    if (mkdir(SERVER_SECRETS_DIR, 0700) == 0) {
+    if (mkdir(server_config_secrets_dir(), 0700) == 0) {
         return 0;
     }
 
@@ -487,7 +480,7 @@ static int ensure_secrets_directory(void)
      * lstat() folgt keinen symbolischen Links.
      * Ein Symlink als Secrets-Verzeichnis wird damit abgelehnt.
      */
-    if (lstat(SERVER_SECRETS_DIR, &directory_status) != 0) {
+    if (lstat(server_config_secrets_dir(), &directory_status) != 0) {
         return errno;
     }
 
@@ -498,7 +491,7 @@ static int ensure_secrets_directory(void)
     /*
      * Nur der Server-Benutzer soll Zugriff erhalten.
      */
-    if (chmod(SERVER_SECRETS_DIR, 0700) != 0) {
+    if (chmod(server_config_secrets_dir(), 0700) != 0) {
         return errno;
     }
 
@@ -541,7 +534,7 @@ bool admin_auth_exists(void)
 {
     struct stat file_status;
 
-    if (lstat(SERVER_AUTH_FILE, &file_status) == 0) {
+    if (lstat(server_config_auth_file(), &file_status) == 0) {
         return true;
     }
 
@@ -643,7 +636,7 @@ int create_admin_auth(
      * 0600 erlaubt nur dem Server-Benutzer Lesen und Schreiben.
      */
     file_descriptor = open(
-            SERVER_AUTH_FILE,
+            server_config_auth_file(),
             open_flags,
             0600);
 
@@ -688,7 +681,7 @@ cleanup:
      * Bei unvollständiger Erstellung keine beschädigte Datei zurücklassen.
      */
     if (result != 0 && file_created) {
-        unlink(SERVER_AUTH_FILE);
+        unlink(server_config_auth_file());
     }
 
     sodium_memzero(password_hash, sizeof(password_hash));

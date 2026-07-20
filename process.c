@@ -7,6 +7,7 @@
 #include "booking.h"
 #include "booking_database.h"
 #include "form_urlencoded.h"
+#include "server_config.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -25,12 +26,6 @@
 #define SETUP_PASSWORD_SIZE 513
 #define FORM_CSRF_TOKEN_BYTES 32
 #define FORM_CSRF_TOKEN_HEX_SIZE (FORM_CSRF_TOKEN_BYTES * 2 + 1)
-
-#ifndef SERVER_DOCUMENT_ROOT
-#define SERVER_DOCUMENT_ROOT "public"
-#endif
-
-#define DOCUMENT_ROOT SERVER_DOCUMENT_ROOT
 
 /*
  * Content-Type anhand der Dateiendung bestimmen.
@@ -534,7 +529,7 @@ static string *serve_static_file(const char *request_path, bool send_body)
     size_t file_length;
     string *response;
 
-    if (realpath(DOCUMENT_ROOT, document_root_real) == NULL) {
+    if (realpath(server_config_document_root(), document_root_real) == NULL) {
         return handle_internal_error(send_body);
     }
 

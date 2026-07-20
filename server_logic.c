@@ -4,6 +4,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -19,11 +20,7 @@
 #include "booking_database.h"
 #include "http_lib.h"
 #include "process.h"
-
-/**
- * TCP-Port, auf welchem der Server hört.
- */
-#define PORT 31337
+#include "server_config.h"
 
 /**
  * Maximale Request-Größe.
@@ -470,8 +467,16 @@ static int setup_socket(void)
     memset(&serv_addr, 0, sizeof(serv_addr));
 
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    serv_addr.sin_port = htons(PORT);
+
+    if (inet_pton(
+            AF_INET,
+            server_config_bind_address(),
+            &serv_addr.sin_addr) != 1) {
+        errno = EINVAL;
+        fatal("ERROR converting configured bind address");
+    }
+
+    serv_addr.sin_port = htons(server_config_port());
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -565,6 +570,14 @@ int main(int argc, char *argv[])
 {
     register_signals();
 
+    if (server_config_initialize() != 0) {
+        fprintf(
+                stderr,
+                "ERROR loading server configuration: %s\n",
+                server_config_last_error());
+        return EXIT_FAILURE;
+    }
+
     if (booking_database_initialize() != 0) {
         fprintf(
                 stderr,
@@ -576,6 +589,11 @@ int main(int argc, char *argv[])
     if (argc == 2 && strcmp(argv[1], "stdin") == 0) {
         main_loop_stdin();
     } else {
+        fprintf(
+                stderr,
+                "Styles 4 Dogs server listening on %s:%u\n",
+                server_config_bind_address(),
+                (unsigned int)server_config_port());
         main_loop();
     }
 

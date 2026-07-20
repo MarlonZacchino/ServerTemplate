@@ -1,4 +1,5 @@
 #include "booking_database.h"
+#include "server_config.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -10,18 +11,6 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-
-#ifndef SERVER_DATA_DIR
-#define SERVER_DATA_DIR "data"
-#endif
-
-#ifndef SERVER_DATABASE_FILE
-#define SERVER_DATABASE_FILE "data/styles4dogs.db"
-#endif
-
-#ifndef SERVER_BOOKING_FILE
-#define SERVER_BOOKING_FILE "data/bookings.txt"
-#endif
 
 #define DATABASE_ERROR_SIZE 512
 #define MAX_LEGACY_LINE 8192
@@ -76,11 +65,11 @@ static int ensure_data_directory(void)
 {
     struct stat directory_status;
 
-    if (is_memory_database_path(SERVER_DATABASE_FILE)) {
+    if (is_memory_database_path(server_config_database_file())) {
         return 0;
     }
 
-    if (mkdir(SERVER_DATA_DIR, 0750) == 0) {
+    if (mkdir(server_config_data_dir(), 0750) == 0) {
         return 0;
     }
 
@@ -93,13 +82,13 @@ static int ensure_data_directory(void)
         return -1;
     }
 
-    if (lstat(SERVER_DATA_DIR, &directory_status) != 0 ||
+    if (lstat(server_config_data_dir(), &directory_status) != 0 ||
         !S_ISDIR(directory_status.st_mode)) {
         set_error_text("Der konfigurierte Datenpfad ist kein reguläres Verzeichnis");
         return -1;
     }
 
-    if (chmod(SERVER_DATA_DIR, 0750) != 0) {
+    if (chmod(server_config_data_dir(), 0750) != 0) {
         snprintf(
                 database_error,
                 sizeof(database_error),
@@ -115,11 +104,11 @@ static int validate_database_path(void)
 {
     struct stat file_status;
 
-    if (is_memory_database_path(SERVER_DATABASE_FILE)) {
+    if (is_memory_database_path(server_config_database_file())) {
         return 0;
     }
 
-    if (lstat(SERVER_DATABASE_FILE, &file_status) != 0) {
+    if (lstat(server_config_database_file(), &file_status) != 0) {
         if (errno == ENOENT) {
             return 0;
         }
@@ -173,7 +162,7 @@ static int configure_database(void)
         return -1;
     }
 
-    if (is_memory_database_path(SERVER_DATABASE_FILE)) {
+    if (is_memory_database_path(server_config_database_file())) {
         return execute_sql("PRAGMA journal_mode = MEMORY;");
     }
 
@@ -522,7 +511,7 @@ static int import_legacy_tsv(void)
     open_flags |= O_NOFOLLOW;
 #endif
 
-    file_descriptor = open(SERVER_BOOKING_FILE, open_flags);
+    file_descriptor = open(server_config_legacy_booking_file(), open_flags);
 
     if (file_descriptor < 0) {
         if (errno == ENOENT) {
@@ -672,12 +661,12 @@ int booking_database_initialize(void)
         return -1;
     }
 
-    if (strncmp(SERVER_DATABASE_FILE, "file:", strlen("file:")) == 0) {
+    if (strncmp(server_config_database_file(), "file:", strlen("file:")) == 0) {
         open_flags |= SQLITE_OPEN_URI;
     }
 
     previous_umask = umask(0077);
-    if (sqlite3_open_v2(SERVER_DATABASE_FILE, &database, open_flags, NULL) != SQLITE_OK) {
+    if (sqlite3_open_v2(server_config_database_file(), &database, open_flags, NULL) != SQLITE_OK) {
         umask(previous_umask);
         set_sqlite_error("SQLite-Datenbank konnte nicht geöffnet werden");
         booking_database_shutdown();
@@ -685,8 +674,8 @@ int booking_database_initialize(void)
     }
     umask(previous_umask);
 
-    if (!is_memory_database_path(SERVER_DATABASE_FILE) &&
-        chmod(SERVER_DATABASE_FILE, 0600) != 0) {
+    if (!is_memory_database_path(server_config_database_file()) &&
+        chmod(server_config_database_file(), 0600) != 0) {
         snprintf(
                 database_error,
                 sizeof(database_error),
