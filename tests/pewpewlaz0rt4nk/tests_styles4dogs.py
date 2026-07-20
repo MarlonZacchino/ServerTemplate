@@ -117,7 +117,11 @@ def run_stateful_tests() -> int:
             "name": "Pew Pew Test",
             "contact": "test@example.invalid",
             "dog_name": "Bello",
+            "dog_size": "medium",
+            "service": "full_groom",
+            "preferred_date": "2026-08-20",
             "message": "Zeile 1\nZeile 2",
+            "privacy_consent": "accepted",
         })
         response = raw_request(request_text(
             "POST",
@@ -129,10 +133,32 @@ def run_stateful_tests() -> int:
 
         after = booking_file.read_text(encoding="utf-8")
         added = after[len(before):]
-        if "Pew Pew Test" not in added or "test@example.invalid" not in added:
-            raise AssertionError("Testbuchung wurde nicht in der isolierten Datei gespeichert")
-        if "Zeile 1\\nZeile 2" not in added:
+        lines = [line for line in added.splitlines() if line]
+        if len(lines) != 1:
+            raise AssertionError(f"Erwartet genau eine neue TSV-Zeile, erhalten {len(lines)}")
+
+        fields = lines[0].split("\t")
+        if len(fields) != 10:
+            raise AssertionError(f"V2-Buchung enthält {len(fields)} statt 10 Felder")
+        if fields[0] != "v2" or fields[2] != "neu":
+            raise AssertionError("Version oder initialer Buchungsstatus ist falsch")
+        if fields[3:9] != [
+            "Pew Pew Test",
+            "test@example.invalid",
+            "Bello",
+            "medium",
+            "full_groom",
+            "2026-08-20",
+        ]:
+            raise AssertionError("Die erweiterten Buchungsfelder wurden nicht korrekt gespeichert")
+        if fields[9] != "Zeile 1\\nZeile 2":
             raise AssertionError("Zeilenumbruch wurde in der TSV-Datei nicht escaped")
+
+        with booking_file.open("a", encoding="utf-8") as file:
+            file.write(
+                "2026-07-01 12:00:00\tLegacy Test\tlegacy@example.invalid"
+                "\tWaldi\tFrühere Anfrage\n"
+            )
 
     def first_run_admin_setup() -> None:
         setup_response = raw_request(request_text("GET", "/setup/admin").encode())
@@ -183,6 +209,10 @@ def run_stateful_tests() -> int:
             raise AssertionError("Adminseite liefert keinen HTML Content-Type")
         if b"Buchungsanfragen" not in valid_body:
             raise AssertionError("Adminseite enthält die erwartete Überschrift nicht")
+        if b"Komplettpflege" not in valid_body or b"Mittel" not in valid_body:
+            raise AssertionError("Adminseite zeigt die erweiterten Buchungsfelder nicht an")
+        if b"Legacy Test" not in valid_body or "Frühere Anfrage".encode("utf-8") not in valid_body:
+            raise AssertionError("Adminseite liest das frühere fünfspaltige Format nicht mehr")
 
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
     check("Buchung wird isoliert und escaped gespeichert", booking_persistence)
@@ -226,7 +256,11 @@ def main() -> int:
         "name": "Laz0r Test",
         "contact": "laz0r@example.invalid",
         "dog_name": "Flocke",
+        "dog_size": "small",
+        "service": "wash_dry",
+        "preferred_date": "2026-08-21",
         "message": "Regressionstest",
+        "privacy_consent": "accepted",
     })
     add_status(cannon, "Gültige Buchungsanfrage", request_text(
         "POST",
@@ -241,6 +275,48 @@ def main() -> int:
         "/booking",
         {"Content-Type": "application/x-www-form-urlencoded"},
         invalid_booking,
+    ), "400 Bad Request")
+
+    missing_privacy = urlencode({
+        "name": "Ohne Zustimmung",
+        "contact": "privacy@example.invalid",
+        "dog_size": "medium",
+        "service": "full_groom",
+    })
+    add_status(cannon, "Buchung ohne Datenschutzbestätigung", request_text(
+        "POST",
+        "/booking",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        missing_privacy,
+    ), "400 Bad Request")
+
+    invalid_service = urlencode({
+        "name": "Ungültige Leistung",
+        "contact": "service@example.invalid",
+        "dog_size": "medium",
+        "service": "nicht-erlaubt",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "Buchung mit ungültiger Leistung", request_text(
+        "POST",
+        "/booking",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        invalid_service,
+    ), "400 Bad Request")
+
+    invalid_date = urlencode({
+        "name": "Ungültiges Datum",
+        "contact": "date@example.invalid",
+        "dog_size": "medium",
+        "service": "full_groom",
+        "preferred_date": "2026-02-31",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "Buchung mit ungültigem Wunschdatum", request_text(
+        "POST",
+        "/booking",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        invalid_date,
     ), "400 Bad Request")
 
     pew_ok = cannon.pewpew()
