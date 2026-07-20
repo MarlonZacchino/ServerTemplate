@@ -16,6 +16,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "booking_database.h"
 #include "http_lib.h"
 #include "process.h"
 
@@ -564,11 +565,20 @@ int main(int argc, char *argv[])
 {
     register_signals();
 
+    if (booking_database_initialize() != 0) {
+        fprintf(
+                stderr,
+                "ERROR initializing booking database: %s\n",
+                booking_database_last_error());
+        return EXIT_FAILURE;
+    }
+
     if (argc == 2 && strcmp(argv[1], "stdin") == 0) {
         main_loop_stdin();
     } else {
         main_loop();
     }
 
+    booking_database_shutdown();
     return EXIT_SUCCESS;
 }

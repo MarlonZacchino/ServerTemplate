@@ -8,6 +8,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
+pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 
 set(
         STYLES4DOGS_DOCUMENT_ROOT
@@ -38,10 +39,17 @@ set(
 )
 
 set(
+        STYLES4DOGS_DATABASE_FILE
+        "${STYLES4DOGS_DATA_DIR}/styles4dogs.db"
+        CACHE FILEPATH
+        "SQLite database file"
+)
+
+set(
         STYLES4DOGS_BOOKING_FILE
         "${STYLES4DOGS_DATA_DIR}/bookings.txt"
         CACHE FILEPATH
-        "Booking storage file"
+        "Legacy TSV booking file imported once into SQLite"
 )
 
 add_executable(Server
@@ -49,6 +57,7 @@ add_executable(Server
         http_lib.c
         process.c
         booking.c
+        booking_database.c
         auth.c
         form_urlencoded.c
 )
@@ -68,11 +77,13 @@ target_compile_definitions(Server PRIVATE
         SERVER_SECRETS_DIR=\"${STYLES4DOGS_SECRETS_DIR}\"
         SERVER_AUTH_FILE=\"${STYLES4DOGS_AUTH_FILE}\"
         SERVER_DATA_DIR=\"${STYLES4DOGS_DATA_DIR}\"
+        SERVER_DATABASE_FILE=\"${STYLES4DOGS_DATABASE_FILE}\"
         SERVER_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
 )
 
 target_link_libraries(Server PRIVATE
         PkgConfig::SODIUM
+        PkgConfig::SQLITE3
 )
 
 target_link_libraries(create_admin_user PRIVATE
