@@ -38,12 +38,45 @@
                     <input id="contact" type="text" name="contact" autocomplete="email" maxlength="180" required>
 
                     <label for="dog-name">Name des Hundes</label>
-                    <input id="dog-name" type="text" name="dog_name" maxlength="120">
+                    <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">
+
+                    <div class="form-grid-two">
+                        <div class="form-field">
+                            <label for="dog-size">Größe des Hundes <span aria-hidden="true">*</span></label>
+                            <select id="dog-size" name="dog_size" required>
+                                <option value="">Bitte auswählen</option>
+                                <option value="small">Klein – bis etwa 10 kg</option>
+                                <option value="medium">Mittel – etwa 10 bis 25 kg</option>
+                                <option value="large">Groß – etwa 25 bis 40 kg</option>
+                                <option value="very_large">Sehr groß – über 40 kg</option>
+                            </select>
+                        </div>
+
+                        <div class="form-field">
+                            <label for="service">Gewünschte Leistung <span aria-hidden="true">*</span></label>
+                            <select id="service" name="service" required>
+                                <option value="">Bitte auswählen</option>
+                                <option value="consultation">Beratung</option>
+                                <option value="wash_dry">Waschen und Föhnen</option>
+                                <option value="full_groom">Komplettpflege</option>
+                                <option value="claw_care">Krallenpflege</option>
+                                <option value="other">Sonstiges</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <label for="preferred-date">Wunschdatum</label>
+                    <input id="preferred-date" type="date" name="preferred_date">
+                    <p class="field-hint">Das Wunschdatum ist unverbindlich. Den endgültigen Termin bestätigen wir persönlich.</p>
 
                     <label for="message">Worum geht es?</label>
-                    <textarea id="message" name="message" rows="7" maxlength="1500" placeholder="Zum Beispiel Rasse, Größe, Fellzustand und gewünschte Pflege"></textarea>
+                    <textarea id="message" name="message" rows="7" maxlength="1000" placeholder="Zum Beispiel Rasse, Fellzustand, Besonderheiten und gewünschte Pflege"></textarea>
 
-                    <p class="privacy-hint">Mit dem Absenden übermittelst du uns die eingegebenen Daten zur Bearbeitung deiner Anfrage. Weitere Informationen findest du im <a href="/datenschutz">Datenschutz</a>.</p>
+                    <label class="consent-field" for="privacy-consent">
+                        <input id="privacy-consent" type="checkbox" name="privacy_consent" value="accepted" required>
+                        <span>Ich habe die <a href="/datenschutz">Datenschutzhinweise</a> gelesen und stimme der Verarbeitung meiner Angaben zur Bearbeitung der Anfrage zu. <span aria-hidden="true">*</span></span>
+                    </label>
+
                     <button class="button" type="submit">Anfrage senden</button>
                     <p class="required-hint">* Pflichtfelder</p>
                 </form>

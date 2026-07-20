@@ -845,3 +845,94 @@ textarea:focus {
         grid-template-columns: 1fr;
     }
 }
+
+/* Erweiterte Buchungsanfrage */
+.form-grid-two {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.form-field {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+}
+
+.form-field label {
+    margin-top: 10px;
+}
+
+select {
+    width: 100%;
+    min-height: 50px;
+    padding: 14px 42px 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: white;
+    color: var(--text);
+    font: inherit;
+}
+
+select:focus {
+    outline: 3px solid rgba(154, 104, 69, 0.20);
+    border-color: var(--accent);
+}
+
+.field-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.consent-field {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.58);
+    font-weight: 500;
+}
+
+.consent-field input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    margin: 2px 0 0;
+    accent-color: var(--accent);
+}
+
+.booking-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+}
+
+.booking-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(154, 104, 69, 0.14);
+    color: var(--accent-dark);
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+@media (max-width: 680px) {
+    .form-grid-two {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    .booking-card-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+}
