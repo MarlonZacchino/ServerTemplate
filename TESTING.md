@@ -15,7 +15,9 @@ Die Testpfade und der abweichende Port `31338` werden ausschließlich zur
 Laufzeit über Umgebungsvariablen gesetzt. Zusätzlich werden ungültiger Port,
 ungültige Bind-Adresse und fehlender Document Root als Startfehler geprüft.
 Neben den öffentlichen Routen werden auch der authentifizierte Admin-Workflow,
-CSRF-Schutz, persistente Statusänderungen sowie Admin-Suche und Statusfilter geprüft. Details stehen in
+CSRF-Schutz, persistente Statusänderungen, Admin-Suche und Statusfilter sowie
+per-IP- und globale Rate-Limits geprüft. Gefälschte `X-Forwarded-For`-Header
+ohne gültiges Proxy-Token sind ebenfalls Teil des Regressionstests. Details stehen in
 `tests/pewpewlaz0rt4nk/README.md`.
 
 ## AFL++

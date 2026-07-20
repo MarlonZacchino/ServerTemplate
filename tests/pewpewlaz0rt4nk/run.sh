@@ -13,6 +13,7 @@ SERVER_LOG="$BUILD_DIR/server.log"
 SERVER_PID=""
 TEST_HOST=127.0.0.1
 TEST_PORT=31338
+TEST_PROXY_TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 SERVER_ENV=(
     "STYLES4DOGS_BIND_ADDRESS=$TEST_HOST"
@@ -20,6 +21,7 @@ SERVER_ENV=(
     "STYLES4DOGS_DOCUMENT_ROOT=$PROJECT_ROOT/public"
     "STYLES4DOGS_SECRETS_DIR=$SECRETS_DIR"
     "STYLES4DOGS_DATA_DIR=$DATA_DIR"
+    "STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TEST_PROXY_TOKEN"
 )
 
 cleanup() {
@@ -102,6 +104,7 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
 fi
 
 STYLES4DOGS_TEST_DATABASE_FILE="$DATABASE_FILE" \
+STYLES4DOGS_TEST_PROXY_TOKEN="$TEST_PROXY_TOKEN" \
     python3 "$SCRIPT_DIR/tests_styles4dogs.py" "$TEST_HOST" "$TEST_PORT"
 
 COUNT_BEFORE=$(python3 - "$DATABASE_FILE" <<'PY'
@@ -148,3 +151,8 @@ assert_configuration_rejected \
     "Fehlender Document Root" \
     "STYLES4DOGS_DOCUMENT_ROOT konnte nicht aufgelöst werden" \
     "STYLES4DOGS_DOCUMENT_ROOT=$RUNTIME_DIR/nicht-vorhanden"
+
+assert_configuration_rejected \
+    "Zu kurzes Proxy-Token" \
+    "STYLES4DOGS_TRUSTED_PROXY_TOKEN muss zwischen 32 und 128 Zeichen lang sein" \
+    "STYLES4DOGS_TRUSTED_PROXY_TOKEN=zu-kurz"

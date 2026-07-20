@@ -49,3 +49,7 @@ value_status_done="erledigt"
 query_status="?status="
 query_search="&q="
 value_status_legacy="altbestand"
+
+header_forwarded_for="X-Forwarded-For: "
+header_proxy_token="X-Styles4Dogs-Proxy-Token: "
+proxy_token_test="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

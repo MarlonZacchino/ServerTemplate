@@ -85,3 +85,11 @@ Bei parallelen Läufen liegen Funde unter `fuzzing/afl/sync/<Instanz>/crashes/`.
 - AFL++ niemals gegen echte Buchungs- oder Secret-Dateien konfigurieren.
 - Ein reproduzierbarer Crash wird erst mit ASan/UBSan analysiert und danach als
   fester Regressionstest ergänzt.
+
+## Proxy- und Rate-Limit-Eingaben
+
+Die AFL-Laufzeit setzt ein isoliertes Test-Proxy-Token. Das Korpus enthält einen
+gültigen proxied Buchungsrequest, damit Header-Parsing und Client-IP-Auflösung
+im instrumentierten Code erreichbar sind. Da jede AFL-Ausführung im
+`stdin`-Modus genau einen Prozesslauf verarbeitet, wird der zustandsbehaftete
+Limiter selbst durch PewPewLaz0rTank regressionsgetestet.

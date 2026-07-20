@@ -1,0 +1,8 @@
+POST /booking HTTP/1.1
+Host: localhost
+Content-Type: application/x-www-form-urlencoded
+X-Forwarded-For: 198.51.100.77
+X-Styles4Dogs-Proxy-Token: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+Content-Length: 83
+
+name=A&contact=a%40b.de&dog_size=medium&service=full_groom&privacy_consent=accepted

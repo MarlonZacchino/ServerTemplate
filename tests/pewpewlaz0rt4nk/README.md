@@ -49,3 +49,14 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.
+
+## Rate-Limit-Regressionen
+
+Der isolierte Lauf setzt ein eigenes Proxy-Token und prüft:
+
+- fünf Buchungsversuche pro Client werden akzeptiert, der nächste erhält `429`,
+- `Retry-After` wird gesetzt,
+- gefälschte `X-Forwarded-For`-Werte ohne korrektes Token umgehen das Limit nicht,
+- zehn fehlgeschlagene Admin-Anmeldungen führen zur Sperre,
+- erfolgreiche Admin-Anmeldung löscht vorherige Fehlversuche,
+- die globale Buchungs-Notbremse greift auch bei rotierenden IP-Adressen.

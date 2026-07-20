@@ -19,6 +19,10 @@ PORT = int(sys.argv[2]) if len(sys.argv) >= 3 else 31337
 TIMEOUT = 5
 TEST_ADMIN_USERNAME = "test-admin"
 TEST_ADMIN_PASSWORD = "Styles4Dogs-Test-2026!"
+TEST_PROXY_TOKEN = os.environ.get(
+    "STYLES4DOGS_TEST_PROXY_TOKEN",
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+)
 
 
 def request_text(method: str, path: str, headers: dict[str, str] | None = None, body: str = "") -> str:
@@ -28,6 +32,14 @@ def request_text(method: str, path: str, headers: dict[str, str] | None = None, 
 
     header_lines = "".join(f"{name}: {value}\r\n" for name, value in all_headers.items())
     return f"{method} {path} HTTP/1.1\r\n{header_lines}\r\n{body}"
+
+
+def proxy_headers(client_ip: str, extra: dict[str, str] | None = None) -> dict[str, str]:
+    return {
+        "X-Forwarded-For": client_ip,
+        "X-Styles4Dogs-Proxy-Token": TEST_PROXY_TOKEN,
+        **(extra or {}),
+    }
 
 
 def add_status(cannon: Laz0rCannon, description: str, request: str, status: str) -> None:
@@ -167,7 +179,10 @@ def run_stateful_tests() -> int:
         response = raw_request(request_text(
             "POST",
             "/booking",
-            {"Content-Type": "application/x-www-form-urlencoded"},
+            proxy_headers(
+                "198.51.100.31",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
             body,
         ).encode())
         assert_status(response, "201 Created")
@@ -517,11 +532,159 @@ def run_stateful_tests() -> int:
         if b'&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;' not in escaped_body:
             raise AssertionError("Suchwert wird nicht sicher im Formular wiedergegeben")
 
+    def rate_limiting() -> None:
+        invalid_body = urlencode({"name": "Rate Limit"})
+        booking_headers = proxy_headers(
+            "198.51.100.200",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        for _ in range(5):
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                booking_headers,
+                invalid_body,
+            ).encode())
+            assert_status(response, "400 Bad Request")
+
+        limited_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            booking_headers,
+            invalid_body,
+        ).encode())
+        limited_headers, _ = assert_status(limited_response, "429 Too Many Requests")
+        retry_after = int(limited_headers.get("retry-after", "0"))
+        if retry_after < 1 or retry_after > 600:
+            raise AssertionError(f"Ungültiger Retry-After-Wert: {retry_after}")
+
+        # A caller who does not know the proxy secret must not evade the limit
+        # by rotating a forged X-Forwarded-For header.
+        for index in range(5):
+            spoofed_headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Forwarded-For": f"203.0.113.{index + 1}",
+                "X-Styles4Dogs-Proxy-Token": "falsches-token-mit-ausreichender-laenge-000000000000",
+            }
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                spoofed_headers,
+                invalid_body,
+            ).encode())
+            assert_status(response, "400 Bad Request")
+
+        spoofed_limited = raw_request(request_text(
+            "POST",
+            "/booking",
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Forwarded-For": "203.0.113.250",
+                "X-Styles4Dogs-Proxy-Token": "falsches-token-mit-ausreichender-laenge-000000000000",
+            },
+            invalid_body,
+        ).encode())
+        assert_status(spoofed_limited, "429 Too Many Requests")
+
+        invalid_admin_headers = proxy_headers(
+            "198.51.100.201",
+            {"Authorization": "Basic !!!"},
+        )
+        for _ in range(10):
+            response = raw_request(request_text(
+                "GET",
+                "/admin/bookings",
+                invalid_admin_headers,
+            ).encode())
+            assert_status(response, "401 Unauthorized")
+
+        blocked_admin = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            invalid_admin_headers,
+        ).encode())
+        assert_status(blocked_admin, "429 Too Many Requests")
+
+        # Successful authentication clears earlier failures for that client.
+        reset_ip = "198.51.100.202"
+        reset_bad_headers = proxy_headers(
+            reset_ip,
+            {"Authorization": "Basic !!!"},
+        )
+        for _ in range(9):
+            response = raw_request(request_text(
+                "GET",
+                "/admin/bookings",
+                reset_bad_headers,
+            ).encode())
+            assert_status(response, "401 Unauthorized")
+
+        valid_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        reset_valid_headers = proxy_headers(
+            reset_ip,
+            {"Authorization": f"Basic {valid_token}"},
+        )
+        valid_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            reset_valid_headers,
+        ).encode())
+        assert_status(valid_response, "200 OK")
+
+        for _ in range(10):
+            response = raw_request(request_text(
+                "GET",
+                "/admin/bookings",
+                reset_bad_headers,
+            ).encode())
+            assert_status(response, "401 Unauthorized")
+
+        reset_blocked = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            reset_bad_headers,
+        ).encode())
+        assert_status(reset_blocked, "429 Too Many Requests")
+
+        # A separate global safety valve eventually rejects even requests from
+        # rotating client addresses. Existing test requests already count, so
+        # the exact iteration is intentionally not hard-coded.
+        global_limited = None
+        for index in range(1, 121):
+            third_octet = index // 250
+            fourth_octet = index % 250 + 1
+            headers = proxy_headers(
+                f"198.18.{third_octet}.{fourth_octet}",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                headers,
+                invalid_body,
+            ).encode())
+            status, response_headers, _ = split_response(response)
+            if status == "HTTP/1.1 429 Too Many Requests":
+                global_limited = response_headers
+                break
+            if status != "HTTP/1.1 400 Bad Request":
+                raise AssertionError(f"Unerwartete globale Limit-Antwort: {status}")
+
+        if global_limited is None:
+            raise AssertionError("Globale Buchungs-Notbremse wurde nicht ausgelöst")
+        global_retry = int(global_limited.get("retry-after", "0"))
+        if global_retry < 1 or global_retry > 60:
+            raise AssertionError(f"Ungültiger globaler Retry-After-Wert: {global_retry}")
+
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
     check("Buchung wird isoliert und escaped gespeichert", booking_persistence)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
+    check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 
     return failures
 
@@ -576,7 +739,10 @@ def main() -> int:
     add_status(cannon, "Gültige Buchungsanfrage", request_text(
         "POST",
         "/booking",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        proxy_headers(
+            "198.51.100.41",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
         valid_booking,
     ), "201 Created")
 
@@ -584,7 +750,10 @@ def main() -> int:
     add_status(cannon, "Buchung ohne Pflichtfeld", request_text(
         "POST",
         "/booking",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        proxy_headers(
+            "198.51.100.42",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
         invalid_booking,
     ), "400 Bad Request")
 
@@ -597,7 +766,10 @@ def main() -> int:
     add_status(cannon, "Buchung ohne Datenschutzbestätigung", request_text(
         "POST",
         "/booking",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        proxy_headers(
+            "198.51.100.43",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
         missing_privacy,
     ), "400 Bad Request")
 
@@ -611,7 +783,10 @@ def main() -> int:
     add_status(cannon, "Buchung mit ungültiger Leistung", request_text(
         "POST",
         "/booking",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        proxy_headers(
+            "198.51.100.44",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
         invalid_service,
     ), "400 Bad Request")
 
@@ -626,7 +801,10 @@ def main() -> int:
     add_status(cannon, "Buchung mit ungültigem Wunschdatum", request_text(
         "POST",
         "/booking",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        proxy_headers(
+            "198.51.100.45",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
         invalid_date,
     ), "400 Bad Request")
 

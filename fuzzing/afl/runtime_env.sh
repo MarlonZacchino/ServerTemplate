@@ -19,4 +19,5 @@ styles4dogs_export_afl_runtime() {
     export STYLES4DOGS_DATA_DIR="$runtime_dir/data"
     export STYLES4DOGS_DATABASE_FILE=:memory:
     export STYLES4DOGS_LEGACY_BOOKING_FILE="$runtime_dir/data/legacy-bookings.txt"
+    export STYLES4DOGS_TRUSTED_PROXY_TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 }
