@@ -7,6 +7,7 @@
 #include "booking_database.h"
 #include "form_urlencoded.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 
 typedef struct admin_page_context {
     string *page;
+    const char *csrf_token;
     size_t booking_count;
 } admin_page_context;
 
@@ -304,6 +306,73 @@ int save_booking_request(const booking_request *booking)
     return booking_database_insert(booking);
 }
 
+static bool is_valid_admin_filter_status(const char *status)
+{
+    if (status == NULL || status[0] == '\0') {
+        return true;
+    }
+
+    return strcmp(status, "neu") == 0 ||
+           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "erledigt") == 0 ||
+           strcmp(status, "altbestand") == 0;
+}
+
+bool parse_booking_admin_filter(
+        const char *query,
+        size_t query_length,
+        booking_admin_filter *filter
+)
+{
+    form_value_result status_result;
+    form_value_result search_result;
+
+    if (filter == NULL) {
+        return false;
+    }
+
+    memset(filter, 0, sizeof(*filter));
+
+    if (query == NULL || query_length == 0) {
+        return true;
+    }
+
+    status_result = form_urlencoded_get_from_data(
+            query,
+            query_length,
+            "status",
+            filter->status,
+            sizeof(filter->status));
+    search_result = form_urlencoded_get_from_data(
+            query,
+            query_length,
+            "q",
+            filter->search,
+            sizeof(filter->search));
+
+    if (status_result == FORM_VALUE_NOT_FOUND) {
+        filter->status[0] = '\0';
+    } else if (status_result != FORM_VALUE_OK) {
+        return false;
+    }
+
+    if (search_result == FORM_VALUE_NOT_FOUND) {
+        filter->search[0] = '\0';
+    } else if (search_result != FORM_VALUE_OK) {
+        return false;
+    }
+
+    trim_ascii_whitespace(filter->status);
+    trim_ascii_whitespace(filter->search);
+
+    if (strcmp(filter->status, "all") == 0) {
+        filter->status[0] = '\0';
+    }
+
+    return is_valid_admin_filter_status(filter->status) &&
+           is_optional_single_line(filter->search);
+}
+
 static void append_html_char_escaped(string *destination, char character)
 {
     switch (character) {
@@ -432,6 +501,191 @@ static const char *status_label(const char *value)
     return value;
 }
 
+static bool is_mutable_status(const char *status)
+{
+    if (status == NULL) {
+        return false;
+    }
+
+    return strcmp(status, "neu") == 0 ||
+           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "erledigt") == 0;
+}
+
+static void append_size_value(string *destination, size_t value)
+{
+    char buffer[32];
+    int written = snprintf(buffer, sizeof(buffer), "%zu", value);
+
+    if (written > 0 && (size_t)written < sizeof(buffer)) {
+        str_cat_cstr(destination, buffer);
+    }
+}
+
+static void append_filter_option(
+        string *page,
+        const char *value,
+        const char *label,
+        const char *current_status
+)
+{
+    str_cat_cstr(page, "                    <option value=\"");
+    append_html_text(page, value);
+    str_cat_cstr(page, "\"");
+
+    if (current_status != NULL && strcmp(value, current_status) == 0) {
+        str_cat_cstr(page, " selected");
+    }
+
+    str_cat_cstr(page, ">");
+    append_html_text(page, label);
+    str_cat_cstr(page, "</option>\n");
+}
+
+static void append_status_summary(
+        string *page,
+        const booking_status_counts *counts
+)
+{
+    if (page == NULL || counts == NULL) {
+        return;
+    }
+
+    str_cat_cstr(page,
+            "            <div class=\"admin-summary\" aria-label=\"Buchungsübersicht\">\n"
+            "                <div><span>Gesamt</span><strong>");
+    append_size_value(page, counts->total);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Neu</span><strong>");
+    append_size_value(page, counts->new_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Kontaktiert</span><strong>");
+    append_size_value(page, counts->contacted_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Erledigt</span><strong>");
+    append_size_value(page, counts->completed_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Altbestand</span><strong>");
+    append_size_value(page, counts->legacy_count);
+    str_cat_cstr(page, "</strong></div>\n            </div>\n");
+}
+
+static void append_admin_filter_form(
+        string *page,
+        const booking_admin_filter *filter
+)
+{
+    if (page == NULL || filter == NULL) {
+        return;
+    }
+
+    str_cat_cstr(page,
+            "            <form class=\"admin-filter-form\" method=\"get\" action=\"/admin/bookings\">\n"
+            "                <div class=\"admin-filter-field\">\n"
+            "                    <label for=\"admin-status-filter\">Status</label>\n"
+            "                    <select id=\"admin-status-filter\" name=\"status\">\n");
+
+    append_filter_option(page, "", "Alle Status", filter->status);
+    append_filter_option(page, "neu", "Neu", filter->status);
+    append_filter_option(page, "kontaktiert", "Kontaktiert", filter->status);
+    append_filter_option(page, "erledigt", "Erledigt", filter->status);
+    append_filter_option(page, "altbestand", "Altbestand", filter->status);
+
+    str_cat_cstr(page,
+            "                    </select>\n"
+            "                </div>\n"
+            "                <div class=\"admin-filter-field admin-search-field\">\n"
+            "                    <label for=\"admin-search\">Suche</label>\n"
+            "                    <input id=\"admin-search\" name=\"q\" type=\"search\" "
+            "maxlength=\"127\" placeholder=\"Name, Kontakt oder Hund\" value=\"");
+    append_html_text(page, filter->search);
+    str_cat_cstr(page,
+            "\">\n"
+            "                </div>\n"
+            "                <button class=\"button button-small\" type=\"submit\">Filtern</button>\n");
+
+    if (filter->status[0] != '\0' || filter->search[0] != '\0') {
+        str_cat_cstr(page,
+                "                <a class=\"button button-small button-secondary\" "
+                "href=\"/admin/bookings\">Zurücksetzen</a>\n");
+    }
+
+    str_cat_cstr(page, "            </form>\n");
+}
+
+static void append_status_option(
+        string *page,
+        const char *value,
+        const char *label,
+        const char *current_status
+)
+{
+    str_cat_cstr(page, "                        <option value=\"");
+    append_html_text(page, value);
+    str_cat_cstr(page, "\"");
+
+    if (current_status != NULL && strcmp(value, current_status) == 0) {
+        str_cat_cstr(page, " selected");
+    }
+
+    str_cat_cstr(page, ">");
+    append_html_text(page, label);
+    str_cat_cstr(page, "</option>\n");
+}
+
+static void append_status_form(
+        string *page,
+        const booking_record *record,
+        const char *csrf_token
+)
+{
+    char id_text[32];
+    int written;
+
+    if (page == NULL || record == NULL || csrf_token == NULL) {
+        return;
+    }
+
+    written = snprintf(id_text, sizeof(id_text), "%" PRId64, record->id);
+
+    if (written <= 0 || (size_t)written >= sizeof(id_text)) {
+        return;
+    }
+
+    str_cat_cstr(page,
+            "                <form class=\"booking-status-form\" "
+            "method=\"post\" action=\"/admin/bookings/status\">\n"
+            "                    <input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_text(page, csrf_token);
+    str_cat_cstr(page,
+            "\">\n"
+            "                    <input type=\"hidden\" name=\"booking_id\" value=\"");
+    append_html_text(page, id_text);
+    str_cat_cstr(page,
+            "\">\n"
+            "                    <label for=\"booking-status-");
+    append_html_text(page, id_text);
+    str_cat_cstr(page,
+            "\">Status ändern</label>\n"
+            "                    <div class=\"booking-status-controls\">\n"
+            "                    <select id=\"booking-status-");
+    append_html_text(page, id_text);
+    str_cat_cstr(page, "\" name=\"status\" required>\n");
+
+    if (!is_mutable_status(record->status)) {
+        str_cat_cstr(page,
+                "                        <option value=\"\" selected disabled>"
+                "Neuen Status wählen</option>\n");
+    }
+
+    append_status_option(page, "neu", "Neu", record->status);
+    append_status_option(page, "kontaktiert", "Kontaktiert", record->status);
+    append_status_option(page, "erledigt", "Erledigt", record->status);
+
+    str_cat_cstr(page,
+            "                    </select>\n"
+            "                    <button class=\"button button-small\" type=\"submit\">"
+            "Speichern</button>\n"
+            "                    </div>\n"
+            "                </form>\n");
+}
+
 static void append_booking_detail(
         string *page,
         const char *label,
@@ -463,10 +717,19 @@ static void append_booking_card(
     str_cat_cstr(page,
             "            <article class=\"booking-card\">\n"
             "                <div class=\"booking-card-head\">\n"
-            "                    <p class=\"booking-time\">");
+            "                    <div><p class=\"booking-time\">");
     append_html_text(page, record->created_at);
+    str_cat_cstr(page, "</p><p class=\"booking-id\">Anfrage #");
+    {
+        char id_text[32];
+        int written = snprintf(id_text, sizeof(id_text), "%" PRId64, record->id);
+
+        if (written > 0 && (size_t)written < sizeof(id_text)) {
+            append_html_text(page, id_text);
+        }
+    }
     str_cat_cstr(page,
-            "</p>\n"
+            "</p></div>\n"
             "                    <span class=\"booking-status\">");
     append_html_text(page, status_label(record->status));
     str_cat_cstr(page,
@@ -495,20 +758,31 @@ static void append_booking_card(
             page,
             record->message,
             "Keine Nachricht angegeben.");
-    str_cat_cstr(page,
-            "</div>\n"
-            "            </article>\n");
+    str_cat_cstr(page, "</div>\n");
+    append_status_form(page, record, context->csrf_token);
+    str_cat_cstr(page, "            </article>\n");
 
     context->booking_count++;
 }
 
-string *build_booking_admin_page(void)
+string *build_booking_admin_page(
+        const char *csrf_token,
+        const booking_admin_filter *filter
+)
 {
     admin_page_context context;
+    booking_status_counts counts;
     string *page = _new_string();
     int database_result;
+    int counts_result;
+
+    if (csrf_token == NULL || csrf_token[0] == '\0' || filter == NULL) {
+        free_str(page);
+        return NULL;
+    }
 
     context.page = page;
+    context.csrf_token = csrf_token;
     context.booking_count = 0;
 
     str_cat_cstr(page,
@@ -532,16 +806,29 @@ string *build_booking_admin_page(void)
             "        <section class=\"card admin-card\">\n"
             "            <p class=\"eyebrow\">Admin</p>\n"
             "            <h1>Buchungsanfragen</h1>\n"
-            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen.</p>\n"
-            "            <div class=\"booking-grid\">\n");
+            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen.</p>\n");
 
-    database_result = booking_database_for_each_newest(
+    counts_result = booking_database_get_status_counts(&counts);
+
+    if (counts_result == 0) {
+        append_status_summary(page, &counts);
+    }
+
+    append_admin_filter_form(page, filter);
+    str_cat_cstr(page, "            <div class=\"booking-grid\">\n");
+
+    database_result = booking_database_for_each_filtered(
+            filter,
             append_booking_card,
             &context);
 
     if (database_result != 0) {
         str_cat_cstr(page,
                 "                <p>Die Buchungsanfragen konnten momentan nicht geladen werden.</p>\n");
+    } else if (context.booking_count == 0 &&
+               (filter->status[0] != '\0' || filter->search[0] != '\0')) {
+        str_cat_cstr(page,
+                "                <p>Für diesen Filter wurden keine Buchungsanfragen gefunden.</p>\n");
     } else if (context.booking_count == 0) {
         str_cat_cstr(page,
                 "                <p>Es wurden noch keine Buchungsanfragen gespeichert.</p>\n");

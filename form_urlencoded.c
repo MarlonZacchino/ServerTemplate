@@ -130,15 +130,14 @@ static form_value_result decode_component(
     return FORM_VALUE_OK;
 }
 
-form_value_result form_urlencoded_get(
-        const string *request,
+form_value_result form_urlencoded_get_from_data(
+        const char *data,
+        size_t data_length,
         const char *field_name,
         char *out,
         size_t out_size
 )
 {
-    const char *body;
-    size_t body_length;
     size_t position = 0;
     bool found = false;
     char decoded_key[MAX_FORM_KEY_LENGTH];
@@ -149,30 +148,24 @@ form_value_result form_urlencoded_get(
 
     out[0] = '\0';
 
-    if (request == NULL || field_name == NULL || field_name[0] == '\0') {
+    if (data == NULL || field_name == NULL || field_name[0] == '\0') {
         return FORM_VALUE_INVALID;
     }
 
-    body = find_request_body(request, &body_length);
-
-    if (body == NULL) {
-        return FORM_VALUE_INVALID;
-    }
-
-    while (position < body_length) {
+    while (position < data_length) {
         size_t pair_start = position;
         size_t pair_end;
         size_t equals_position;
         form_value_result key_result;
 
-        while (position < body_length && body[position] != '&') {
+        while (position < data_length && data[position] != '&') {
             position++;
         }
 
         pair_end = position;
         equals_position = pair_start;
 
-        while (equals_position < pair_end && body[equals_position] != '=') {
+        while (equals_position < pair_end && data[equals_position] != '=') {
             equals_position++;
         }
 
@@ -181,7 +174,7 @@ form_value_result form_urlencoded_get(
         }
 
         key_result = decode_component(
-                body + pair_start,
+                data + pair_start,
                 equals_position - pair_start,
                 decoded_key,
                 sizeof(decoded_key));
@@ -199,7 +192,7 @@ form_value_result form_urlencoded_get(
             }
 
             value_result = decode_component(
-                    body + equals_position + 1,
+                    data + equals_position + 1,
                     pair_end - equals_position - 1,
                     out,
                     out_size);
@@ -211,10 +204,44 @@ form_value_result form_urlencoded_get(
             found = true;
         }
 
-        if (position < body_length && body[position] == '&') {
+        if (position < data_length && data[position] == '&') {
             position++;
         }
     }
 
     return found ? FORM_VALUE_OK : FORM_VALUE_NOT_FOUND;
+}
+
+form_value_result form_urlencoded_get(
+        const string *request,
+        const char *field_name,
+        char *out,
+        size_t out_size
+)
+{
+    const char *body;
+    size_t body_length;
+
+    if (out == NULL || out_size == 0) {
+        return FORM_VALUE_INVALID;
+    }
+
+    out[0] = '\0';
+
+    if (request == NULL || field_name == NULL || field_name[0] == '\0') {
+        return FORM_VALUE_INVALID;
+    }
+
+    body = find_request_body(request, &body_length);
+
+    if (body == NULL) {
+        return FORM_VALUE_INVALID;
+    }
+
+    return form_urlencoded_get_from_data(
+            body,
+            body_length,
+            field_name,
+            out,
+            out_size);
 }

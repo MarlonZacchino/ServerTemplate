@@ -14,6 +14,18 @@ typedef enum form_value_result {
 } form_value_result;
 
 /*
+ * Liest ein Feld aus beliebigen application/x-www-form-urlencoded-Daten,
+ * zum Beispiel aus einem Query-String oder einem Request-Body.
+ */
+form_value_result form_urlencoded_get_from_data(
+        const char *data,
+        size_t data_length,
+        const char *field_name,
+        char *out,
+        size_t out_size
+);
+
+/*
  * Liest ein Feld aus einem application/x-www-form-urlencoded-Request-Body.
  *
  * Die Ausgabe ist immer nullterminiert, sofern out_size > 0 ist.

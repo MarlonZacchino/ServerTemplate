@@ -201,11 +201,19 @@ static int create_schema(void)
             "    ON bookings(created_at DESC, id DESC);"
             "CREATE INDEX IF NOT EXISTS idx_bookings_status "
             "    ON bookings(status);"
+            "CREATE TRIGGER IF NOT EXISTS trg_bookings_status_insert "
+            "BEFORE INSERT ON bookings "
+            "WHEN NEW.status NOT IN ('neu', 'kontaktiert', 'erledigt', 'altbestand') "
+            "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
+            "CREATE TRIGGER IF NOT EXISTS trg_bookings_status_update "
+            "BEFORE UPDATE OF status ON bookings "
+            "WHEN NEW.status NOT IN ('neu', 'kontaktiert', 'erledigt', 'altbestand') "
+            "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
             "CREATE TABLE IF NOT EXISTS app_metadata ("
             "    key TEXT PRIMARY KEY,"
             "    value TEXT NOT NULL"
             ");"
-            "PRAGMA user_version = 1;"
+            "PRAGMA user_version = 2;"
             "COMMIT;";
 
     return execute_sql(schema_sql);
@@ -777,16 +785,68 @@ static const char *column_text_or_empty(sqlite3_stmt *statement, int column)
     return value == NULL ? "" : (const char *)value;
 }
 
-int booking_database_for_each_newest(
+static int build_literal_like_pattern(
+        const char *search,
+        char *out_pattern,
+        size_t out_size
+)
+{
+    size_t out_position = 0;
+
+    if (search == NULL || out_pattern == NULL || out_size < 3) {
+        set_error_text("Ungültiger Suchwert oder Ausgabepuffer");
+        return -1;
+    }
+
+    out_pattern[out_position++] = '%';
+
+    for (size_t index = 0; search[index] != '\0'; index++) {
+        char character = search[index];
+
+        if (character == '%' || character == '_' || character == '\\') {
+            if (out_position + 2 >= out_size) {
+                set_error_text("Suchwert ist zu lang");
+                return -1;
+            }
+
+            out_pattern[out_position++] = '\\';
+        } else if (out_position + 1 >= out_size) {
+            set_error_text("Suchwert ist zu lang");
+            return -1;
+        }
+
+        out_pattern[out_position++] = character;
+    }
+
+    if (out_position + 2 > out_size) {
+        set_error_text("Suchwert ist zu lang");
+        return -1;
+    }
+
+    out_pattern[out_position++] = '%';
+    out_pattern[out_position] = '\0';
+    return 0;
+}
+
+int booking_database_for_each_filtered(
+        const booking_admin_filter *filter,
         booking_record_callback callback,
         void *context
 )
 {
     sqlite3_stmt *statement = NULL;
     int step_result;
+    char search_pattern[BOOKING_ADMIN_SEARCH_SIZE * 2 + 3];
 
-    if (database == NULL || callback == NULL) {
-        set_error_text("Datenbank ist nicht initialisiert oder Callback fehlt");
+    if (database == NULL || filter == NULL || callback == NULL) {
+        set_error_text("Datenbank, Filter oder Callback fehlt");
+        return -1;
+    }
+
+    if (build_literal_like_pattern(
+            filter->search,
+            search_pattern,
+            sizeof(search_pattern)) != 0) {
         return -1;
     }
 
@@ -794,11 +854,33 @@ int booking_database_for_each_newest(
             database,
             "SELECT id, created_at, status, customer_name, contact, dog_name, "
             "       dog_size, service, preferred_date, message, legacy "
-            "FROM bookings ORDER BY created_at DESC, id DESC;",
+            "FROM bookings "
+            "WHERE (?1 = '' OR status = ?1) "
+            "  AND (?2 = '%%' OR customer_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR contact LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE) "
+            "ORDER BY created_at DESC, id DESC;",
             -1,
             &statement,
             NULL) != SQLITE_OK) {
-        set_sqlite_error("Buchungsabfrage konnte nicht vorbereitet werden");
+        set_sqlite_error("Gefilterte Buchungsabfrage konnte nicht vorbereitet werden");
+        return -1;
+    }
+
+    if (sqlite3_bind_text(
+            statement,
+            1,
+            filter->status,
+            -1,
+            SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(
+            statement,
+            2,
+            search_pattern,
+            -1,
+            SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Buchungsfilter konnten nicht gebunden werden");
+        sqlite3_finalize(statement);
         return -1;
     }
 
@@ -821,11 +903,115 @@ int booking_database_for_each_newest(
     }
 
     if (step_result != SQLITE_DONE) {
-        set_sqlite_error("Buchungsabfrage konnte nicht vollständig ausgeführt werden");
+        set_sqlite_error("Gefilterte Buchungsabfrage konnte nicht vollständig ausgeführt werden");
         sqlite3_finalize(statement);
         return -1;
     }
 
     sqlite3_finalize(statement);
     return 0;
+}
+
+int booking_database_get_status_counts(booking_status_counts *counts)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (database == NULL || counts == NULL) {
+        set_error_text("Datenbank ist nicht initialisiert oder Zählerausgabe fehlt");
+        return -1;
+    }
+
+    memset(counts, 0, sizeof(*counts));
+
+    if (sqlite3_prepare_v2(
+            database,
+            "SELECT COUNT(*), "
+            "       SUM(CASE WHEN status = 'neu' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'kontaktiert' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'erledigt' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'altbestand' THEN 1 ELSE 0 END) "
+            "FROM bookings;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Statuszähler konnten nicht vorbereitet werden");
+        return -1;
+    }
+
+    step_result = sqlite3_step(statement);
+
+    if (step_result != SQLITE_ROW) {
+        set_sqlite_error("Statuszähler konnten nicht gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    counts->total = (size_t)sqlite3_column_int64(statement, 0);
+    counts->new_count = (size_t)sqlite3_column_int64(statement, 1);
+    counts->contacted_count = (size_t)sqlite3_column_int64(statement, 2);
+    counts->completed_count = (size_t)sqlite3_column_int64(statement, 3);
+    counts->legacy_count = (size_t)sqlite3_column_int64(statement, 4);
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
+static bool is_valid_mutable_status(const char *status)
+{
+    if (status == NULL) {
+        return false;
+    }
+
+    return strcmp(status, "neu") == 0 ||
+           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "erledigt") == 0;
+}
+
+booking_status_update_result booking_database_update_status(
+        int64_t booking_id,
+        const char *status
+)
+{
+    sqlite3_stmt *statement = NULL;
+    booking_status_update_result result = BOOKING_STATUS_UPDATE_ERROR;
+
+    if (database == NULL) {
+        set_error_text("Datenbank ist nicht initialisiert");
+        return BOOKING_STATUS_UPDATE_ERROR;
+    }
+
+    if (booking_id <= 0 || !is_valid_mutable_status(status)) {
+        set_error_text("Ungültige Buchungs-ID oder ungültiger Status");
+        return BOOKING_STATUS_UPDATE_ERROR;
+    }
+
+    if (sqlite3_prepare_v2(
+            database,
+            "UPDATE bookings SET status = ?1 WHERE id = ?2;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Statusänderung konnte nicht vorbereitet werden");
+        return BOOKING_STATUS_UPDATE_ERROR;
+    }
+
+    if (sqlite3_bind_text(statement, 1, status, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 2, (sqlite3_int64)booking_id) != SQLITE_OK) {
+        set_sqlite_error("Statuswerte konnten nicht gebunden werden");
+        goto cleanup;
+    }
+
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+        set_sqlite_error("Buchungsstatus konnte nicht geändert werden");
+        goto cleanup;
+    }
+
+    result = sqlite3_changes(database) == 0
+            ? BOOKING_STATUS_UPDATE_NOT_FOUND
+            : BOOKING_STATUS_UPDATE_OK;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
 }

@@ -2,6 +2,7 @@
 #define SERVER_BOOKING_DATABASE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "booking.h"
@@ -20,10 +21,24 @@ typedef struct booking_record {
     bool legacy;
 } booking_record;
 
+typedef struct booking_status_counts {
+    size_t total;
+    size_t new_count;
+    size_t contacted_count;
+    size_t completed_count;
+    size_t legacy_count;
+} booking_status_counts;
+
 typedef void (*booking_record_callback)(
         const booking_record *record,
         void *context
 );
+
+typedef enum booking_status_update_result {
+    BOOKING_STATUS_UPDATE_ERROR = -1,
+    BOOKING_STATUS_UPDATE_OK = 0,
+    BOOKING_STATUS_UPDATE_NOT_FOUND = 1
+} booking_status_update_result;
 
 /*
  * Öffnet die SQLite-Datenbank, legt das Schema an und importiert eine
@@ -45,9 +60,22 @@ int booking_database_insert(const booking_request *booking);
  * Ruft callback für alle Buchungen auf, neueste zuerst.
  * Die String-Zeiger im Datensatz sind nur während des Callback-Aufrufs gültig.
  */
-int booking_database_for_each_newest(
+int booking_database_for_each_filtered(
+        const booking_admin_filter *filter,
         booking_record_callback callback,
         void *context
+);
+
+/* Liefert die globalen Anzahlen pro Status für die Adminübersicht. */
+int booking_database_get_status_counts(booking_status_counts *counts);
+
+/*
+ * Ändert den Status einer vorhandenen Buchung. Erlaubt sind ausschließlich
+ * "neu", "kontaktiert" und "erledigt".
+ */
+booking_status_update_result booking_database_update_status(
+        int64_t booking_id,
+        const char *status
 );
 
 /* Letzte interne SQLite-/Migrationsfehlermeldung für das Server-Log. */

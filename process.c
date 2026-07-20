@@ -5,6 +5,7 @@
 #include "auth.h"
 #include "process.h"
 #include "booking.h"
+#include "booking_database.h"
 #include "form_urlencoded.h"
 
 #include <errno.h>
@@ -12,6 +13,7 @@
 #include <stdio.h>
 #include <sodium.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -21,8 +23,8 @@
 #define MAX_PATH_LENGTH 512
 #define SETUP_USERNAME_SIZE 128
 #define SETUP_PASSWORD_SIZE 513
-#define SETUP_CSRF_TOKEN_BYTES 32
-#define SETUP_CSRF_TOKEN_HEX_SIZE (SETUP_CSRF_TOKEN_BYTES * 2 + 1)
+#define FORM_CSRF_TOKEN_BYTES 32
+#define FORM_CSRF_TOKEN_HEX_SIZE (FORM_CSRF_TOKEN_BYTES * 2 + 1)
 
 #ifndef SERVER_DOCUMENT_ROOT
 #define SERVER_DOCUMENT_ROOT "public"
@@ -248,20 +250,43 @@ static bool parse_request_line(
 }
 
 /*
- * Entfernt Query-Parameter aus dem Pfad.
- *
- * Aus:
- * /kontakt?foo=bar
- *
- * wird:
- * /kontakt
+ * Trennt den Query-String vom Pfad. Der Query-Zeiger zeigt anschließend
+ * in denselben Pfadpuffer und ist nur so lange wie dieser gültig.
  */
-static void remove_query_string(char *path)
+static void split_query_string(
+        char *path,
+        const char **out_query,
+        size_t *out_query_length
+)
 {
-    char *question_mark = strchr(path, '?');
+    char *question_mark;
 
-    if (question_mark != NULL) {
-        *question_mark = '\0';
+    if (out_query != NULL) {
+        *out_query = NULL;
+    }
+
+    if (out_query_length != NULL) {
+        *out_query_length = 0;
+    }
+
+    if (path == NULL) {
+        return;
+    }
+
+    question_mark = strchr(path, '?');
+
+    if (question_mark == NULL) {
+        return;
+    }
+
+    *question_mark = '\0';
+
+    if (out_query != NULL) {
+        *out_query = question_mark + 1;
+    }
+
+    if (out_query_length != NULL) {
+        *out_query_length = strlen(question_mark + 1);
     }
 }
 
@@ -481,7 +506,11 @@ static string *handle_unauthorized(bool send_body)
     return build_response_text(
             "401 Unauthorized",
             "text/html; charset=utf-8",
-            "WWW-Authenticate: Basic realm=\"Styles 4 Dogs Admin\"\r\n",
+            "WWW-Authenticate: Basic realm=\"Styles 4 Dogs Admin\"\r\n"
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n",
             body,
             send_body
     );
@@ -575,21 +604,21 @@ static const char *setup_security_headers(void)
             "X-Frame-Options: DENY\r\n";
 }
 
-static bool get_setup_csrf_token(
+static bool get_form_csrf_token(
         char *out_token,
         size_t out_token_size
 )
 {
     static bool initialized = false;
     static bool token_available = false;
-    static char token[SETUP_CSRF_TOKEN_HEX_SIZE];
+    static char token[FORM_CSRF_TOKEN_HEX_SIZE];
 
     if (out_token == NULL || out_token_size < sizeof(token)) {
         return false;
     }
 
     if (!initialized) {
-        unsigned char random_token[SETUP_CSRF_TOKEN_BYTES];
+        unsigned char random_token[FORM_CSRF_TOKEN_BYTES];
 
         initialized = true;
 
@@ -622,9 +651,9 @@ static bool get_setup_csrf_token(
     return true;
 }
 
-static bool setup_csrf_token_matches(const char *received_token)
+static bool form_csrf_token_matches(const char *received_token)
 {
-    char expected_token[SETUP_CSRF_TOKEN_HEX_SIZE];
+    char expected_token[FORM_CSRF_TOKEN_HEX_SIZE];
     size_t received_length;
     bool matches;
 
@@ -634,20 +663,20 @@ static bool setup_csrf_token_matches(const char *received_token)
 
     received_length = strnlen(
             received_token,
-            SETUP_CSRF_TOKEN_HEX_SIZE + 1);
+            FORM_CSRF_TOKEN_HEX_SIZE + 1);
 
-    if (received_length != SETUP_CSRF_TOKEN_HEX_SIZE - 1) {
+    if (received_length != FORM_CSRF_TOKEN_HEX_SIZE - 1) {
         return false;
     }
 
-    if (!get_setup_csrf_token(expected_token, sizeof(expected_token))) {
+    if (!get_form_csrf_token(expected_token, sizeof(expected_token))) {
         return false;
     }
 
     matches = sodium_memcmp(
             received_token,
             expected_token,
-            SETUP_CSRF_TOKEN_HEX_SIZE - 1) == 0;
+            FORM_CSRF_TOKEN_HEX_SIZE - 1) == 0;
 
     sodium_memzero(expected_token, sizeof(expected_token));
     return matches;
@@ -718,7 +747,7 @@ static void clear_request_body(string *request)
 
 static string *handle_admin_setup_page(bool send_body)
 {
-    char csrf_token[SETUP_CSRF_TOKEN_HEX_SIZE];
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
     string *body;
     string *response;
 
@@ -726,7 +755,7 @@ static string *handle_admin_setup_page(bool send_body)
         return handle_not_found(send_body);
     }
 
-    if (!get_setup_csrf_token(csrf_token, sizeof(csrf_token))) {
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
         return handle_internal_error(send_body);
     }
 
@@ -849,7 +878,7 @@ static string *handle_admin_setup_created(bool send_body)
 
 static string *handle_admin_setup_post(string *request)
 {
-    char csrf_token[SETUP_CSRF_TOKEN_HEX_SIZE] = {0};
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
     char username[SETUP_USERNAME_SIZE] = {0};
     char password[SETUP_PASSWORD_SIZE] = {0};
     char password_repeat[SETUP_PASSWORD_SIZE] = {0};
@@ -899,7 +928,7 @@ static string *handle_admin_setup_post(string *request)
         goto cleanup;
     }
 
-    if (!setup_csrf_token_matches(csrf_token)) {
+    if (!form_csrf_token_matches(csrf_token)) {
         response = handle_admin_setup_error(
                 "Die Sicherheitsprüfung ist fehlgeschlagen. Bitte lade die Seite neu.",
                 true);
@@ -1011,39 +1040,247 @@ static string *handle_booking(string *request)
     return handle_booking_created();
 }
 
-static string *handle_admin_bookings(bool send_body)
+static const char *admin_security_headers(void)
 {
-    string *body = build_booking_admin_page();
+    return
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Security-Policy: default-src 'self'; "
+            "style-src 'self'; form-action 'self'; base-uri 'none'; "
+            "frame-ancestors 'none'\r\n"
+            "Referrer-Policy: no-referrer\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n";
+}
+
+static string *handle_admin_bookings(
+        bool send_body,
+        const booking_admin_filter *filter
+)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    string *body;
+    string *response;
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+
+    body = build_booking_admin_page(csrf_token, filter);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
 
     if (body == NULL) {
         return handle_internal_error(send_body);
     }
 
-    string *response = build_response_bytes(
+    response = build_response_bytes(
             "200 OK",
             "text/html; charset=utf-8",
-            NULL,
+            admin_security_headers(),
             get_char_str(body),
             get_length(body),
             send_body
     );
 
     free_str(body);
-
     return response;
+}
+
+static string *handle_admin_action_forbidden(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>403 Forbidden</title></head>"
+            "<body><h1>403 Forbidden</h1><p>Die Sicherheitsprüfung ist fehlgeschlagen.</p>"
+            "</body></html>";
+
+    return build_response_text(
+            "403 Forbidden",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            body,
+            true);
+}
+
+static string *handle_admin_status_bad_request(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>400 Bad Request</title></head>"
+            "<body><h1>400 Bad Request</h1><p>Die Statusänderung ist ungültig.</p>"
+            "</body></html>";
+
+    return build_response_text(
+            "400 Bad Request",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            body,
+            true);
+}
+
+static string *handle_admin_status_not_found(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>404 Nicht gefunden</title></head>"
+            "<body><h1>404 Nicht gefunden</h1><p>Die Buchungsanfrage existiert nicht.</p>"
+            "</body></html>";
+
+    return build_response_text(
+            "404 Not Found",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            body,
+            true);
+}
+
+static string *handle_admin_status_redirect(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<title>Status gespeichert</title></head>"
+            "<body><p>Der Status wurde gespeichert.</p>"
+            "<p><a href=\"/admin/bookings\">Zurück zu den Buchungsanfragen</a></p>"
+            "</body></html>";
+
+    return build_response_text(
+            "303 See Other",
+            "text/html; charset=utf-8",
+            "Location: /admin/bookings\r\n"
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Security-Policy: default-src 'self'; "
+            "style-src 'self'; form-action 'self'; base-uri 'none'; "
+            "frame-ancestors 'none'\r\n"
+            "Referrer-Policy: no-referrer\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n",
+            body,
+            true);
+}
+
+static bool parse_positive_booking_id(
+        const char *text,
+        int64_t *out_booking_id
+)
+{
+    uint64_t value = 0;
+
+    if (text == NULL || text[0] == '\0' || out_booking_id == NULL) {
+        return false;
+    }
+
+    for (size_t index = 0; text[index] != '\0'; index++) {
+        unsigned int digit;
+
+        if (text[index] < '0' || text[index] > '9') {
+            return false;
+        }
+
+        digit = (unsigned int)(text[index] - '0');
+
+        if (value > ((uint64_t)INT64_MAX - digit) / 10U) {
+            return false;
+        }
+
+        value = value * 10U + digit;
+    }
+
+    if (value == 0) {
+        return false;
+    }
+
+    *out_booking_id = (int64_t)value;
+    return true;
+}
+
+static bool is_valid_admin_booking_status(const char *status)
+{
+    if (status == NULL) {
+        return false;
+    }
+
+    return strcmp(status, "neu") == 0 ||
+           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "erledigt") == 0;
+}
+
+static string *handle_admin_booking_status_post(string *request)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
+    char booking_id_text[32] = {0};
+    char status[32] = {0};
+    form_value_result csrf_result;
+    form_value_result booking_id_result;
+    form_value_result status_result;
+    int64_t booking_id;
+    booking_status_update_result update_result;
+
+    csrf_result = form_urlencoded_get(
+            request,
+            "csrf_token",
+            csrf_token,
+            sizeof(csrf_token));
+
+    if (csrf_result != FORM_VALUE_OK ||
+        !form_csrf_token_matches(csrf_token)) {
+        sodium_memzero(csrf_token, sizeof(csrf_token));
+        return handle_admin_action_forbidden();
+    }
+
+    booking_id_result = form_urlencoded_get(
+            request,
+            "booking_id",
+            booking_id_text,
+            sizeof(booking_id_text));
+    status_result = form_urlencoded_get(
+            request,
+            "status",
+            status,
+            sizeof(status));
+
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+
+    if (booking_id_result != FORM_VALUE_OK ||
+        status_result != FORM_VALUE_OK ||
+        !parse_positive_booking_id(booking_id_text, &booking_id) ||
+        !is_valid_admin_booking_status(status)) {
+        return handle_admin_status_bad_request();
+    }
+
+    update_result = booking_database_update_status(booking_id, status);
+
+    if (update_result == BOOKING_STATUS_UPDATE_OK) {
+        return handle_admin_status_redirect();
+    }
+
+    if (update_result == BOOKING_STATUS_UPDATE_NOT_FOUND) {
+        return handle_admin_status_not_found();
+    }
+
+    fprintf(
+            stderr,
+            "Buchungsstatus konnte nicht geändert werden: %s\n",
+            booking_database_last_error());
+    return handle_internal_error(true);
 }
 
 string *process(string *request)
 {
     char method[MAX_METHOD_LENGTH + 1];
     char path[MAX_PATH_LENGTH + 1];
+    const char *query = NULL;
+    size_t query_length = 0;
     bool send_body = true;
 
     if (!parse_request_line(request, method, sizeof(method), path, sizeof(path))) {
         return handle_bad_request(true);
     }
 
-    remove_query_string(path);
+    split_query_string(path, &query, &query_length);
 
     if (strcmp(method, "HEAD") == 0) {
         send_body = false;
@@ -1060,6 +1297,14 @@ string *process(string *request)
             return handle_admin_setup_post(request);
         }
 
+        if (strcmp(path, "/admin/bookings/status") == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+
+            return handle_admin_booking_status_post(request);
+        }
+
         return handle_not_found(true);
     }
 
@@ -1072,11 +1317,17 @@ string *process(string *request)
     }
 
     if (strcmp(path, "/admin/bookings") == 0) {
+        booking_admin_filter filter;
+
         if (!request_has_valid_admin_auth(request)) {
             return handle_unauthorized(send_body);
         }
 
-        return handle_admin_bookings(send_body);
+        if (!parse_booking_admin_filter(query, query_length, &filter)) {
+            return handle_bad_request(send_body);
+        }
+
+        return handle_admin_bookings(send_body, &filter);
     }
 
     return serve_static_file(path, send_body);
