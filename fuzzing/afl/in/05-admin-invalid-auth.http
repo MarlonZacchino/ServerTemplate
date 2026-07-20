@@ -1,0 +1,4 @@
+GET /admin/bookings HTTP/1.1
+Authorization: Basic YWRtaW46ZmFsc2No
+Host: localhost
+

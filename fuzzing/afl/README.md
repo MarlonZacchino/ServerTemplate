@@ -1,0 +1,84 @@
+# AFL++ für den Styles-4-Dogs-Server
+
+Der Server besitzt einen `stdin`-Modus. AFL++ übergibt deshalb jeden Testfall
+direkt an:
+
+```text
+Server stdin
+```
+
+Es wird kein Netzwerk-Socket benötigt. Der AFL-Build verwendet eigene Secrets-
+und Datenpfade. Buchungen werden nach `/dev/null` geschrieben, damit ein langer
+Fuzzing-Lauf keine wachsende Testdatei erzeugt.
+
+## Abhängigkeiten unter Arch Linux
+
+```bash
+sudo pacman -S --needed afl++ clang cmake ninja libsodium pkgconf
+```
+
+## Instrumentierten Server bauen
+
+```bash
+./fuzzing/afl/build.sh
+```
+
+Optionaler AFL-Build mit ASan und UBSan:
+
+```bash
+./fuzzing/afl/build.sh asan
+AFL_BUILD_DIR="$PWD/cmake-build-afl-asan" ./fuzzing/afl/run.sh
+```
+
+Der normale, schnellere AFL-Build sollte für längere Kampagnen bevorzugt werden.
+Funde lassen sich anschließend gezielt mit Sanitizern wiederholen.
+
+## Einzelne AFL-Instanz
+
+```bash
+./fuzzing/afl/run.sh
+```
+
+Ein vorhandener Lauf wird automatisch fortgesetzt. Für einen vollständig neuen
+Lauf zuerst:
+
+```bash
+./fuzzing/afl/clean.sh
+```
+
+## Mehrere Instanzen
+
+Standardmäßig wird ungefähr die Hälfte der CPU-Threads verwendet:
+
+```bash
+./fuzzing/afl/run_parallel.sh
+```
+
+Die Anzahl kann explizit gesetzt werden:
+
+```bash
+AFL_INSTANCES=4 ./fuzzing/afl/run_parallel.sh
+```
+
+Status in einem zweiten Terminal:
+
+```bash
+./fuzzing/afl/status.sh
+```
+
+## Crash mit ASan und UBSan wiederholen
+
+```bash
+./fuzzing/afl/replay_crash.sh \
+  fuzzing/afl/out/default/crashes/id:000000,...
+```
+
+Bei parallelen Läufen liegen Funde unter `fuzzing/afl/sync/<Instanz>/crashes/`.
+
+## Hinweise
+
+- `fuzzing/afl/in/` und `http.dict` gehören ins Git.
+- `out/`, `sync/` und `logs/` gehören nicht ins Git.
+- AFL++ niemals gegen echte Buchungs- oder Secret-Dateien konfigurieren.
+- Ein reproduzierbarer Crash wird erst mit ASan/UBSan analysiert und danach als
+  fester Regressionstest ergänzt.

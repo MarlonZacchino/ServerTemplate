@@ -9,3 +9,10 @@ cmake-build-*/
 *.so
 *.exe
 Server
+
+# Test- und Fuzzing-Ausgaben
+fuzzing/afl/out/
+fuzzing/afl/sync/
+fuzzing/afl/logs/
+__pycache__/
+*.pyc
