@@ -75,6 +75,7 @@ add_executable(Server
         auth.c
         form_urlencoded.c
         server_config.c
+        rate_limit.c
 )
 
 add_executable(create_admin_user

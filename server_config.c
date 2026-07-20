@@ -48,6 +48,7 @@
 
 #define CONFIG_ERROR_SIZE 512
 #define CONFIG_ADDRESS_SIZE INET_ADDRSTRLEN
+#define CONFIG_PROXY_TOKEN_SIZE 129
 
 typedef struct server_config_state {
     bool initialized;
@@ -59,6 +60,7 @@ typedef struct server_config_state {
     char data_dir[PATH_MAX];
     char database_file[PATH_MAX];
     char legacy_booking_file[PATH_MAX];
+    char trusted_proxy_token[CONFIG_PROXY_TOKEN_SIZE];
 } server_config_state;
 
 static server_config_state config;
@@ -303,6 +305,45 @@ static int validate_directory_if_present(
     return -1;
 }
 
+
+static int load_trusted_proxy_token(void)
+{
+    const char *value = getenv("STYLES4DOGS_TRUSTED_PROXY_TOKEN");
+    size_t length;
+
+    config.trusted_proxy_token[0] = '\0';
+
+    if (value == NULL || value[0] == '\0') {
+        return 0;
+    }
+
+    length = strlen(value);
+
+    if (length < 32 || length >= sizeof(config.trusted_proxy_token)) {
+        set_error(
+                "STYLES4DOGS_TRUSTED_PROXY_TOKEN muss zwischen 32 und 128 Zeichen lang sein");
+        return -1;
+    }
+
+    for (size_t index = 0; index < length; index++) {
+        unsigned char character = (unsigned char)value[index];
+        bool allowed =
+                (character >= 'a' && character <= 'z') ||
+                (character >= 'A' && character <= 'Z') ||
+                (character >= '0' && character <= '9') ||
+                character == '-' || character == '_';
+
+        if (!allowed) {
+            set_error(
+                    "STYLES4DOGS_TRUSTED_PROXY_TOKEN enthält ungültige Zeichen");
+            return -1;
+        }
+    }
+
+    memcpy(config.trusted_proxy_token, value, length + 1);
+    return 0;
+}
+
 static int load_file_path(
         char *destination,
         size_t destination_size,
@@ -392,6 +433,7 @@ int server_config_initialize(void)
             document_root,
             config.document_root,
             sizeof(config.document_root)) != 0 ||
+        load_trusted_proxy_token() != 0 ||
         copy_nonempty_value(
             config.secrets_dir,
             sizeof(config.secrets_dir),
@@ -516,4 +558,9 @@ const char *server_config_database_file(void)
 const char *server_config_legacy_booking_file(void)
 {
     return config.legacy_booking_file;
+}
+
+const char *server_config_trusted_proxy_token(void)
+{
+    return config.trusted_proxy_token;
 }

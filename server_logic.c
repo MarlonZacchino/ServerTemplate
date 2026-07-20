@@ -20,6 +20,7 @@
 #include "booking_database.h"
 #include "http_lib.h"
 #include "process.h"
+#include "rate_limit.h"
 #include "server_config.h"
 
 /**
@@ -32,6 +33,16 @@
  * Timeout für Socket-Lese- und Schreiboperationen.
  */
 #define SOCKET_TIMEOUT_SECONDS 5
+
+#define CLIENT_IP_SIZE INET6_ADDRSTRLEN
+#define REQUEST_METHOD_SIZE 16
+#define REQUEST_PATH_SIZE 512
+
+typedef enum request_kind {
+    REQUEST_KIND_OTHER = 0,
+    REQUEST_KIND_BOOKING,
+    REQUEST_KIND_ADMIN
+} request_kind;
 
 /**
  * Verarbeitet einen Request und erzeugt eine Response.
@@ -213,6 +224,301 @@ static size_t get_content_length_from_header(const char *buffer, size_t header_l
     return 0;
 }
 
+
+static bool constant_time_equals(
+        const char *a,
+        size_t a_length,
+        const char *b,
+        size_t b_length
+)
+{
+    unsigned char difference = 0;
+
+    if (a == NULL || b == NULL || a_length != b_length) {
+        return false;
+    }
+
+    for (size_t index = 0; index < a_length; index++) {
+        difference |= (unsigned char)a[index] ^ (unsigned char)b[index];
+    }
+
+    return difference == 0;
+}
+
+/*
+ * Finds exactly one HTTP header in the bounded header section.
+ * Duplicate headers are rejected to avoid ambiguous proxy identity data.
+ */
+static bool find_unique_header_value(
+        const char *buffer,
+        size_t request_length,
+        const char *header_name,
+        const char **out_value,
+        size_t *out_value_length
+)
+{
+    size_t header_end;
+    size_t position = 0;
+    size_t found_count = 0;
+    const char *found_value = NULL;
+    size_t found_length = 0;
+    size_t header_name_length;
+
+    if (buffer == NULL || header_name == NULL ||
+        out_value == NULL || out_value_length == NULL) {
+        return false;
+    }
+
+    *out_value = NULL;
+    *out_value_length = 0;
+    header_end = find_http_header_end(buffer, request_length);
+
+    if (header_end == 0) {
+        return false;
+    }
+
+    header_name_length = strlen(header_name);
+
+    while (position < header_end && buffer[position] != '\n') {
+        position++;
+    }
+
+    if (position >= header_end) {
+        return false;
+    }
+
+    position++;
+
+    while (position < header_end) {
+        size_t raw_line_end = position;
+        size_t line_end;
+        size_t colon;
+        size_t value_start;
+        size_t value_end;
+
+        while (raw_line_end < header_end && buffer[raw_line_end] != '\n') {
+            raw_line_end++;
+        }
+
+        line_end = raw_line_end;
+        if (line_end > position && buffer[line_end - 1] == '\r') {
+            line_end--;
+        }
+
+        if (line_end == position) {
+            break;
+        }
+
+        colon = position;
+        while (colon < line_end && buffer[colon] != ':') {
+            colon++;
+        }
+
+        if (colon < line_end &&
+            colon - position == header_name_length &&
+            header_name_matches(buffer, position, line_end, header_name)) {
+            found_count++;
+            if (found_count > 1) {
+                return false;
+            }
+
+            value_start = colon + 1;
+            while (value_start < line_end &&
+                   (buffer[value_start] == ' ' || buffer[value_start] == '\t')) {
+                value_start++;
+            }
+
+            value_end = line_end;
+            while (value_end > value_start &&
+                   (buffer[value_end - 1] == ' ' || buffer[value_end - 1] == '\t')) {
+                value_end--;
+            }
+
+            found_value = buffer + value_start;
+            found_length = value_end - value_start;
+        }
+
+        if (raw_line_end >= header_end) {
+            break;
+        }
+        position = raw_line_end + 1;
+    }
+
+    if (found_count != 1 || found_length == 0) {
+        return false;
+    }
+
+    *out_value = found_value;
+    *out_value_length = found_length;
+    return true;
+}
+
+static bool normalize_ip_slice(
+        const char *value,
+        size_t value_length,
+        char *destination,
+        size_t destination_size
+)
+{
+    char temporary[CLIENT_IP_SIZE];
+    struct in_addr address_v4;
+    struct in6_addr address_v6;
+
+    while (value_length > 0 && (*value == ' ' || *value == '\t')) {
+        value++;
+        value_length--;
+    }
+
+    while (value_length > 0 &&
+           (value[value_length - 1] == ' ' || value[value_length - 1] == '\t')) {
+        value_length--;
+    }
+
+    if (value_length == 0 || value_length >= sizeof(temporary)) {
+        return false;
+    }
+
+    memcpy(temporary, value, value_length);
+    temporary[value_length] = '\0';
+
+    if (inet_pton(AF_INET, temporary, &address_v4) == 1) {
+        return inet_ntop(AF_INET, &address_v4, destination, destination_size) != NULL;
+    }
+
+    if (inet_pton(AF_INET6, temporary, &address_v6) == 1) {
+        return inet_ntop(AF_INET6, &address_v6, destination, destination_size) != NULL;
+    }
+
+    return false;
+}
+
+static void resolve_client_ip(
+        const char *buffer,
+        size_t request_length,
+        const struct sockaddr_in *peer_address,
+        bool allow_trusted_proxy,
+        char *destination,
+        size_t destination_size
+)
+{
+    const char *configured_token = server_config_trusted_proxy_token();
+    const char *received_token;
+    const char *forwarded_for;
+    size_t received_token_length;
+    size_t forwarded_for_length;
+    size_t first_address_length;
+
+    if (peer_address == NULL ||
+        inet_ntop(AF_INET, &peer_address->sin_addr, destination, destination_size) == NULL) {
+        snprintf(destination, destination_size, "127.0.0.1");
+    }
+
+    if (!allow_trusted_proxy ||
+        strcmp(destination, "127.0.0.1") != 0 ||
+        configured_token == NULL || configured_token[0] == '\0') {
+        return;
+    }
+
+    if (!find_unique_header_value(
+            buffer,
+            request_length,
+            "X-Styles4Dogs-Proxy-Token",
+            &received_token,
+            &received_token_length) ||
+        !constant_time_equals(
+            received_token,
+            received_token_length,
+            configured_token,
+            strlen(configured_token)) ||
+        !find_unique_header_value(
+            buffer,
+            request_length,
+            "X-Forwarded-For",
+            &forwarded_for,
+            &forwarded_for_length)) {
+        return;
+    }
+
+    first_address_length = 0;
+    while (first_address_length < forwarded_for_length &&
+           forwarded_for[first_address_length] != ',') {
+        first_address_length++;
+    }
+
+    (void)normalize_ip_slice(
+            forwarded_for,
+            first_address_length,
+            destination,
+            destination_size);
+}
+
+static request_kind classify_request(
+        const char *buffer,
+        size_t request_length
+)
+{
+    char method[REQUEST_METHOD_SIZE];
+    char path[REQUEST_PATH_SIZE];
+    size_t position = 0;
+    size_t method_length = 0;
+    size_t path_length = 0;
+
+    if (buffer == NULL || request_length == 0) {
+        return REQUEST_KIND_OTHER;
+    }
+
+    while (position < request_length && buffer[position] != ' ') {
+        if (buffer[position] == '\r' || buffer[position] == '\n' ||
+            method_length + 1 >= sizeof(method)) {
+            return REQUEST_KIND_OTHER;
+        }
+        method[method_length++] = buffer[position++];
+    }
+
+    if (method_length == 0 || position >= request_length) {
+        return REQUEST_KIND_OTHER;
+    }
+    method[method_length] = '\0';
+
+    while (position < request_length && buffer[position] == ' ') {
+        position++;
+    }
+
+    while (position < request_length && buffer[position] != ' ') {
+        if (buffer[position] == '\r' || buffer[position] == '\n' ||
+            path_length + 1 >= sizeof(path)) {
+            return REQUEST_KIND_OTHER;
+        }
+        path[path_length++] = buffer[position++];
+    }
+
+    if (path_length == 0) {
+        return REQUEST_KIND_OTHER;
+    }
+    path[path_length] = '\0';
+
+    char *query = strchr(path, '?');
+    if (query != NULL) {
+        *query = '\0';
+    }
+
+    if (strcmp(method, "POST") == 0 && strcmp(path, "/booking") == 0) {
+        return REQUEST_KIND_BOOKING;
+    }
+
+    if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
+        strcmp(path, "/admin/bookings") == 0) {
+        return REQUEST_KIND_ADMIN;
+    }
+
+    if (strcmp(method, "POST") == 0 &&
+        strcmp(path, "/admin/bookings/status") == 0) {
+        return REQUEST_KIND_ADMIN;
+    }
+
+    return REQUEST_KIND_OTHER;
+}
+
 /**
  * Schreibt alle Bytes in fd.
  *
@@ -361,25 +667,105 @@ static string *make_internal_error_response(void)
     return cpy_str((void *)response, strlen(response));
 }
 
+
+static string *make_too_many_requests_response(unsigned int retry_after_seconds)
+{
+    const char *body = "Zu viele Anfragen. Bitte versuche es später erneut.\n";
+    char response[512];
+    int written;
+
+    if (retry_after_seconds == 0) {
+        retry_after_seconds = 1;
+    }
+
+    written = snprintf(
+            response,
+            sizeof(response),
+            "HTTP/1.1 429 Too Many Requests\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            "Content-Length: %zu\r\n"
+            "Retry-After: %u\r\n"
+            "Cache-Control: no-store\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "%s",
+            strlen(body),
+            retry_after_seconds,
+            body);
+
+    if (written < 0 || (size_t)written >= sizeof(response)) {
+        return make_internal_error_response();
+    }
+
+    return cpy_str(response, (size_t)written);
+}
+
+static bool response_has_status(const string *response, const char *status)
+{
+    const char *data;
+    size_t response_length;
+    size_t status_length;
+
+    if (response == NULL || status == NULL) {
+        return false;
+    }
+
+    data = get_const_char_str(response);
+    response_length = get_length(response);
+    status_length = strlen(status);
+
+    return data != NULL && response_length >= status_length &&
+           memcmp(data, status, status_length) == 0;
+}
+
 /**
  * Verarbeitet einen bereits gelesenen Request-Buffer.
  */
-static int handle_raw_request(int output_fd, const char *buffer, size_t request_length)
+static int handle_raw_request(
+        int output_fd,
+        const char *buffer,
+        size_t request_length,
+        const char *client_ip
+)
 {
-    string *request = cpy_str((void *)buffer, request_length);
+    request_kind kind = classify_request(buffer, request_length);
+    unsigned int retry_after_seconds = 1;
+    string *request = NULL;
+    string *response = NULL;
 
-    if (request == NULL) {
-        return -1;
+    if (kind == REQUEST_KIND_BOOKING &&
+        !rate_limit_allow_booking(client_ip, &retry_after_seconds)) {
+        response = make_too_many_requests_response(retry_after_seconds);
+    } else if (kind == REQUEST_KIND_ADMIN &&
+               rate_limit_admin_is_blocked(client_ip, &retry_after_seconds)) {
+        response = make_too_many_requests_response(retry_after_seconds);
+    } else {
+        request = cpy_str((void *)buffer, request_length);
+
+        if (request == NULL) {
+            return -1;
+        }
+
+        response = process(request);
+
+        if (kind == REQUEST_KIND_ADMIN) {
+            if (response_has_status(response, "HTTP/1.1 401 ")) {
+                rate_limit_record_admin_failure(client_ip);
+            } else if (response_has_status(response, "HTTP/1.1 200 ") ||
+                       response_has_status(response, "HTTP/1.1 303 ")) {
+                rate_limit_clear_admin_failures(client_ip);
+            }
+        }
     }
-
-    string *response = process(request);
 
     if (response == NULL) {
         response = make_internal_error_response();
     }
 
     if (response == NULL) {
-        free_str(request);
+        if (request != NULL) {
+            free_str(request);
+        }
         return -1;
     }
 
@@ -400,7 +786,9 @@ static int handle_raw_request(int output_fd, const char *buffer, size_t request_
         free_str(response);
     }
 
-    free_str(request);
+    if (request != NULL) {
+        free_str(request);
+    }
 
     return result;
 }
@@ -428,7 +816,11 @@ static void main_loop_stdin(void)
         fatal("ERROR reading from stdin");
     }
 
-    if (handle_raw_request(STDOUT_FILENO, buffer, (size_t)request_length) < 0) {
+    if (handle_raw_request(
+            STDOUT_FILENO,
+            buffer,
+            (size_t)request_length,
+            "127.0.0.1") < 0) {
         free(buffer);
         fatal("ERROR writing response to stdout");
     }
@@ -505,8 +897,9 @@ static int setup_socket(void)
 /**
  * Verarbeitet eine einzelne Client-Verbindung.
  */
-static void handle_client(int client_fd)
+static void handle_client(int client_fd, const struct sockaddr_in *client_address)
 {
+    char client_ip[CLIENT_IP_SIZE];
     char *buffer = malloc(BUFFER_SIZE);
 
     if (buffer == NULL) {
@@ -522,7 +915,19 @@ static void handle_client(int client_fd)
         return;
     }
 
-    if (handle_raw_request(client_fd, buffer, (size_t)request_length) < 0) {
+    resolve_client_ip(
+            buffer,
+            (size_t)request_length,
+            client_address,
+            true,
+            client_ip,
+            sizeof(client_ip));
+
+    if (handle_raw_request(
+            client_fd,
+            buffer,
+            (size_t)request_length,
+            client_ip) < 0) {
         warn_errno("ERROR writing response to client socket");
     }
 
@@ -553,7 +958,7 @@ static void main_loop(void)
 
         set_socket_timeouts(client_fd);
 
-        handle_client(client_fd);
+        handle_client(client_fd, &client_addr);
 
         if (close(client_fd) < 0) {
             warn_errno("ERROR closing client socket");

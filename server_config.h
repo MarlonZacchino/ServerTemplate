@@ -22,4 +22,10 @@ const char *server_config_data_dir(void);
 const char *server_config_database_file(void);
 const char *server_config_legacy_booking_file(void);
 
+/*
+ * Optional shared secret used to trust proxy-provided client IP headers.
+ * An empty string disables forwarded-client-IP trust.
+ */
+const char *server_config_trusted_proxy_token(void);
+
 #endif
