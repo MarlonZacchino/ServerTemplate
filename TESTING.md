@@ -53,3 +53,19 @@ Syntax, systemd-Units, Staging-Installation sowie SQLite-Backup und Restore:
 
 Der Test installiert ausschließlich in ein temporäres Verzeichnis und verändert
 weder `/etc` noch `/opt`, `/var/lib` oder laufende systemd-Dienste.
+
+## Caddy-Deployment
+
+Der Staging-Test prüft zusätzlich die optionale Caddy-Installation, ohne
+`/etc/caddy`, systemd oder einen laufenden Proxy zu verändern:
+
+```bash
+./deploy/tests/test_deployment.sh
+```
+
+Auf einem tatsächlich installierten System wird die Proxy-Konfiguration mit
+folgendem Befehl geprüft:
+
+```bash
+sudo ./deploy/scripts/verify-caddy.sh
+```

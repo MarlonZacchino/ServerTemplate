@@ -188,7 +188,11 @@ install_file 0755 root root "$BUILD_DIR/Server" "$APP_PATH/bin/Server"
 install_file 0755 root root "$SCRIPT_DIR/backup.sh" "$APP_PATH/bin/styles4dogs-backup"
 install_file 0755 root root "$SCRIPT_DIR/restore.sh" "$APP_PATH/bin/styles4dogs-restore"
 install_file 0755 root root "$SCRIPT_DIR/verify-installation.sh" "$APP_PATH/bin/styles4dogs-verify"
+install_file 0755 root root "$SCRIPT_DIR/install-caddy.sh" "$APP_PATH/bin/styles4dogs-install-caddy"
+install_file 0755 root root "$SCRIPT_DIR/verify-caddy.sh" "$APP_PATH/bin/styles4dogs-verify-caddy"
+install_file 0755 root root "$SCRIPT_DIR/uninstall-caddy.sh" "$APP_PATH/bin/styles4dogs-uninstall-caddy"
 install_file 0644 root root "$PROJECT_ROOT/DEPLOYMENT.md" "$APP_PATH/share/DEPLOYMENT.md"
+install_file 0644 root root "$PROJECT_ROOT/CADDY_DEPLOYMENT.md" "$APP_PATH/share/CADDY_DEPLOYMENT.md"
 
 case "$WEB_PATH" in
     */var/www/styles4dogs|*/staging/*|/var/www/styles4dogs) ;;
@@ -257,6 +261,7 @@ Styles 4 Dogs installed.
   Secrets:       $SECRETS_PATH
   Database:      $STATE_PATH/styles4dogs.db
   Backups:       $BACKUP_PATH
+  Caddy setup:   $APP_PATH/bin/styles4dogs-install-caddy
 EOF_SUMMARY
 
 if [[ -z "$ROOT_PREFIX" && "$START_SERVICE" -eq 1 ]]; then

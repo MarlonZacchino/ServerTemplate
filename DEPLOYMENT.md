@@ -2,7 +2,7 @@
 
 Dieses Deployment installiert den C-Server als eigenen, gehärteten systemd-
 Dienst. Der Server lauscht ausschließlich auf `127.0.0.1:31337`. Öffentlicher
-HTTPS-Verkehr wird im nächsten Schritt über Caddy weitergeleitet.
+HTTPS-Verkehr wird über Caddy weitergeleitet.
 
 ## Zielstruktur
 
@@ -47,6 +47,22 @@ Der Installer:
 
 Eine vorhandene Konfiguration wird nur mit `--replace-env` ersetzt. Die alte
 Datei bleibt dabei als zeitgestempeltes Backup erhalten.
+
+
+## Caddy und HTTPS
+
+Nach erfolgreicher Backend-Installation kann der Reverse Proxy zunächst lokal
+und später mit der echten Domain eingerichtet werden:
+
+```bash
+sudo pacman -S --needed caddy curl
+sudo ./deploy/scripts/install-caddy.sh
+```
+
+Der lokale Test ist danach unter `http://127.0.0.1:8080` erreichbar. Für eine
+öffentliche Domain wird der Installer erneut mit `--site-address DOMAIN`
+ausgeführt. Vollständige Hinweise zu DNS, HTTPS, Sicherheitsheadern und Logs
+stehen in `CADDY_DEPLOYMENT.md`.
 
 ## Ersteinrichtung des Adminzugangs
 
