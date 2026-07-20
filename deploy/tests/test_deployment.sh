@@ -26,10 +26,41 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/index.html" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/server.env" ]]
 [[ -f "$STAGING_ROOT/etc/systemd/system/styles4dogs.service" ]]
+[[ -x "$STAGING_ROOT/opt/styles4dogs/bin/styles4dogs-install-caddy" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/CADDY_DEPLOYMENT.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 
+# Simulate the Arch Linux package Caddyfile, which already imports the whole
+# conf.d directory. The installer must reuse this import instead of adding a
+# second, overlapping *.caddy import.
+mkdir -p "$STAGING_ROOT/etc/caddy/conf.d"
+cat > "$STAGING_ROOT/etc/caddy/Caddyfile" <<'EOF_CADDYFILE'
+{
+    admin unix//run/caddy/admin.socket
+}
+
+import /etc/caddy/conf.d/*
+EOF_CADDYFILE
+
+"$PROJECT_ROOT/deploy/scripts/install-caddy.sh" \
+    --staging-root "$STAGING_ROOT" \
+    --site-address http://127.0.0.1:18080 \
+    --upstream 127.0.0.1:31337 \
+    --no-start
+
+[[ -f "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy" ]]
+[[ -f "$STAGING_ROOT/etc/styles4dogs/caddy.env" ]]
+[[ -f "$STAGING_ROOT/etc/systemd/system/caddy.service.d/styles4dogs.conf" ]]
+grep -Fq "import /etc/caddy/conf.d/*" \
+    "$STAGING_ROOT/etc/caddy/Caddyfile"
+! grep -Fq "import /etc/caddy/conf.d/*.caddy" \
+    "$STAGING_ROOT/etc/caddy/Caddyfile"
+[[ -f "$STAGING_ROOT/var/log/caddy/styles4dogs-access.log" ]]
+[[ "$(stat -c '%a' "$STAGING_ROOT/var/log/caddy/styles4dogs-access.log")" == "640" ]]
+grep -Fq "STYLES4DOGS_CADDY_SITE_ADDRESS=http://127.0.0.1:18080" \
+    "$STAGING_ROOT/etc/styles4dogs/caddy.env"
 
 if command -v systemd-analyze >/dev/null 2>&1; then
     systemd-analyze verify --recursive-errors=no --root="$STAGING_ROOT" \
@@ -68,4 +99,4 @@ STYLES4DOGS_BACKUP_DIR="$STAGING_ROOT/restore-safety" \
 RESTORED_VALUE=$(sqlite3 "$RESTORED_DATABASE" 'SELECT value FROM smoke_test;')
 [[ "$RESTORED_VALUE" == "backup works" ]]
 
-echo "Deployment staging, backup and restore tests: OK"
+echo "Deployment, Caddy staging, backup and restore tests: OK"
