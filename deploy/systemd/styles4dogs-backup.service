@@ -1,0 +1,42 @@
+[Unit]
+Description=Back up the Styles 4 Dogs SQLite database
+Documentation=file:/opt/styles4dogs/share/DEPLOYMENT.md
+ConditionPathExists=/var/lib/styles4dogs/styles4dogs.db
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/styles4dogs/bin/styles4dogs-backup --database /var/lib/styles4dogs/styles4dogs.db --output-dir /var/backups/styles4dogs
+Environment=STYLES4DOGS_BACKUP_LOCK=/run/styles4dogs-backup/backup.lock
+RuntimeDirectory=styles4dogs-backup
+RuntimeDirectoryMode=0700
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/styles4dogs /var/backups/styles4dogs /run/styles4dogs-backup
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX

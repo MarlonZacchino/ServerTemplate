@@ -1,0 +1,63 @@
+[Unit]
+Description=Styles 4 Dogs web server
+Documentation=file:/opt/styles4dogs/share/DEPLOYMENT.md
+After=local-fs.target network.target
+Wants=network.target
+ConditionPathExists=/opt/styles4dogs/bin/Server
+ConditionPathExists=/etc/styles4dogs/server.env
+ConditionPathIsDirectory=/var/www/styles4dogs
+
+[Service]
+Type=simple
+User=styles4dogs
+Group=styles4dogs
+WorkingDirectory=/opt/styles4dogs
+EnvironmentFile=/etc/styles4dogs/server.env
+ExecStart=/opt/styles4dogs/bin/Server
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=20s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+
+# Der Server benötigt weder Root-Rechte noch Linux-Capabilities.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Dateisystemzugriff: Programm, Website und Konfiguration sind schreibgeschützt.
+# Schreibbar bleiben ausschließlich SQLite-Daten und der separate Secret-Ordner,
+# damit der einmalige Browser-Setup admin.auth sicher erstellen kann.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadOnlyPaths=/opt/styles4dogs /var/www/styles4dogs /etc/styles4dogs/server.env
+ReadWritePaths=/var/lib/styles4dogs /etc/styles4dogs/secrets
+
+# Zusätzliche Härtung.
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+LimitNOFILE=1024
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

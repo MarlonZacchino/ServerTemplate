@@ -42,3 +42,14 @@ Details, Crash-Replay und Sanitizer-Build stehen in
 4. Valgrind für ausgewählte Requests verwenden,
 5. AFL++ über einen längeren Zeitraum laufen lassen,
 6. reproduzierbare AFL-Funde als feste Regressionstests ergänzen.
+
+## Deployment-Skripte
+
+Syntax, systemd-Units, Staging-Installation sowie SQLite-Backup und Restore:
+
+```bash
+./deploy/tests/test_deployment.sh
+```
+
+Der Test installiert ausschließlich in ein temporäres Verzeichnis und verändert
+weder `/etc` noch `/opt`, `/var/lib` oder laufende systemd-Dienste.
