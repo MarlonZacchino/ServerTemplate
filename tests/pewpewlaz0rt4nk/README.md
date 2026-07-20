@@ -16,12 +16,12 @@ Im Projektwurzelverzeichnis:
 Der Ablauf:
 
 1. konfiguriert `cmake-build-pewpew/`,
-2. verwendet isolierte `secrets/`- und `data/`-Ordner,
-3. startet den Server auf `127.0.0.1:31337`,
+2. setzt isolierte `secrets/`- und `data/`-Ordner über die Runtime-Konfiguration,
+3. startet den Server auf `127.0.0.1:31338`,
 4. führt die HTTP-Regressions- und Zustandsprüfungen aus,
 5. beendet den Testserver automatisch.
 
-Vor dem Start darf kein anderer Prozess Port `31337` belegen.
+Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 
 ## Abgedeckte Bereiche
 
@@ -43,7 +43,9 @@ Vor dem Start darf kein anderer Prozess Port `31337` belegen.
 - Schutz gegen doppelte TSV-Importe bei einem Neustart,
 - persistente Statusänderung in SQLite ohne Änderung anderer Buchungen,
 - Statusfilter und Suche nach Kundenname, Kontakt oder Hund,
-- Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten.
+- Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
+- Runtime-Overrides für Port und Pfade,
+- kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.

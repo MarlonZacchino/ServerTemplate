@@ -9,19 +9,17 @@ fi
 CRASH_FILE=$(realpath -- "$1")
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
+source "$SCRIPT_DIR/runtime_env.sh"
 BUILD_DIR="$PROJECT_ROOT/cmake-build-asan"
 RUNTIME_DIR="$BUILD_DIR/test-runtime"
+
+styles4dogs_export_afl_runtime "$PROJECT_ROOT" "$RUNTIME_DIR"
 
 cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_C_COMPILER=clang \
     -DCMAKE_C_FLAGS_DEBUG="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
-    -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
-    -DSTYLES4DOGS_SECRETS_DIR="$RUNTIME_DIR/secrets" \
-    -DSTYLES4DOGS_AUTH_FILE="$RUNTIME_DIR/secrets/admin.auth" \
-    -DSTYLES4DOGS_DATA_DIR="$RUNTIME_DIR/data" \
-    -DSTYLES4DOGS_DATABASE_FILE=:memory: \
-    -DSTYLES4DOGS_BOOKING_FILE="$RUNTIME_DIR/data/legacy-bookings.txt"
+    -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 
 cmake --build "$BUILD_DIR" --target Server
 

@@ -3,15 +3,19 @@ set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
+source "$SCRIPT_DIR/runtime_env.sh"
 BUILD_DIR=${AFL_BUILD_DIR:-"$PROJECT_ROOT/cmake-build-afl"}
 TARGET="$BUILD_DIR/Server"
 INPUT_DIR="$SCRIPT_DIR/in"
 OUTPUT_DIR="$SCRIPT_DIR/sync"
 LOG_DIR="$SCRIPT_DIR/logs"
 DICTIONARY="$SCRIPT_DIR/http.dict"
+RUNTIME_DIR="$BUILD_DIR/fuzz-runtime"
 CPU_THREADS=$(nproc)
 INSTANCES=${AFL_INSTANCES:-$((CPU_THREADS / 2))}
 SECONDARY_PIDS=()
+
+styles4dogs_export_afl_runtime "$PROJECT_ROOT" "$RUNTIME_DIR"
 
 if (( INSTANCES < 1 )); then
     INSTANCES=1

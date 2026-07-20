@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
+source "$SCRIPT_DIR/runtime_env.sh"
 MODE=${1:-plain}
 
 case "$MODE" in
@@ -23,16 +24,11 @@ case "$MODE" in
 esac
 
 RUNTIME_DIR="$BUILD_DIR/fuzz-runtime"
-mkdir -p "$RUNTIME_DIR/secrets" "$RUNTIME_DIR/data"
+styles4dogs_export_afl_runtime "$PROJECT_ROOT" "$RUNTIME_DIR"
 
 cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_C_COMPILER=afl-clang-fast \
-    -DSTYLES4DOGS_SECRETS_DIR="$RUNTIME_DIR/secrets" \
-    -DSTYLES4DOGS_AUTH_FILE="$RUNTIME_DIR/secrets/admin.auth" \
-    -DSTYLES4DOGS_DATA_DIR="$RUNTIME_DIR/data" \
-    -DSTYLES4DOGS_DATABASE_FILE=:memory: \
-    -DSTYLES4DOGS_BOOKING_FILE="$RUNTIME_DIR/data/legacy-bookings.txt"
+    -DCMAKE_C_COMPILER=afl-clang-fast
 
 cmake --build "$BUILD_DIR" --target Server
 

@@ -7,8 +7,9 @@ direkt an:
 Server stdin
 ```
 
-Es wird kein Netzwerk-Socket benötigt. Der AFL-Build verwendet eigene Secrets-
-und Datenpfade. Für jeden AFL-Prozess wird eine SQLite-Datenbank im Arbeitsspeicher verwendet.
+Es wird kein Netzwerk-Socket benötigt. `runtime_env.sh` setzt für Build-Prüfung,
+Fuzzing und Crash-Replay dieselben isolierten Laufzeitvariablen. Für jeden
+AFL-Prozess wird eine SQLite-Datenbank im Arbeitsspeicher verwendet.
 Dadurch schreibt ein langer Fuzzing-Lauf weder echte Buchungen noch wachsende
 Testdatenbanken auf die Festplatte. Das Startkorpus enthält außerdem einen
 strukturell gültigen Admin-Statusrequest und eine Admin-Filteranfrage mit ungültigen Zugangsdaten.

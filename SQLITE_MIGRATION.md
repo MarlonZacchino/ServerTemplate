@@ -1,7 +1,10 @@
 # Migration der Buchungen auf SQLite
 
-Der Server speichert neue Buchungsanfragen in `data/styles4dogs.db`.
-Eine vorhandene `data/bookings.txt` wird beim ersten erfolgreichen Start
+Standardmäßig speichert der Server neue Buchungsanfragen in
+`data/styles4dogs.db`. Über `STYLES4DOGS_DATA_DIR` und
+`STYLES4DOGS_DATABASE_FILE` kann der Pfad ohne neuen Build geändert werden.
+Eine vorhandene, über `STYLES4DOGS_LEGACY_BOOKING_FILE` konfigurierte
+`data/bookings.txt` wird beim ersten erfolgreichen Start
 transaktional importiert. Unterstützt werden das frühere fünfspaltige Format
 und das versionierte TSV-v2-Format.
 
