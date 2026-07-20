@@ -11,7 +11,7 @@ Es wird kein Netzwerk-Socket benötigt. Der AFL-Build verwendet eigene Secrets-
 und Datenpfade. Für jeden AFL-Prozess wird eine SQLite-Datenbank im Arbeitsspeicher verwendet.
 Dadurch schreibt ein langer Fuzzing-Lauf weder echte Buchungen noch wachsende
 Testdatenbanken auf die Festplatte. Das Startkorpus enthält außerdem einen
-strukturell gültigen Admin-Statusrequest mit ungültigen Zugangsdaten.
+strukturell gültigen Admin-Statusrequest und eine Admin-Filteranfrage mit ungültigen Zugangsdaten.
 
 ## Abhängigkeiten unter Arch Linux
 

@@ -36,9 +36,14 @@ Vor dem Start darf kein anderer Prozess Port `31337` belegen.
 - einmaliges Browser-Setup mit CSRF-Token,
 - Sperrung der Setup-Route nach der Einrichtung,
 - Basic Auth mit falschen und korrekten Zugangsdaten,
+- Statusänderungen nur mit Authentifizierung und gültigem CSRF-Token,
+- Validierung von Buchungs-ID und den Statuswerten `neu`, `kontaktiert`, `erledigt`,
 - SQLite-Speicherung in einer isolierten Testdatenbank,
 - einmaliger Import von TSV-v1 und TSV-v2,
-- Schutz gegen doppelte TSV-Importe bei einem Neustart.
+- Schutz gegen doppelte TSV-Importe bei einem Neustart,
+- persistente Statusänderung in SQLite ohne Änderung anderer Buchungen,
+- Statusfilter und Suche nach Kundenname, Kontakt oder Hund,
+- Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.

@@ -17,6 +17,8 @@ from pewpewlaz0rt4nk import Beam, Laz0rCannon
 HOST = sys.argv[1] if len(sys.argv) >= 2 else "127.0.0.1"
 PORT = int(sys.argv[2]) if len(sys.argv) >= 3 else 31337
 TIMEOUT = 5
+TEST_ADMIN_USERNAME = "test-admin"
+TEST_ADMIN_PASSWORD = "Styles4Dogs-Test-2026!"
 
 
 def request_text(method: str, path: str, headers: dict[str, str] | None = None, body: str = "") -> str:
@@ -212,8 +214,8 @@ def run_stateful_tests() -> int:
         if match is None:
             raise AssertionError("CSRF-Token wurde nicht in der Setup-Seite gefunden")
 
-        username = "test-admin"
-        password = "Styles4Dogs-Test-2026!"
+        username = TEST_ADMIN_USERNAME
+        password = TEST_ADMIN_PASSWORD
         body = urlencode({
             "csrf_token": match.group(1).decode("ascii"),
             "username": username,
@@ -254,10 +256,272 @@ def run_stateful_tests() -> int:
             raise AssertionError("Adminseite zeigt die erweiterten Buchungsfelder nicht an")
         if b"Legacy Test" not in valid_body or "Frühere Anfrage".encode("utf-8") not in valid_body:
             raise AssertionError("Adminseite liest das frühere fünfspaltige Format nicht mehr")
+        if b'action="/admin/bookings/status"' not in valid_body:
+            raise AssertionError("Adminseite enthält kein Formular zur Statusänderung")
+
+    def admin_status_workflow() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+
+        admin_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            auth_headers,
+        ).encode())
+        admin_headers, admin_body = assert_status(admin_response, "200 OK")
+
+        if admin_headers.get("cache-control") != "no-store":
+            raise AssertionError("Adminseite setzt Cache-Control: no-store nicht")
+
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', admin_body)
+        if csrf_match is None:
+            raise AssertionError("CSRF-Token wurde im Adminbereich nicht gefunden")
+        csrf_token = csrf_match.group(1).decode("ascii")
+
+        with sqlite3.connect(database_file) as connection:
+            target = connection.execute(
+                "SELECT id, status FROM bookings WHERE customer_name = ?",
+                ("Pew Pew Test",),
+            ).fetchone()
+            untouched = connection.execute(
+                "SELECT id, status FROM bookings WHERE customer_name = ?",
+                ("TSV V2 Test",),
+            ).fetchone()
+
+        if target is None or untouched is None:
+            raise AssertionError("Testbuchungen für die Statusänderung fehlen")
+
+        target_id, original_status = target
+        untouched_id, untouched_status = untouched
+
+        missing_auth_body = urlencode({
+            "csrf_token": csrf_token,
+            "booking_id": str(target_id),
+            "status": "kontaktiert",
+        })
+        missing_auth_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+            missing_auth_body,
+        ).encode())
+        assert_status(missing_auth_response, "401 Unauthorized")
+
+        invalid_csrf_body = urlencode({
+            "csrf_token": "0" * 64,
+            "booking_id": str(target_id),
+            "status": "kontaktiert",
+        })
+        invalid_csrf_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            invalid_csrf_body,
+        ).encode())
+        assert_status(invalid_csrf_response, "403 Forbidden")
+
+        invalid_status_body = urlencode({
+            "csrf_token": csrf_token,
+            "booking_id": str(target_id),
+            "status": "geloescht",
+        })
+        invalid_status_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            invalid_status_body,
+        ).encode())
+        assert_status(invalid_status_response, "400 Bad Request")
+
+        invalid_id_body = urlencode({
+            "csrf_token": csrf_token,
+            "booking_id": "12x",
+            "status": "kontaktiert",
+        })
+        invalid_id_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            invalid_id_body,
+        ).encode())
+        assert_status(invalid_id_response, "400 Bad Request")
+
+        unknown_id_body = urlencode({
+            "csrf_token": csrf_token,
+            "booking_id": "9223372036854775807",
+            "status": "kontaktiert",
+        })
+        unknown_id_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            unknown_id_body,
+        ).encode())
+        assert_status(unknown_id_response, "404 Not Found")
+
+        update_body = urlencode({
+            "csrf_token": csrf_token,
+            "booking_id": str(target_id),
+            "status": "kontaktiert",
+        })
+        update_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/status",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            update_body,
+        ).encode())
+        update_headers, _ = assert_status(update_response, "303 See Other")
+
+        if update_headers.get("location") != "/admin/bookings":
+            raise AssertionError("Statusänderung leitet nicht zum Adminbereich zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            updated_status = connection.execute(
+                "SELECT status FROM bookings WHERE id = ?",
+                (target_id,),
+            ).fetchone()[0]
+            current_untouched_status = connection.execute(
+                "SELECT status FROM bookings WHERE id = ?",
+                (untouched_id,),
+            ).fetchone()[0]
+
+        if updated_status != "kontaktiert":
+            raise AssertionError(f"Status wurde nicht gespeichert: {updated_status!r}")
+        if current_untouched_status != untouched_status:
+            raise AssertionError("Eine andere Buchung wurde unerwartet verändert")
+        if original_status == updated_status:
+            raise AssertionError("Der Zielstatus hat sich nicht verändert")
+
+        refreshed_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            auth_headers,
+        ).encode())
+        _, refreshed_body = assert_status(refreshed_response, "200 OK")
+
+        selected_pattern = (
+            rb'<option value="kontaktiert" selected>Kontaktiert</option>'
+        )
+        if re.search(selected_pattern, refreshed_body) is None:
+            raise AssertionError("Adminseite zeigt den gespeicherten Status nicht als ausgewählt")
+
+    def admin_filter_workflow() -> None:
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+
+        status_query = urlencode({"status": "kontaktiert"})
+        status_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{status_query}",
+            auth_headers,
+        ).encode())
+        _, status_body = assert_status(status_response, "200 OK")
+
+        if b"Pew Pew Test" not in status_body:
+            raise AssertionError("Statusfilter zeigt die kontaktierte Buchung nicht")
+        if b"TSV V2 Test" in status_body or b"Legacy Test" in status_body:
+            raise AssertionError("Statusfilter zeigt Buchungen mit anderem Status")
+        if b'<option value="kontaktiert" selected>' not in status_body:
+            raise AssertionError("Gewählter Statusfilter wird nicht beibehalten")
+        if b'class="admin-summary"' not in status_body:
+            raise AssertionError("Adminübersicht enthält keine Statuszähler")
+
+        dog_query = urlencode({"q": "Waldi"})
+        dog_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{dog_query}",
+            auth_headers,
+        ).encode())
+        _, dog_body = assert_status(dog_response, "200 OK")
+
+        if b"Legacy Test" not in dog_body or b"Pew Pew Test" in dog_body:
+            raise AssertionError("Hundesuche filtert die Buchungen nicht korrekt")
+
+        contact_query = urlencode({"q": "v2@example.invalid"})
+        contact_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{contact_query}",
+            auth_headers,
+        ).encode())
+        _, contact_body = assert_status(contact_response, "200 OK")
+
+        if b"TSV V2 Test" not in contact_body or b"Legacy Test" in contact_body:
+            raise AssertionError("Kontaktsuche filtert die Buchungen nicht korrekt")
+
+        literal_wildcard_query = urlencode({"q": "%"})
+        literal_wildcard_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{literal_wildcard_query}",
+            auth_headers,
+        ).encode())
+        _, literal_wildcard_body = assert_status(literal_wildcard_response, "200 OK")
+
+        if "Für diesen Filter wurden keine Buchungsanfragen gefunden.".encode("utf-8") not in literal_wildcard_body:
+            raise AssertionError("LIKE-Sonderzeichen werden nicht als wörtliche Suche behandelt")
+
+        invalid_status_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings?status=geloescht",
+            auth_headers,
+        ).encode())
+        assert_status(invalid_status_response, "400 Bad Request")
+
+        duplicate_status_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings?status=neu&status=erledigt",
+            auth_headers,
+        ).encode())
+        assert_status(duplicate_status_response, "400 Bad Request")
+
+        invalid_encoding_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings?q=%ZZ",
+            auth_headers,
+        ).encode())
+        assert_status(invalid_encoding_response, "400 Bad Request")
+
+        escaped_query = urlencode({"q": '<script>alert("x")</script>'})
+        escaped_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{escaped_query}",
+            auth_headers,
+        ).encode())
+        _, escaped_body = assert_status(escaped_response, "200 OK")
+
+        if b'<script>alert("x")</script>' in escaped_body:
+            raise AssertionError("Suchwert wird ungeescaped in die Adminseite geschrieben")
+        if b'&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;' not in escaped_body:
+            raise AssertionError("Suchwert wird nicht sicher im Formular wiedergegeben")
 
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
     check("Buchung wird isoliert und escaped gespeichert", booking_persistence)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
+    check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
+    check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
 
     return failures
 
@@ -290,6 +554,12 @@ def main() -> int:
     add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "401 Unauthorized")
     add_status(cannon, "Adminbereich mit ungültigem Basic Token", request_text(
         "GET", "/admin/bookings", {"Authorization": "Basic !!!"}
+    ), "401 Unauthorized")
+    add_status(cannon, "Statusänderung ohne Zugangsdaten", request_text(
+        "POST",
+        "/admin/bookings/status",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        "booking_id=1&status=kontaktiert&csrf_token=invalid",
     ), "401 Unauthorized")
     add_status(cannon, "Setup-Seite beim ersten Start", request_text("GET", "/setup/admin"), "200 OK")
 

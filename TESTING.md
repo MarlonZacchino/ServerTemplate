@@ -11,7 +11,9 @@ umgestellt. Produktionsdaten und Tests sind voneinander getrennt.
 
 Der Testlauf baut und startet einen eigenen Server, verwendet isolierte
 Admin-Dateien, SQLite-Datenbanken und TSV-Importdateien und beendet den Prozess anschließend automatisch.
-Details stehen in `tests/pewpewlaz0rt4nk/README.md`.
+Neben den öffentlichen Routen werden auch der authentifizierte Admin-Workflow,
+CSRF-Schutz, persistente Statusänderungen sowie Admin-Suche und Statusfilter geprüft. Details stehen in
+`tests/pewpewlaz0rt4nk/README.md`.
 
 ## AFL++
 

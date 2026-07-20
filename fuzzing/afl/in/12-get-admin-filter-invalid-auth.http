@@ -1,0 +1,4 @@
+GET /admin/bookings?status=neu&q=Bello HTTP/1.1
+Host: localhost
+Authorization: Basic !!!
+

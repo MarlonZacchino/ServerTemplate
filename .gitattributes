@@ -1,2 +1,2 @@
 # AFL seed files are raw HTTP byte streams and intentionally use CRLF.
-fuzzing/afl/in/*.http -text
+fuzzing/afl/in/*.http binary
