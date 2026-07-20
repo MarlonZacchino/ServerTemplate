@@ -30,7 +30,7 @@ typedef struct booking_request {
 bool parse_booking_request(const string *request, booking_request *booking);
 
 /*
- * Speichert eine validierte Buchungsanfrage im versionierten TSV-Format.
+ * Speichert eine validierte Buchungsanfrage in der SQLite-Datenbank.
  */
 int save_booking_request(const booking_request *booking);
 

@@ -4,44 +4,19 @@
 
 #include "booking.h"
 
+#include "booking_database.h"
 #include "form_urlencoded.h"
 
-#include <errno.h>
-#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
 
-#ifndef SERVER_DATA_DIR
-#define SERVER_DATA_DIR "data"
-#endif
-
-#ifndef SERVER_BOOKING_FILE
-#define SERVER_BOOKING_FILE "data/bookings.txt"
-#endif
-
-#define MAX_BOOKING_LINE 8192
-#define BOOKING_FIELD_COUNT_V1 5
-#define BOOKING_FIELD_COUNT_V2 10
-#define BOOKING_STATUS_NEW "neu"
 #define PRIVACY_CONSENT_VALUE "accepted"
 
-typedef struct booking_record_view {
-    const char *time;
-    const char *status;
-    const char *name;
-    const char *contact;
-    const char *dog_name;
-    const char *dog_size;
-    const char *service;
-    const char *preferred_date;
-    const char *message;
-    bool legacy;
-} booking_record_view;
+typedef struct admin_page_context {
+    string *page;
+    size_t booking_count;
+} admin_page_context;
 
 static void trim_ascii_whitespace(char *text)
 {
@@ -324,161 +299,9 @@ bool parse_booking_request(const string *request, booking_request *booking)
     return true;
 }
 
-static void append_storage_escaped(string *destination, const char *text)
-{
-    if (destination == NULL || text == NULL) {
-        return;
-    }
-
-    for (size_t index = 0; text[index] != '\0'; index++) {
-        switch (text[index]) {
-            case '\\':
-                str_cat_cstr(destination, "\\\\");
-                break;
-            case '\n':
-                str_cat_cstr(destination, "\\n");
-                break;
-            case '\r':
-                str_cat_cstr(destination, "\\r");
-                break;
-            case '\t':
-                str_cat_cstr(destination, "\\t");
-                break;
-            default:
-                str_cat(destination, text + index, 1);
-                break;
-        }
-    }
-}
-
-static int ensure_data_directory(void)
-{
-    struct stat directory_status;
-
-    if (mkdir(SERVER_DATA_DIR, 0750) == 0) {
-        return 0;
-    }
-
-    if (errno != EEXIST) {
-        return -1;
-    }
-
-    if (lstat(SERVER_DATA_DIR, &directory_status) != 0 ||
-        !S_ISDIR(directory_status.st_mode)) {
-        return -1;
-    }
-
-    return chmod(SERVER_DATA_DIR, 0750) == 0 ? 0 : -1;
-}
-
-static int write_all_to_file(
-        int file_descriptor,
-        const char *data,
-        size_t length
-)
-{
-    size_t written_total = 0;
-
-    while (written_total < length) {
-        ssize_t written = write(
-                file_descriptor,
-                data + written_total,
-                length - written_total);
-
-        if (written < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            return -1;
-        }
-
-        if (written == 0) {
-            return -1;
-        }
-
-        written_total += (size_t)written;
-    }
-
-    return 0;
-}
-
 int save_booking_request(const booking_request *booking)
 {
-    time_t now;
-    struct tm local_time;
-    char time_buffer[64];
-    string *line;
-    int file_descriptor;
-    int open_flags = O_WRONLY | O_CREAT | O_APPEND;
-    int result = -1;
-
-    if (booking == NULL || ensure_data_directory() != 0) {
-        return -1;
-    }
-
-    now = time(NULL);
-
-    if (localtime_r(&now, &local_time) != NULL) {
-        strftime(
-                time_buffer,
-                sizeof(time_buffer),
-                "%Y-%m-%d %H:%M:%S",
-                &local_time);
-    } else {
-        snprintf(time_buffer, sizeof(time_buffer), "%ld", (long)now);
-    }
-
-    line = _new_string();
-
-    str_cat_cstr(line, "v2\t");
-    append_storage_escaped(line, time_buffer);
-    str_cat_cstr(line, "\t" BOOKING_STATUS_NEW "\t");
-    append_storage_escaped(line, booking->name);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->contact);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->dog_name);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->dog_size);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->service);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->preferred_date);
-    str_cat_cstr(line, "\t");
-    append_storage_escaped(line, booking->message);
-    str_cat_cstr(line, "\n");
-
-#ifdef O_CLOEXEC
-    open_flags |= O_CLOEXEC;
-#endif
-
-#ifdef O_NOFOLLOW
-    open_flags |= O_NOFOLLOW;
-#endif
-
-    file_descriptor = open(SERVER_BOOKING_FILE, open_flags, 0600);
-
-    if (file_descriptor < 0) {
-        free_str(line);
-        return -1;
-    }
-
-    if (fchmod(file_descriptor, 0600) == 0 &&
-        write_all_to_file(
-                file_descriptor,
-                get_const_char_str(line),
-                get_length(line)) == 0 &&
-        fsync(file_descriptor) == 0) {
-        result = 0;
-    }
-
-    if (close(file_descriptor) != 0) {
-        result = -1;
-    }
-
-    free_str(line);
-    return result;
+    return booking_database_insert(booking);
 }
 
 static void append_html_char_escaped(string *destination, char character)
@@ -505,46 +328,18 @@ static void append_html_char_escaped(string *destination, char character)
     }
 }
 
-static void append_storage_field_as_html(
-        string *destination,
-        const char *source
-)
+static void append_html_text(string *destination, const char *source)
 {
     if (destination == NULL || source == NULL) {
         return;
     }
 
     for (size_t index = 0; source[index] != '\0'; index++) {
-        if (source[index] == '\\' && source[index + 1] != '\0') {
-            index++;
-
-            switch (source[index]) {
-                case 'n':
-                    append_html_char_escaped(destination, '\n');
-                    break;
-                case 'r':
-                    append_html_char_escaped(destination, '\r');
-                    break;
-                case 't':
-                    append_html_char_escaped(destination, '\t');
-                    break;
-                case '\\':
-                    append_html_char_escaped(destination, '\\');
-                    break;
-                default:
-                    append_html_char_escaped(destination, '\\');
-                    append_html_char_escaped(destination, source[index]);
-                    break;
-            }
-
-            continue;
-        }
-
         append_html_char_escaped(destination, source[index]);
     }
 }
 
-static void append_storage_field_or_fallback(
+static void append_html_text_or_fallback(
         string *destination,
         const char *source,
         const char *fallback
@@ -555,98 +350,7 @@ static void append_storage_field_or_fallback(
         return;
     }
 
-    append_storage_field_as_html(destination, source);
-}
-
-static size_t split_booking_line(
-        char *line,
-        char *fields[],
-        size_t max_fields
-)
-{
-    size_t count = 0;
-    char *start;
-
-    if (line == NULL || fields == NULL || max_fields == 0) {
-        return 0;
-    }
-
-    start = line;
-
-    for (char *position = line; *position != '\0'; position++) {
-        if (*position == '\r' || *position == '\n') {
-            *position = '\0';
-            break;
-        }
-
-        if (*position == '\t') {
-            if (count >= max_fields) {
-                return max_fields + 1;
-            }
-
-            *position = '\0';
-            fields[count] = start;
-            count++;
-            start = position + 1;
-        }
-    }
-
-    if (count >= max_fields) {
-        return max_fields + 1;
-    }
-
-    fields[count] = start;
-    return count + 1;
-}
-
-static bool parse_booking_record(
-        char *line,
-        booking_record_view *record
-)
-{
-    char *fields[BOOKING_FIELD_COUNT_V2];
-    size_t field_count;
-
-    if (line == NULL || record == NULL) {
-        return false;
-    }
-
-    memset(record, 0, sizeof(*record));
-    field_count = split_booking_line(
-            line,
-            fields,
-            BOOKING_FIELD_COUNT_V2);
-
-    if (field_count == BOOKING_FIELD_COUNT_V1) {
-        record->time = fields[0];
-        record->status = "Altbestand";
-        record->name = fields[1];
-        record->contact = fields[2];
-        record->dog_name = fields[3];
-        record->dog_size = "";
-        record->service = "";
-        record->preferred_date = "";
-        record->message = fields[4];
-        record->legacy = true;
-        return true;
-    }
-
-    if (field_count == BOOKING_FIELD_COUNT_V2 &&
-        strcmp(fields[0], "v2") == 0) {
-        record->time = fields[1];
-        record->status = fields[2];
-        record->name = fields[3];
-        record->contact = fields[4];
-        record->dog_name = fields[5];
-        record->dog_size = fields[6];
-        record->service = fields[7];
-        record->preferred_date = fields[8];
-        record->message = fields[9];
-        record->legacy = false;
-        return true;
-    }
-
-    return false;
+    append_html_text(destination, source);
 }
 
 static const char *dog_size_label(const char *value)
@@ -703,6 +407,31 @@ static const char *service_label(const char *value)
     return value;
 }
 
+static const char *status_label(const char *value)
+{
+    if (value == NULL || value[0] == '\0') {
+        return "Unbekannt";
+    }
+
+    if (strcmp(value, "neu") == 0) {
+        return "Neu";
+    }
+
+    if (strcmp(value, "kontaktiert") == 0) {
+        return "Kontaktiert";
+    }
+
+    if (strcmp(value, "erledigt") == 0) {
+        return "Erledigt";
+    }
+
+    if (strcmp(value, "altbestand") == 0) {
+        return "Altbestand";
+    }
+
+    return value;
+}
+
 static void append_booking_detail(
         string *page,
         const char *label,
@@ -713,47 +442,46 @@ static void append_booking_detail(
     str_cat_cstr(page, "                    <p><span>");
     str_cat_cstr(page, label);
     str_cat_cstr(page, "</span><strong>");
-    append_storage_field_or_fallback(page, value, fallback);
+    append_html_text_or_fallback(page, value, fallback);
     str_cat_cstr(page, "</strong></p>\n");
 }
 
 static void append_booking_card(
-        string *page,
-        const booking_record_view *record
+        const booking_record *record,
+        void *context_value
 )
 {
-    const char *size_label;
-    const char *selected_service_label;
+    admin_page_context *context = context_value;
+    string *page;
 
-    if (page == NULL || record == NULL) {
+    if (record == NULL || context == NULL || context->page == NULL) {
         return;
     }
 
-    size_label = dog_size_label(record->dog_size);
-    selected_service_label = service_label(record->service);
+    page = context->page;
 
     str_cat_cstr(page,
             "            <article class=\"booking-card\">\n"
             "                <div class=\"booking-card-head\">\n"
             "                    <p class=\"booking-time\">");
-    append_storage_field_as_html(page, record->time);
+    append_html_text(page, record->created_at);
     str_cat_cstr(page,
             "</p>\n"
             "                    <span class=\"booking-status\">");
-    append_storage_field_as_html(page, record->status);
+    append_html_text(page, status_label(record->status));
     str_cat_cstr(page,
             "</span>\n"
             "                </div>\n"
             "                <h2>");
-    append_storage_field_as_html(page, record->name);
+    append_html_text(page, record->name);
     str_cat_cstr(page,
             "</h2>\n"
             "                <div class=\"booking-details\">\n");
 
     append_booking_detail(page, "Kontakt", record->contact, "Nicht angegeben");
     append_booking_detail(page, "Hund", record->dog_name, "Nicht angegeben");
-    append_booking_detail(page, "Größe", size_label, "Nicht angegeben");
-    append_booking_detail(page, "Leistung", selected_service_label, "Nicht angegeben");
+    append_booking_detail(page, "Größe", dog_size_label(record->dog_size), "Nicht angegeben");
+    append_booking_detail(page, "Leistung", service_label(record->service), "Nicht angegeben");
     append_booking_detail(page, "Wunschdatum", record->preferred_date, "Flexibel");
 
     if (record->legacy) {
@@ -763,21 +491,25 @@ static void append_booking_card(
     str_cat_cstr(page,
             "                </div>\n"
             "                <div class=\"booking-message\">");
-    append_storage_field_or_fallback(
+    append_html_text_or_fallback(
             page,
             record->message,
             "Keine Nachricht angegeben.");
     str_cat_cstr(page,
             "</div>\n"
             "            </article>\n");
+
+    context->booking_count++;
 }
 
 string *build_booking_admin_page(void)
 {
-    FILE *file;
-    char line[MAX_BOOKING_LINE];
-    size_t booking_count = 0;
+    admin_page_context context;
     string *page = _new_string();
+    int database_result;
+
+    context.page = page;
+    context.booking_count = 0;
 
     str_cat_cstr(page,
             "<!doctype html>\n"
@@ -800,41 +532,19 @@ string *build_booking_admin_page(void)
             "        <section class=\"card admin-card\">\n"
             "            <p class=\"eyebrow\">Admin</p>\n"
             "            <h1>Buchungsanfragen</h1>\n"
-            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen.</p>\n");
+            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen.</p>\n"
+            "            <div class=\"booking-grid\">\n");
 
-    file = fopen(SERVER_BOOKING_FILE, "rb");
+    database_result = booking_database_for_each_newest(
+            append_booking_card,
+            &context);
 
-    if (file == NULL) {
+    if (database_result != 0) {
         str_cat_cstr(page,
-                "            <p>Es wurden noch keine Buchungsanfragen gespeichert.</p>\n"
-                "            <p><a href=\"/\">Zurück zur Startseite</a></p>\n"
-                "        </section>\n"
-                "    </main>\n"
-                "    <footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styles 4 Dogs Admin.</small></div></footer>\n"
-                "</body>\n"
-                "</html>\n");
-
-        return page;
-    }
-
-    str_cat_cstr(page, "            <div class=\"booking-grid\">\n");
-
-    while (fgets(line, sizeof(line), file) != NULL) {
-        booking_record_view record;
-
-        if (!parse_booking_record(line, &record)) {
-            continue;
-        }
-
-        append_booking_card(page, &record);
-        booking_count++;
-    }
-
-    fclose(file);
-
-    if (booking_count == 0) {
+                "                <p>Die Buchungsanfragen konnten momentan nicht geladen werden.</p>\n");
+    } else if (context.booking_count == 0) {
         str_cat_cstr(page,
-                "                <p>Noch keine lesbaren Buchungsanfragen vorhanden.</p>\n");
+                "                <p>Es wurden noch keine Buchungsanfragen gespeichert.</p>\n");
     }
 
     str_cat_cstr(page,
