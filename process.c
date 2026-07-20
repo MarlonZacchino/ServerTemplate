@@ -5,10 +5,12 @@
 #include "auth.h"
 #include "process.h"
 #include "booking.h"
+#include "form_urlencoded.h"
 
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <sodium.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -17,6 +19,10 @@
 
 #define MAX_METHOD_LENGTH 15
 #define MAX_PATH_LENGTH 512
+#define SETUP_USERNAME_SIZE 128
+#define SETUP_PASSWORD_SIZE 513
+#define SETUP_CSRF_TOKEN_BYTES 32
+#define SETUP_CSRF_TOKEN_HEX_SIZE (SETUP_CSRF_TOKEN_BYTES * 2 + 1)
 
 #ifndef SERVER_DOCUMENT_ROOT
 #define SERVER_DOCUMENT_ROOT "public"
@@ -155,59 +161,90 @@ static bool parse_request_line(
         size_t path_size
 )
 {
+    const char *data;
     size_t length;
-    size_t pos = 0;
-    size_t method_len = 0;
-    size_t path_len = 0;
+    size_t position = 0;
+    size_t method_length = 0;
+    size_t path_length = 0;
+    size_t version_start;
+    size_t version_length;
 
     if (request == NULL || method == NULL || path == NULL) {
         return false;
     }
 
-    const char* data = get_const_char_str(request);
+    data = get_const_char_str(request);
     length = get_length(request);
 
     if (data == NULL || length == 0 || method_size == 0 || path_size == 0) {
         return false;
     }
 
-    while (pos < length && data[pos] != ' ' && data[pos] != '\r' && data[pos] != '\n') {
-        if (method_len + 1 >= method_size) {
+    while (position < length && data[position] != ' ') {
+        if (data[position] == '\r' || data[position] == '\n' ||
+            method_length + 1 >= method_size) {
             return false;
         }
 
-        method[method_len] = data[pos];
-        method_len++;
-        pos++;
+        method[method_length++] = data[position++];
     }
 
-    if (method_len == 0 || pos >= length || data[pos] != ' ') {
+    if (method_length == 0 || position >= length || data[position] != ' ') {
         return false;
     }
 
-    method[method_len] = '\0';
+    method[method_length] = '\0';
 
-    while (pos < length && data[pos] == ' ') {
-        pos++;
+    while (position < length && data[position] == ' ') {
+        position++;
     }
 
-    while (pos < length && data[pos] != ' ' && data[pos] != '\r' && data[pos] != '\n') {
-        if (path_len + 1 >= path_size) {
+    while (position < length && data[position] != ' ') {
+        if (data[position] == '\r' || data[position] == '\n' ||
+            path_length + 1 >= path_size) {
             return false;
         }
 
-        path[path_len] = data[pos];
-        path_len++;
-        pos++;
+        path[path_length++] = data[position++];
     }
 
-    if (path_len == 0) {
+    if (path_length == 0 || position >= length || data[position] != ' ') {
         return false;
     }
 
-    path[path_len] = '\0';
+    path[path_length] = '\0';
 
-    return true;
+    while (position < length && data[position] == ' ') {
+        position++;
+    }
+
+    version_start = position;
+
+    while (position < length && data[position] != '\r' && data[position] != '\n') {
+        if (data[position] == ' ' || data[position] == '\t') {
+            return false;
+        }
+        position++;
+    }
+
+    version_length = position - version_start;
+
+    if (!((version_length == strlen("HTTP/1.0") &&
+           memcmp(data + version_start, "HTTP/1.0", version_length) == 0) ||
+          (version_length == strlen("HTTP/1.1") &&
+           memcmp(data + version_start, "HTTP/1.1", version_length) == 0))) {
+        return false;
+    }
+
+    if (position >= length) {
+        return false;
+    }
+
+    if (data[position] == '\r') {
+        return position + 1 < length && data[position + 1] == '\n';
+    }
+
+    return data[position] == '\n';
 }
 
 /*
@@ -269,6 +306,40 @@ static bool starts_with_path(const char *path, const char *prefix)
     }
 
     return path[prefix_length] == '\0' || path[prefix_length] == '/';
+}
+
+static bool contains_parent_path_segment(const char *path)
+{
+    size_t position = 0;
+
+    if (path == NULL) {
+        return false;
+    }
+
+    while (path[position] != '\0') {
+        size_t segment_start;
+        size_t segment_length;
+
+        while (path[position] == '/') {
+            position++;
+        }
+
+        segment_start = position;
+
+        while (path[position] != '\0' && path[position] != '/') {
+            position++;
+        }
+
+        segment_length = position - segment_start;
+
+        if (segment_length == 2 &&
+            path[segment_start] == '.' &&
+            path[segment_start + 1] == '.') {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /*
@@ -444,6 +515,10 @@ static string *serve_static_file(const char *request_path, bool send_body)
         return handle_bad_request(send_body);
     }
 
+    if (contains_parent_path_segment(mapped_path)) {
+        return handle_forbidden(send_body);
+    }
+
     if (snprintf(candidate_path, sizeof(candidate_path), "%s%s", document_root_real, mapped_path)
         >= (int)sizeof(candidate_path)) {
         return handle_bad_request(send_body);
@@ -483,6 +558,388 @@ static string *serve_static_file(const char *request_path, bool send_body)
     );
 
     free(file_content);
+
+    return response;
+}
+
+static const char *setup_security_headers(void)
+{
+    return
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Security-Policy: default-src 'self'; "
+            "style-src 'self'; form-action 'self'; base-uri 'none'; "
+            "frame-ancestors 'none'\r\n"
+            "Referrer-Policy: no-referrer\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n";
+}
+
+static bool get_setup_csrf_token(
+        char *out_token,
+        size_t out_token_size
+)
+{
+    static bool initialized = false;
+    static bool token_available = false;
+    static char token[SETUP_CSRF_TOKEN_HEX_SIZE];
+
+    if (out_token == NULL || out_token_size < sizeof(token)) {
+        return false;
+    }
+
+    if (!initialized) {
+        unsigned char random_token[SETUP_CSRF_TOKEN_BYTES];
+
+        initialized = true;
+
+        if (sodium_init() < 0) {
+            sodium_memzero(random_token, sizeof(random_token));
+            return false;
+        }
+
+        randombytes_buf(random_token, sizeof(random_token));
+
+        if (sodium_bin2hex(
+                token,
+                sizeof(token),
+                random_token,
+                sizeof(random_token)) == NULL) {
+            sodium_memzero(random_token, sizeof(random_token));
+            sodium_memzero(token, sizeof(token));
+            return false;
+        }
+
+        sodium_memzero(random_token, sizeof(random_token));
+        token_available = true;
+    }
+
+    if (!token_available) {
+        return false;
+    }
+
+    memcpy(out_token, token, sizeof(token));
+    return true;
+}
+
+static bool setup_csrf_token_matches(const char *received_token)
+{
+    char expected_token[SETUP_CSRF_TOKEN_HEX_SIZE];
+    size_t received_length;
+    bool matches;
+
+    if (received_token == NULL) {
+        return false;
+    }
+
+    received_length = strnlen(
+            received_token,
+            SETUP_CSRF_TOKEN_HEX_SIZE + 1);
+
+    if (received_length != SETUP_CSRF_TOKEN_HEX_SIZE - 1) {
+        return false;
+    }
+
+    if (!get_setup_csrf_token(expected_token, sizeof(expected_token))) {
+        return false;
+    }
+
+    matches = sodium_memcmp(
+            received_token,
+            expected_token,
+            SETUP_CSRF_TOKEN_HEX_SIZE - 1) == 0;
+
+    sodium_memzero(expected_token, sizeof(expected_token));
+    return matches;
+}
+
+static bool passwords_match(
+        const char *password,
+        const char *password_repeat
+)
+{
+    size_t password_length;
+    size_t repeated_length;
+
+    if (password == NULL || password_repeat == NULL) {
+        return false;
+    }
+
+    password_length = strnlen(password, SETUP_PASSWORD_SIZE);
+    repeated_length = strnlen(password_repeat, SETUP_PASSWORD_SIZE);
+
+    if (password_length != repeated_length) {
+        return false;
+    }
+
+    return sodium_memcmp(
+            password,
+            password_repeat,
+            password_length) == 0;
+}
+
+static void clear_request_body(string *request)
+{
+    char *data;
+    size_t length;
+
+    if (request == NULL) {
+        return;
+    }
+
+    data = get_char_str(request);
+    length = get_length(request);
+
+    if (data == NULL) {
+        return;
+    }
+
+    for (size_t index = 0; index + 3 < length; index++) {
+        if (data[index] == '\r' &&
+            data[index + 1] == '\n' &&
+            data[index + 2] == '\r' &&
+            data[index + 3] == '\n') {
+            sodium_memzero(
+                    data + index + 4,
+                    length - (index + 4));
+            return;
+        }
+    }
+
+    for (size_t index = 0; index + 1 < length; index++) {
+        if (data[index] == '\n' && data[index + 1] == '\n') {
+            sodium_memzero(
+                    data + index + 2,
+                    length - (index + 2));
+            return;
+        }
+    }
+}
+
+static string *handle_admin_setup_page(bool send_body)
+{
+    char csrf_token[SETUP_CSRF_TOKEN_HEX_SIZE];
+    string *body;
+    string *response;
+
+    if (admin_auth_exists()) {
+        return handle_not_found(send_body);
+    }
+
+    if (!get_setup_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+
+    body = _new_string();
+
+    str_cat_cstr(body,
+            "<!doctype html>\n"
+            "<html lang=\"de\">\n"
+            "<head>\n"
+            "    <meta charset=\"utf-8\">\n"
+            "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "    <meta name=\"robots\" content=\"noindex,nofollow\">\n"
+            "    <title>Admin einrichten | Styles 4 Dogs</title>\n"
+            "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
+            "</head>\n"
+            "<body>\n"
+            "    <main class=\"page\">\n"
+            "        <section class=\"card form-card\">\n"
+            "            <p class=\"eyebrow\">Ersteinrichtung</p>\n"
+            "            <h1>Admin-Zugang erstellen</h1>\n"
+            "            <p>Diese Seite funktioniert nur, solange noch kein Admin-Zugang existiert.</p>\n"
+            "            <form class=\"form\" method=\"post\" action=\"/setup/admin\" autocomplete=\"off\">\n"
+            "                <input type=\"hidden\" name=\"csrf_token\" value=\"");
+
+    str_cat_cstr(body, csrf_token);
+
+    str_cat_cstr(body,
+            "\">\n"
+            "                <label for=\"username\">Benutzername</label>\n"
+            "                <input id=\"username\" name=\"username\" type=\"text\" "
+            "maxlength=\"127\" pattern=\"[A-Za-z0-9._@-]+\" "
+            "autocomplete=\"username\" required>\n"
+            "                <label for=\"password\">Passwort</label>\n"
+            "                <input id=\"password\" name=\"password\" type=\"password\" "
+            "minlength=\"12\" maxlength=\"512\" "
+            "autocomplete=\"new-password\" required>\n"
+            "                <label for=\"password_repeat\">Passwort wiederholen</label>\n"
+            "                <input id=\"password_repeat\" name=\"password_repeat\" "
+            "type=\"password\" minlength=\"12\" maxlength=\"512\" "
+            "autocomplete=\"new-password\" required>\n"
+            "                <button class=\"button\" type=\"submit\">Admin-Zugang erstellen</button>\n"
+            "            </form>\n"
+            "        </section>\n"
+            "    </main>\n"
+            "</body>\n"
+            "</html>\n");
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            setup_security_headers(),
+            get_const_char_str(body),
+            get_length(body),
+            send_body);
+
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    free_str(body);
+
+    return response;
+}
+
+static string *handle_admin_setup_error(
+        const char *message,
+        bool send_body
+)
+{
+    string *body = _new_string();
+    string *response;
+
+    str_cat_cstr(body,
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>Einrichtung fehlgeschlagen | Styles 4 Dogs</title>"
+            "<link rel=\"stylesheet\" href=\"/style.css\"></head>"
+            "<body><main class=\"page\"><section class=\"card form-card\">"
+            "<p class=\"eyebrow\">Ersteinrichtung</p>"
+            "<h1>Admin-Zugang konnte nicht erstellt werden</h1><p>");
+    str_cat_cstr(body, message);
+    str_cat_cstr(body,
+            "</p><p><a class=\"button button-secondary\" href=\"/setup/admin\">"
+            "Zurück zur Einrichtung</a></p></section></main></body></html>");
+
+    response = build_response_bytes(
+            "400 Bad Request",
+            "text/html; charset=utf-8",
+            setup_security_headers(),
+            get_const_char_str(body),
+            get_length(body),
+            send_body);
+
+    free_str(body);
+    return response;
+}
+
+static string *handle_admin_setup_created(bool send_body)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>Admin erstellt | Styles 4 Dogs</title>"
+            "<link rel=\"stylesheet\" href=\"/style.css\"></head>"
+            "<body><main class=\"page\"><section class=\"card form-card\">"
+            "<p class=\"eyebrow\">Einrichtung abgeschlossen</p>"
+            "<h1>Admin-Zugang wurde erstellt</h1>"
+            "<p>Die Einrichtungsseite ist ab jetzt automatisch deaktiviert.</p>"
+            "<p><a class=\"button\" href=\"/admin/bookings\">Zum Adminbereich</a></p>"
+            "</section></main></body></html>";
+
+    return build_response_text(
+            "201 Created",
+            "text/html; charset=utf-8",
+            setup_security_headers(),
+            body,
+            send_body);
+}
+
+static string *handle_admin_setup_post(string *request)
+{
+    char csrf_token[SETUP_CSRF_TOKEN_HEX_SIZE] = {0};
+    char username[SETUP_USERNAME_SIZE] = {0};
+    char password[SETUP_PASSWORD_SIZE] = {0};
+    char password_repeat[SETUP_PASSWORD_SIZE] = {0};
+    form_value_result csrf_result;
+    form_value_result username_result;
+    form_value_result password_result;
+    form_value_result repeat_result;
+    int create_result;
+    string *response;
+
+    if (admin_auth_exists()) {
+        clear_request_body(request);
+        return handle_not_found(true);
+    }
+
+    csrf_result = form_urlencoded_get(
+            request,
+            "csrf_token",
+            csrf_token,
+            sizeof(csrf_token));
+
+    username_result = form_urlencoded_get(
+            request,
+            "username",
+            username,
+            sizeof(username));
+
+    password_result = form_urlencoded_get(
+            request,
+            "password",
+            password,
+            sizeof(password));
+
+    repeat_result = form_urlencoded_get(
+            request,
+            "password_repeat",
+            password_repeat,
+            sizeof(password_repeat));
+
+    if (csrf_result != FORM_VALUE_OK ||
+        username_result != FORM_VALUE_OK ||
+        password_result != FORM_VALUE_OK ||
+        repeat_result != FORM_VALUE_OK) {
+        response = handle_admin_setup_error(
+                "Die Formulardaten sind unvollständig oder ungültig.",
+                true);
+        goto cleanup;
+    }
+
+    if (!setup_csrf_token_matches(csrf_token)) {
+        response = handle_admin_setup_error(
+                "Die Sicherheitsprüfung ist fehlgeschlagen. Bitte lade die Seite neu.",
+                true);
+        goto cleanup;
+    }
+
+    if (!passwords_match(password, password_repeat)) {
+        response = handle_admin_setup_error(
+                "Die beiden Passwörter stimmen nicht überein.",
+                true);
+        goto cleanup;
+    }
+
+    create_result = create_admin_auth(username, password);
+
+    if (create_result == 0) {
+        response = handle_admin_setup_created(true);
+        goto cleanup;
+    }
+
+    if (create_result == EEXIST) {
+        response = handle_not_found(true);
+        goto cleanup;
+    }
+
+    if (create_result == EINVAL) {
+        response = handle_admin_setup_error(
+                "Der Benutzername oder das Passwort erfüllt die Vorgaben nicht.",
+                true);
+        goto cleanup;
+    }
+
+    response = handle_internal_error(true);
+
+cleanup:
+    clear_request_body(request);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    sodium_memzero(username, sizeof(username));
+    sodium_memzero(password, sizeof(password));
+    sodium_memzero(password_repeat, sizeof(password_repeat));
 
     return response;
 }
@@ -599,6 +1056,10 @@ string *process(string *request)
             return handle_booking(request);
         }
 
+        if (strcmp(path, "/setup/admin") == 0) {
+            return handle_admin_setup_post(request);
+        }
+
         return handle_not_found(true);
     }
 
@@ -606,6 +1067,10 @@ string *process(string *request)
      * Ab hier bleiben nur noch GET und HEAD übrig.
      * Die Admin-Seite schützen wir mit Basic Auth.
      */
+    if (strcmp(path, "/setup/admin") == 0) {
+        return handle_admin_setup_page(send_body);
+    }
+
     if (strcmp(path, "/admin/bookings") == 0) {
         if (!request_has_valid_admin_auth(request)) {
             return handle_unauthorized(send_body);
