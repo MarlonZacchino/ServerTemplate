@@ -7,6 +7,8 @@
 #include "http_lib.h"
 
 #define BOOKING_NAME_SIZE 256
+#define BOOKING_FIRST_NAME_SIZE 128
+#define BOOKING_LAST_NAME_SIZE 128
 #define BOOKING_CONTACT_SIZE 256
 #define BOOKING_CONTACT_CHANNEL_SIZE 16
 #define BOOKING_EMAIL_SIZE 256
@@ -25,6 +27,8 @@
 
 typedef struct booking_request {
     char name[BOOKING_NAME_SIZE];
+    char first_name[BOOKING_FIRST_NAME_SIZE];
+    char last_name[BOOKING_LAST_NAME_SIZE];
     char contact[BOOKING_CONTACT_SIZE];
     char contact_channel[BOOKING_CONTACT_CHANNEL_SIZE];
     char email[BOOKING_EMAIL_SIZE];

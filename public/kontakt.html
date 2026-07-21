@@ -32,14 +32,17 @@
         <div class="container contact-grid">
             <div class="form-card">
                 <form method="post" action="/booking" class="form" data-booking-form>
-                    <label for="name">Dein Name <span aria-hidden="true">*</span></label>
-                    <input id="name" type="text" name="name" autocomplete="name" maxlength="120" required>
-
                     <fieldset class="contact-choice" data-contact-choice>
                         <legend>Wie dürfen wir dich kontaktieren? <span aria-hidden="true">*</span></legend>
                         <div class="contact-channel-options">
-                            <label><input type="radio" name="contact_channel" value="email" checked> E-Mail</label>
-                            <label><input type="radio" name="contact_channel" value="phone"> Telefon oder Mobilfunk</label>
+                            <label class="contact-channel-option">
+                                <input type="radio" name="contact_channel" value="email" checked>
+                                <span class="contact-channel-option-text contact-channel-option-text-nowrap">E-Mail</span>
+                            </label>
+                            <label class="contact-channel-option">
+                                <input type="radio" name="contact_channel" value="phone">
+                                <span class="contact-channel-option-text">Telefon oder Mobilfunk</span>
+                            </label>
                         </div>
 
                         <div class="contact-channel-panel" data-contact-email>
@@ -65,6 +68,17 @@
                             <p class="form-help" data-whatsapp-help>WhatsApp ist nur bei einer Mobilfunknummer möglich.</p>
                         </div>
                     </fieldset>
+
+                    <div class="form-grid-two customer-name-fields">
+                        <div class="form-field">
+                            <label for="first-name">Vorname <span aria-hidden="true">*</span></label>
+                            <input id="first-name" type="text" name="first_name" autocomplete="given-name" maxlength="120" required>
+                        </div>
+                        <div class="form-field">
+                            <label for="last-name">Nachname <span aria-hidden="true">*</span></label>
+                            <input id="last-name" type="text" name="last_name" autocomplete="family-name" maxlength="120" required>
+                        </div>
+                    </div>
 
                     <label for="dog-name">Name des Hundes</label>
                     <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">

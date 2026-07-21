@@ -150,6 +150,65 @@ static bool get_optional_message(
 }
 
 
+static bool parse_customer_name(const string *request, booking_request *booking)
+{
+    form_value_result first_name_result;
+    form_value_result last_name_result;
+    int written;
+
+    if (request == NULL || booking == NULL) {
+        return false;
+    }
+
+    first_name_result = form_urlencoded_get(
+            request,
+            "first_name",
+            booking->first_name,
+            sizeof(booking->first_name));
+    last_name_result = form_urlencoded_get(
+            request,
+            "last_name",
+            booking->last_name,
+            sizeof(booking->last_name));
+
+    /*
+     * Übergangsweise bleibt das frühere Feld "name" gültig. Dadurch
+     * funktionieren bereits geladene Formulare und ältere API-Clients nach
+     * dem Deployment weiter. Neue Formulare senden Vor- und Nachname separat.
+     */
+    if (first_name_result == FORM_VALUE_NOT_FOUND &&
+        last_name_result == FORM_VALUE_NOT_FOUND) {
+        return get_required_field(
+                request,
+                "name",
+                booking->name,
+                sizeof(booking->name));
+    }
+
+    if (first_name_result != FORM_VALUE_OK ||
+        last_name_result != FORM_VALUE_OK) {
+        return false;
+    }
+
+    trim_ascii_whitespace(booking->first_name);
+    trim_ascii_whitespace(booking->last_name);
+
+    if (!is_nonempty_single_line(booking->first_name) ||
+        !is_nonempty_single_line(booking->last_name)) {
+        return false;
+    }
+
+    written = snprintf(
+            booking->name,
+            sizeof(booking->name),
+            "%s %s",
+            booking->first_name,
+            booking->last_name);
+
+    return written >= 0 && (size_t)written < sizeof(booking->name);
+}
+
+
 static bool parse_contact_fields(const string *request, booking_request *booking)
 {
     if (!get_required_field(
@@ -236,11 +295,7 @@ bool parse_booking_request(const string *request, booking_request *booking)
     memset(booking, 0, sizeof(*booking));
     memset(privacy_consent, 0, sizeof(privacy_consent));
 
-    if (!get_required_field(
-            request,
-            "name",
-            booking->name,
-            sizeof(booking->name)) ||
+    if (!parse_customer_name(request, booking) ||
         !parse_contact_fields(request, booking) ||
         !get_optional_single_line_field(
             request,

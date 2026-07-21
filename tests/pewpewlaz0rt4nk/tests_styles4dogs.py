@@ -217,6 +217,26 @@ def run_stateful_tests() -> int:
             if migration_marker is None or not migration_marker[0].startswith("completed:2"):
                 raise AssertionError("Der einmalige TSV-Import wurde nicht als abgeschlossen markiert")
 
+    def contact_form_layout() -> None:
+        response = raw_request(request_text("GET", "/kontakt").encode())
+        _, body = assert_status(response, "200 OK")
+        page = body.decode("utf-8")
+
+        contact_position = page.find("Wie dürfen wir dich kontaktieren?")
+        first_name_position = page.find('name="first_name"')
+        last_name_position = page.find('name="last_name"')
+        dog_name_position = page.find('name="dog_name"')
+
+        if min(contact_position, first_name_position, last_name_position, dog_name_position) < 0:
+            raise AssertionError("Kontaktformular enthält nicht alle erwarteten Felder")
+        if not contact_position < first_name_position < last_name_position < dog_name_position:
+            raise AssertionError("Vor- und Nachname stehen nicht unter der Kontaktwahl")
+        if ('class="contact-channel-option"' not in page or
+            'contact-channel-option-text-nowrap">E-Mail</span>' not in page):
+            raise AssertionError("Kontaktarten verwenden nicht die bruchsichere Darstellung")
+        if 'name="name"' in page:
+            raise AssertionError("Das alte gemeinsame Namensfeld wird noch ausgeliefert")
+
     def public_calendar_and_pending_booking() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
         if not database_file_value:
@@ -281,7 +301,8 @@ def run_stateful_tests() -> int:
 
         selected_slot = free_slots[0]
         body = urlencode({
-            "name": "Pew Pew Test",
+            "first_name": "Pew Pew",
+            "last_name": "Test",
             **email_contact("test@example.invalid"),
             "dog_name": "Bello",
             "dog_size": "medium",
@@ -1383,6 +1404,7 @@ def run_stateful_tests() -> int:
 
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
     check("TSV-Altbestand und Kalenderschema werden korrekt geladen", booking_persistence)
+    check("Kontaktformular trennt Vor- und Nachname", contact_form_layout)
     check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
