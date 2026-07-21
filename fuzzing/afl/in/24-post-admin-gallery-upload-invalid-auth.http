@@ -1,0 +1,11 @@
+POST /admin/gallery/upload HTTP/1.1
+Host: localhost
+Content-Type: multipart/form-data; boundary=test
+Content-Length: 69
+
+--test
+Content-Disposition: form-data; name="image"
+
+x
+--test--
+

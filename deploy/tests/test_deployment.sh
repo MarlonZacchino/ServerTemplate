@@ -25,6 +25,9 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -x "$STAGING_ROOT/opt/styles4dogs/bin/Server" ]]
 [[ -x "$STAGING_ROOT/opt/styles4dogs/bin/notification_worker" ]]
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/index.html" ]]
+[[ -f "$STAGING_ROOT/var/www/styles4dogs/galerie.html" ]]
+[[ -f "$STAGING_ROOT/var/www/styles4dogs/gallery.js" ]]
+[[ -f "$STAGING_ROOT/var/www/styles4dogs/logo.jpg" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/server.env" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/notification.env" ]]
 [[ "$(stat -c '%a' "$STAGING_ROOT/etc/styles4dogs/notification.env")" == "640" ]]
@@ -36,17 +39,18 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/RATE_LIMITING.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE5.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE6.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/GALLERY_PHASE8.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Eq '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=[A-Za-z0-9_-]{32,128}$' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
-grep -Fq 'STYLES4DOGS_SALON_NAME=Styles 4 Dogs' \
+grep -Fq 'STYLES4DOGS_SALON_NAME=Styling 4 Dogs' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Fq 'STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
-grep -Fq 'STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs' \
+grep -Fq 'STYLES4DOGS_SMTP_FROM_NAME=Styling 4 Dogs' \
     "$STAGING_ROOT/etc/styles4dogs/notification.env"
 grep -Fq 'STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING=0' \
     "$STAGING_ROOT/etc/styles4dogs/notification.env"
@@ -88,6 +92,10 @@ CADDY_TOKEN=$(awk -F= '$1 == "STYLES4DOGS_TRUSTED_PROXY_TOKEN" {print $2}' \
     "$STAGING_ROOT/etc/styles4dogs/caddy.env")
 [[ "$SERVER_TOKEN" == "$CADDY_TOKEN" ]]
 grep -Fq 'header_up X-Styles4Dogs-Proxy-Token {$STYLES4DOGS_TRUSTED_PROXY_TOKEN}' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq '@gallery_upload_body path /admin/gallery/upload' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq 'max_size 9MiB' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 
 if command -v systemd-analyze >/dev/null 2>&1; then

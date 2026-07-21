@@ -1,4 +1,4 @@
-# Caddy-Reverse-Proxy für Styles 4 Dogs
+# Caddy-Reverse-Proxy für Styling 4 Dogs
 
 Der C-Server bleibt ausschließlich unter `127.0.0.1:31337` erreichbar. Caddy
 übernimmt die öffentliche Verbindung, automatische TLS-Zertifikate,
@@ -19,7 +19,8 @@ Zusammen schützen:
 - der ausschließlich lokale Upstream,
 - das interne per-IP- und globale Rate-Limit,
 - ein Body-Limit von 16 KiB für `/booking`,
-- ein Body-Limit von 8 KiB für Admin-Statusänderungen,
+- ein Body-Limit von 64 KiB für normale Adminaktionen,
+- ein separates Limit von 9 MiB für Galerie-Uploads,
 - die öffentlich vollständig gesperrte Setup-Route.
 
 ## Installation auf Arch Linux
@@ -106,7 +107,8 @@ Bei lokaler Standardkonfiguration prüft das Skript zusätzlich:
 - `/setup/admin` liefert `404`,
 - `/admin/bookings` liefert `401`,
 - Sicherheitsheader sind vorhanden,
-- ein übergroßer Buchungsbody liefert `413`.
+- ein übergroßer Buchungsbody liefert `413`,
+- Galerie-Uploads sind auf 9 MiB inklusive Multipart-Overhead begrenzt.
 
 ## Admin-Ersteinrichtung
 
@@ -130,7 +132,7 @@ http://127.0.0.1:31337/setup/admin
 sudo ./deploy/scripts/uninstall-caddy.sh
 ```
 
-Das entfernt nur die Styles-4-Dogs-Site, ihre Environment-Datei und den
+Das entfernt nur die Styling-4-Dogs-Site, ihre Environment-Datei und den
 systemd-Drop-in. Andere Caddy-Sites und das Paket bleiben erhalten.
 
 Caddy zusätzlich deaktivieren:

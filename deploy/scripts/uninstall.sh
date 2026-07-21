@@ -66,9 +66,9 @@ if [[ "$PURGE_DATA" -eq 1 ]]; then
     rm -rf -- /etc/styles4dogs /var/lib/styles4dogs /var/backups/styles4dogs
     userdel styles4dogs 2>/dev/null || true
     groupdel styles4dogs 2>/dev/null || true
-    echo "Styles 4 Dogs and all runtime data were removed."
+    echo "Styling 4 Dogs and all runtime data were removed."
 else
-    echo "Styles 4 Dogs was uninstalled. Configuration and customer data were preserved:"
+    echo "Styling 4 Dogs was uninstalled. Configuration and customer data were preserved:"
     echo "  /etc/styles4dogs"
     echo "  /var/lib/styles4dogs"
     echo "  /var/backups/styles4dogs"

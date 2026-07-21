@@ -29,7 +29,7 @@ Usage: sudo ./deploy/scripts/install-caddy.sh [options]
 Options:
   --site-address ADDRESS  Caddy site address or domain
                           Default: http://127.0.0.1:8080
-  --upstream HOST:PORT    Local Styles 4 Dogs backend
+  --upstream HOST:PORT    Local Styling 4 Dogs backend
                           Default: 127.0.0.1:31337
   --no-start              Install and validate, but do not start Caddy
   --staging-root DIR      Install below DIR without systemd or Caddy validation
@@ -154,8 +154,8 @@ fi
 BACKUP_SUFFIX=$(date -u +%Y%m%dT%H%M%SZ)
 cp -a -- "$CADDYFILE_PATH" "$CADDYFILE_PATH.backup-$BACKUP_SUFFIX"
 
-MANAGED_BEGIN="# BEGIN Styles 4 Dogs managed include"
-MANAGED_END="# END Styles 4 Dogs managed include"
+MANAGED_BEGIN="# BEGIN Styling 4 Dogs managed include"
+MANAGED_END="# END Styling 4 Dogs managed include"
 
 # Remove an older managed block first. This keeps upgrades idempotent and
 # prevents a duplicate import when the distribution Caddyfile already imports
@@ -251,7 +251,7 @@ if [[ -z "$ROOT_PREFIX" ]]; then
 fi
 
 cat <<EOF_SUMMARY
-Styles 4 Dogs Caddy configuration installed.
+Styling 4 Dogs Caddy configuration installed.
   Site address: $SITE_ADDRESS
   Upstream:     $UPSTREAM
   Caddyfile:    $CADDYFILE_PATH

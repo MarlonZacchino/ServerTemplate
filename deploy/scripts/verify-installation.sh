@@ -52,6 +52,9 @@ check_mode() {
     && ok "notification worker exists" \
     || bad "missing notification worker"
 [[ -r "$WEB_ROOT/index.html" ]] && ok "website files exist" || bad "missing website files"
+[[ -r "$WEB_ROOT/galerie.html" && -r "$WEB_ROOT/gallery.js" && -r "$WEB_ROOT/logo.jpg" ]] \
+    && ok "gallery and logo files exist" \
+    || bad "gallery or logo files are missing"
 [[ -r "$ENV_FILE" ]] && ok "server.env exists" || bad "missing server.env"
 [[ -r "$NOTIFICATION_ENV_FILE" ]] \
     && ok "notification.env exists" \
@@ -68,6 +71,20 @@ check_mode "$STATE_DIR/styles4dogs.db" 600
 check_mode "$CONFIG_DIR/secrets/admin.auth" 600
 check_mode "$NOTIFICATION_SECRET_FILE" 600
 check_mode "$NOTIFICATION_KEY_FILE" 600
+
+
+if [[ -f "$STATE_DIR/styles4dogs.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+    SCHEMA_VERSION=$(sqlite3 "$STATE_DIR/styles4dogs.db" 'PRAGMA user_version;' || true)
+    [[ "$SCHEMA_VERSION" == "7" ]] \
+        && ok "database schema version is 7" \
+        || bad "database schema version is ${SCHEMA_VERSION:-unknown}, expected 7"
+
+    GALLERY_TABLE=$(sqlite3 "$STATE_DIR/styles4dogs.db" \
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='gallery_images';" || true)
+    [[ "$GALLERY_TABLE" == "1" ]] \
+        && ok "gallery table exists" \
+        || bad "gallery table is missing"
+fi
 
 if [[ -e "$NOTIFICATION_SECRET_FILE" || -e "$NOTIFICATION_KEY_FILE" ]]; then
     if [[ -f "$NOTIFICATION_SECRET_FILE" && -f "$NOTIFICATION_KEY_FILE" ]]; then

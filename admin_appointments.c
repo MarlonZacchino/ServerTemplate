@@ -387,14 +387,14 @@ string *admin_appointments_build_page(
             "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
             "<meta name=\"robots\" content=\"noindex,nofollow\">"
-            "<title>Terminkalender | Styles 4 Dogs Admin</title>"
+            "<title>Terminkalender | Styling 4 Dogs Admin</title>"
             "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
             "<header class=\"site-header\"><div class=\"container nav-wrap\">"
-            "<a class=\"brand\" href=\"/admin/appointments\"><span class=\"brand-mark\">S4D</span><span>Admin</span></a>"
+            "<a class=\"brand\" href=\"/admin/appointments\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Admin</span></a>"
             "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
             "<a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a>"
             "<a href=\"/admin/appointments\" aria-current=\"page\">Termine</a>"
-            "<a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header>"
+            "<a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header>"
             "<main class=\"page admin-appointments-page\"><section class=\"card admin-appointments-intro\">"
             "<p class=\"eyebrow\">Salonbetrieb</p><h1>Terminkalender</h1>"
             "<p>Offene Anfragen, bestätigte Termine und Sperrzeiten in einer gemeinsamen Ansicht.</p>"
@@ -476,6 +476,6 @@ string *admin_appointments_build_page(
 
     str_cat_cstr(page,
             "</section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\">"
-            "<small>&copy; 2026 Styles 4 Dogs Admin.</small></div></footer></body></html>");
+            "<small>&copy; 2026 Styling 4 Dogs Admin.</small></div></footer></body></html>");
     return page;
 }

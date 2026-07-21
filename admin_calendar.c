@@ -738,17 +738,17 @@ string *admin_calendar_build_page(
             "    <meta charset=\"utf-8\">\n"
             "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
             "    <meta name=\"robots\" content=\"noindex,nofollow\">\n"
-            "    <title>Kalender verwalten - Styles 4 Dogs</title>\n"
+            "    <title>Kalender verwalten - Styling 4 Dogs</title>\n"
             "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
             "    <script src=\"/admin-calendar.js\" defer></script>\n"
             "</head>\n<body>\n"
             "    <header class=\"site-header\"><div class=\"container nav-wrap\">\n"
-            "        <a class=\"brand\" href=\"/\"><span class=\"brand-mark\">S4D</span><span>Styles 4 Dogs</span></a>\n"
+            "        <a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>\n"
             "        <nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
             "<a href=\"/\">Website öffnen</a>"
             "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
             "<a href=\"/admin/appointments\">Termine</a>"
-            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
+            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
             "    </div></header>\n"
             "    <main class=\"page admin-page admin-calendar-page\">\n"
             "        <section class=\"card admin-card admin-calendar-intro\">\n"
@@ -807,7 +807,7 @@ string *admin_calendar_build_page(
 
     str_cat_cstr(page,
             "    </main>\n"
-            "    <footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styles 4 Dogs Admin.</small></div></footer>\n"
+            "    <footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs Admin.</small></div></footer>\n"
             "</body>\n</html>\n");
 
     return page;

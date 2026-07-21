@@ -321,6 +321,13 @@ static int load_environment(notification_smtp_settings *settings)
     return 0;
 }
 
+static void migrate_default_brand_name(notification_smtp_settings *settings)
+{
+    if (settings != NULL && strcmp(settings->from_name, "Styles 4 Dogs") == 0) {
+        snprintf(settings->from_name, sizeof(settings->from_name), "%s", "Styling 4 Dogs");
+    }
+}
+
 int notification_settings_load(notification_smtp_settings *settings)
 {
     int result;
@@ -328,9 +335,14 @@ int notification_settings_load(notification_smtp_settings *settings)
     if (settings == NULL) { set_error("Ausgabe für E-Mail-Konfiguration fehlt"); return -1; }
     if (sodium_init() < 0) { set_error("Kryptografie konnte nicht initialisiert werden"); return -1; }
     result = read_managed(settings);
-    if (result == 0) return 0;
+    if (result == 0) {
+        migrate_default_brand_name(settings);
+        return 0;
+    }
     if (result < 0) return -1;
-    return load_environment(settings);
+    result = load_environment(settings);
+    if (result == 0) migrate_default_brand_name(settings);
+    return result;
 }
 
 static int write_blob(const unsigned char *blob, size_t length)

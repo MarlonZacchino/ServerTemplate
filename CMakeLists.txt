@@ -85,6 +85,7 @@ add_executable(Server
         admin_calendar.c
         admin_appointments.c
         admin_notifications.c
+        gallery.c
         notification_queue.c
         notification_settings.c
         notification_templates.c

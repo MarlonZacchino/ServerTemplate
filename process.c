@@ -15,6 +15,7 @@
 #include "form_urlencoded.h"
 #include "server_config.h"
 #include "notification_queue.h"
+#include "gallery.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -68,6 +69,10 @@ static const char *guess_content_type(const char *path)
 
     if (strcmp(extension, ".svg") == 0) {
         return "image/svg+xml";
+    }
+
+    if (strcmp(extension, ".webp") == 0) {
+        return "image/webp";
     }
 
     if (strcmp(extension, ".ico") == 0) {
@@ -309,6 +314,10 @@ static const char *map_route_to_file(const char *path)
         return "/preise.html";
     }
 
+    if (strcmp(path, "/galerie") == 0) {
+        return "/galerie.html";
+    }
+
     if (strcmp(path, "/kontakt") == 0) {
         return "/kontakt.html";
     }
@@ -508,7 +517,7 @@ static string *handle_unauthorized(bool send_body)
     return build_response_text(
             "401 Unauthorized",
             "text/html; charset=utf-8",
-            "WWW-Authenticate: Basic realm=\"Styles 4 Dogs Admin\"\r\n"
+            "WWW-Authenticate: Basic realm=\"Styling 4 Dogs Admin\"\r\n"
             "Cache-Control: no-store\r\n"
             "Pragma: no-cache\r\n"
             "X-Content-Type-Options: nosniff\r\n"
@@ -770,7 +779,7 @@ static string *handle_admin_setup_page(bool send_body)
             "    <meta charset=\"utf-8\">\n"
             "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
             "    <meta name=\"robots\" content=\"noindex,nofollow\">\n"
-            "    <title>Admin einrichten | Styles 4 Dogs</title>\n"
+            "    <title>Admin einrichten | Styling 4 Dogs</title>\n"
             "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
             "</head>\n"
             "<body>\n"
@@ -832,7 +841,7 @@ static string *handle_admin_setup_error(
             "<meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
             "<meta name=\"robots\" content=\"noindex,nofollow\">"
-            "<title>Einrichtung fehlgeschlagen | Styles 4 Dogs</title>"
+            "<title>Einrichtung fehlgeschlagen | Styling 4 Dogs</title>"
             "<link rel=\"stylesheet\" href=\"/style.css\"></head>"
             "<body><main class=\"page\"><section class=\"card form-card\">"
             "<p class=\"eyebrow\">Ersteinrichtung</p>"
@@ -861,7 +870,7 @@ static string *handle_admin_setup_created(bool send_body)
             "<meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
             "<meta name=\"robots\" content=\"noindex,nofollow\">"
-            "<title>Admin erstellt | Styles 4 Dogs</title>"
+            "<title>Admin erstellt | Styling 4 Dogs</title>"
             "<link rel=\"stylesheet\" href=\"/style.css\"></head>"
             "<body><main class=\"page\"><section class=\"card form-card\">"
             "<p class=\"eyebrow\">Einrichtung abgeschlossen</p>"
@@ -1081,7 +1090,7 @@ static string *handle_booking_created(bool confirmed)
             "<!doctype html>\n"
             "<html lang=\"de\">\n"
             "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Terminanfrage gesendet | Styles 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
+            "<title>Terminanfrage gesendet | Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
             "<body><main class=\"page\"><section class=\"card\">"
             "<p class=\"eyebrow\">Termin vorläufig reserviert</p><h1>Vielen Dank!</h1>"
             "<p>Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum vorläufig reserviert. "
@@ -1092,7 +1101,7 @@ static string *handle_booking_created(bool confirmed)
             "<!doctype html>\n"
             "<html lang=\"de\">\n"
             "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Termin bestätigt | Styles 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
+            "<title>Termin bestätigt | Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
             "<body><main class=\"page\"><section class=\"card\">"
             "<p class=\"eyebrow\">Termin automatisch bestätigt</p><h1>Dein Termin ist eingetragen.</h1>"
             "<p>Der ausgewählte Zeitraum wurde verbindlich reserviert. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg.</p>"
@@ -1112,7 +1121,7 @@ static string *handle_booking_unavailable(void)
     const char *body =
             "<!doctype html><html lang=\"de\"><head>"
             "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Termin nicht mehr verfügbar | Styles 4 Dogs</title>"
+            "<title>Termin nicht mehr verfügbar | Styling 4 Dogs</title>"
             "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
             "<main class=\"page\"><section class=\"card\">"
             "<p class=\"eyebrow\">Termin nicht verfügbar</p>"
@@ -1134,7 +1143,7 @@ static string *handle_booking_contact_limit(void)
     const char *body =
             "<!doctype html><html lang=\"de\"><head>"
             "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Zu viele Terminanfragen | Styles 4 Dogs</title>"
+            "<title>Zu viele Terminanfragen | Styling 4 Dogs</title>"
             "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
             "<main class=\"page\"><section class=\"card\">"
             "<p class=\"eyebrow\">Buchungsschutz</p>"
@@ -1566,7 +1575,7 @@ static string *handle_admin_calendar_page(
     return response;
 }
 
-static bool request_has_valid_admin_csrf(string *request)
+static bool request_has_valid_admin_csrf(const string *request)
 {
     char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
     form_value_result result = form_urlencoded_get(
@@ -1860,6 +1869,196 @@ static string *handle_admin_calendar_post(
     return handle_internal_error(true);
 }
 
+
+static bool request_has_valid_admin_multipart_csrf(const string *request)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
+    bool ok = gallery_extract_multipart_text_field(request, "csrf_token", csrf_token, sizeof(csrf_token)) &&
+              form_csrf_token_matches(csrf_token);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    return ok;
+}
+
+static string *handle_gallery_api(bool send_body)
+{
+    string *body = gallery_build_public_json();
+    string *response;
+
+    if (body == NULL) {
+        fprintf(stderr, "Galerie-JSON konnte nicht erzeugt werden: %s\n", gallery_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "application/json; charset=utf-8",
+            "Cache-Control: no-store\r\n"
+            "X-Content-Type-Options: nosniff\r\n",
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_gallery_media(const char *request_path, const char *prefix, bool include_hidden, bool send_body)
+{
+    char *body = NULL;
+    size_t body_length = 0;
+    char content_type[64] = {0};
+    int result = gallery_read_media(
+            request_path + strlen(prefix),
+            include_hidden,
+            &body,
+            &body_length,
+            content_type,
+            sizeof(content_type));
+    string *response;
+
+    if (result == 1) {
+        return handle_not_found(send_body);
+    }
+    if (result != 0) {
+        fprintf(stderr, "Galeriebild konnte nicht geladen werden: %s\n", gallery_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            content_type,
+            include_hidden
+                    ? "Cache-Control: no-store\r\n"
+                      "Pragma: no-cache\r\n"
+                      "X-Content-Type-Options: nosniff\r\n"
+                    : "Cache-Control: public, max-age=300\r\n"
+                      "X-Content-Type-Options: nosniff\r\n",
+            body,
+            body_length,
+            send_body);
+    free(body);
+    return response;
+}
+
+static string *handle_admin_gallery_page(bool send_body, const char *query, size_t query_length)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    char notice_code[32] = {0};
+    string *body;
+    string *response;
+
+    if (query != NULL && query_length > 0) {
+        form_value_result result = form_urlencoded_get_from_data(query, query_length, "saved", notice_code, sizeof(notice_code));
+        if (result != FORM_VALUE_OK && result != FORM_VALUE_NOT_FOUND) {
+            return handle_bad_request(send_body);
+        }
+    }
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+
+    body = gallery_build_admin_page(csrf_token, notice_code[0] == '\0' ? NULL : notice_code);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    if (body == NULL) {
+        fprintf(stderr, "Admin-Galerieseite konnte nicht erzeugt werden: %s\n", gallery_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_admin_gallery_bad_request(void)
+{
+    return build_response_text(
+            "400 Bad Request",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>400 Bad Request</title></head><body><h1>Ungültige Galerieangabe</h1><p>Die Änderung konnte nicht gespeichert werden. Bitte prüfe die Eingaben und die Bilddatei.</p><p><a href=\"/admin/gallery\">Zurück zur Galerie</a></p></body></html>",
+            true);
+}
+
+static string *handle_admin_gallery_not_found(void)
+{
+    return build_response_text(
+            "404 Not Found",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>404 Nicht gefunden</title></head><body><h1>Bild nicht gefunden</h1><p>Das gewünschte Foto existiert nicht mehr.</p><p><a href=\"/admin/gallery\">Zurück zur Galerie</a></p></body></html>",
+            true);
+}
+
+static string *handle_admin_gallery_redirect(const char *saved_code)
+{
+    char headers[512];
+    char body[512];
+    int headers_written;
+    int body_written;
+
+    headers_written = snprintf(headers, sizeof(headers),
+                               "Location: /admin/gallery?saved=%s\r\n%s",
+                               saved_code, admin_security_headers());
+    body_written = snprintf(body, sizeof(body),
+                            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><title>Galerie gespeichert</title></head><body><p>Die Galerie wurde aktualisiert.</p><p><a href=\"/admin/gallery\">Zurück zur Galerie</a></p></body></html>");
+    if (headers_written < 0 || (size_t)headers_written >= sizeof(headers) ||
+        body_written < 0 || (size_t)body_written >= sizeof(body)) {
+        return handle_internal_error(true);
+    }
+
+    return build_response_text("303 See Other", "text/html; charset=utf-8", headers, body, true);
+}
+
+static string *handle_admin_gallery_upload_post(const string *request)
+{
+    gallery_result result;
+
+    if (!request_has_valid_admin_multipart_csrf(request)) {
+        return handle_admin_action_forbidden();
+    }
+
+    result = gallery_handle_upload(request);
+    if (result == GALLERY_OK) {
+        return handle_admin_gallery_redirect("uploaded");
+    }
+    if (result == GALLERY_BAD_REQUEST) {
+        fprintf(stderr, "Ungültiger Galerie-Upload: %s\n", gallery_last_error());
+        return handle_admin_gallery_bad_request();
+    }
+
+    fprintf(stderr, "Galerie-Upload fehlgeschlagen: %s\n", gallery_last_error());
+    return handle_internal_error(true);
+}
+
+static string *handle_admin_gallery_delete_post(const string *request)
+{
+    gallery_result result;
+
+    if (!request_has_valid_admin_csrf(request)) {
+        return handle_admin_action_forbidden();
+    }
+
+    result = gallery_handle_delete(request);
+    if (result == GALLERY_OK) {
+        return handle_admin_gallery_redirect("deleted");
+    }
+    if (result == GALLERY_BAD_REQUEST) {
+        return handle_admin_gallery_bad_request();
+    }
+    if (result == GALLERY_NOT_FOUND) {
+        return handle_admin_gallery_not_found();
+    }
+
+    fprintf(stderr, "Galerie-Löschen fehlgeschlagen: %s\n", gallery_last_error());
+    return handle_internal_error(true);
+}
+
 string *process(string *request)
 {
     char method[MAX_METHOD_LENGTH + 1];
@@ -1996,6 +2195,20 @@ string *process(string *request)
             }
         }
 
+        if (strcmp(path, "/admin/gallery/upload") == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+            return handle_admin_gallery_upload_post(request);
+        }
+
+        if (strcmp(path, "/admin/gallery/delete") == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+            return handle_admin_gallery_delete_post(request);
+        }
+
         return handle_not_found(true);
     }
 
@@ -2005,6 +2218,14 @@ string *process(string *request)
 
     if (strcmp(path, "/api/availability") == 0) {
         return handle_calendar_availability(query, query_length, send_body);
+    }
+
+    if (strcmp(path, "/api/gallery") == 0) {
+        return handle_gallery_api(send_body);
+    }
+
+    if (strncmp(path, "/media/", strlen("/media/")) == 0) {
+        return handle_gallery_media(path, "/media/", false, send_body);
     }
 
     /*
@@ -2035,6 +2256,26 @@ string *process(string *request)
         }
 
         return handle_admin_calendar_page(send_body, query, query_length);
+    }
+
+    if (strncmp(path, "/admin/gallery/media/", strlen("/admin/gallery/media/")) == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+
+        return handle_gallery_media(
+                path,
+                "/admin/gallery/media/",
+                true,
+                send_body);
+    }
+
+    if (strcmp(path, "/admin/gallery") == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+
+        return handle_admin_gallery_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/bookings") == 0) {

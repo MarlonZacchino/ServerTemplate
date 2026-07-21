@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP regression tests for the Styles 4 Dogs C server."""
+"""HTTP regression tests for the Styling 4 Dogs C server."""
 
 from __future__ import annotations
 
@@ -149,8 +149,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 6:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 6, erhalten {schema_version}")
+            if schema_version != 7:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 7, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -159,6 +159,7 @@ def run_stateful_tests() -> int:
                 "calendar_closures",
                 "notification_jobs",
                 "notification_templates",
+                "gallery_images",
             }
             existing_tables = {
                 row[0]
@@ -443,6 +444,136 @@ def run_stateful_tests() -> int:
             raise AssertionError("Adminseite liest das frühere fünfspaltige Format nicht mehr")
         if b'action="/admin/bookings/status"' not in valid_body:
             raise AssertionError("Adminseite enthält kein Formular zur Statusänderung")
+
+    def admin_gallery_workflow() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+
+        public_page_response = raw_request(request_text("GET", "/galerie").encode())
+        _, public_page_body = assert_status(public_page_response, "200 OK")
+        if b"/gallery.js" not in public_page_body or b"Styling 4 Dogs" not in public_page_body:
+            raise AssertionError("Öffentliche Galerieseite ist unvollständig")
+
+        empty_api_response = raw_request(request_text("GET", "/api/gallery").encode())
+        _, empty_api_body = assert_status(empty_api_response, "200 OK")
+        if json.loads(empty_api_body) != []:
+            raise AssertionError("Neue Galerie ist nicht leer")
+
+        admin_response = raw_request(request_text(
+            "GET",
+            "/admin/gallery",
+            auth_headers,
+        ).encode())
+        _, admin_body = assert_status(admin_response, "200 OK")
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', admin_body)
+        if csrf_match is None:
+            raise AssertionError("Galerie-Adminseite enthält kein CSRF-Token")
+        if b'action="/admin/gallery/upload"' not in admin_body:
+            raise AssertionError("Galerie-Adminseite enthält kein Upload-Formular")
+        if b'/logo.jpg' not in admin_body:
+            raise AssertionError("Galerie-Adminseite verwendet das neue Logo nicht")
+
+        csrf_token = csrf_match.group(1).decode("ascii")
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        boundary = "----Styling4DogsGalleryTestBoundary"
+        parts: list[bytes] = []
+
+        def add_text(name: str, value: str) -> None:
+            parts.append(
+                f"--{boundary}\r\n"
+                f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                f"{value}\r\n".encode("utf-8")
+            )
+
+        add_text("csrf_token", csrf_token)
+        add_text("title", "Bello nach der Pflege")
+        add_text("alt_text", "Kleiner Hund mit frisch geschnittenem Fell")
+        add_text("sort_order", "10")
+        add_text("visible", "1")
+        add_text("publication_consent", "1")
+        parts.append(
+            f"--{boundary}\r\n"
+            "Content-Disposition: form-data; name=\"image\"; filename=\"bello.png\"\r\n"
+            "Content-Type: image/png\r\n\r\n".encode("ascii")
+            + image_bytes
+            + b"\r\n"
+        )
+        parts.append(f"--{boundary}--\r\n".encode("ascii"))
+        upload_body = b"".join(parts)
+        upload_request = (
+            f"POST /admin/gallery/upload HTTP/1.1\r\n"
+            f"Host: {HOST}:{PORT}\r\n"
+            f"Authorization: Basic {auth_token}\r\n"
+            f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
+            f"Content-Length: {len(upload_body)}\r\n\r\n"
+        ).encode("ascii") + upload_body
+        upload_response = raw_request(upload_request)
+        upload_headers, _ = assert_status(upload_response, "303 See Other")
+        if upload_headers.get("location") != "/admin/gallery?saved=uploaded":
+            raise AssertionError("Galerie-Upload leitet nicht korrekt zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            row = connection.execute(
+                "SELECT id, title, alt_text, file_name, mime_type, length(image_data), sort_order, visible "
+                "FROM gallery_images ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise AssertionError("Galeriebild wurde nicht in SQLite gespeichert")
+        if row[1:3] != (
+            "Bello nach der Pflege",
+            "Kleiner Hund mit frisch geschnittenem Fell",
+        ):
+            raise AssertionError(f"Galerietexte wurden falsch gespeichert: {row!r}")
+        if row[4] != "image/png" or row[5] != len(image_bytes) or row[6:] != (10, 1):
+            raise AssertionError(f"Galeriebild-Metadaten sind inkonsistent: {row!r}")
+
+        image_id = row[0]
+        file_name = row[3]
+        api_response = raw_request(request_text("GET", "/api/gallery").encode())
+        _, api_body = assert_status(api_response, "200 OK")
+        items = json.loads(api_body)
+        if len(items) != 1 or items[0]["title"] != "Bello nach der Pflege":
+            raise AssertionError(f"Galerie-API liefert falsche Daten: {items!r}")
+        if items[0]["url"] != f"/media/{file_name}":
+            raise AssertionError("Galerie-API liefert eine falsche Bild-URL")
+
+        media_response = raw_request(request_text("GET", f"/media/{file_name}").encode())
+        media_headers, media_body = assert_status(media_response, "200 OK")
+        if media_headers.get("content-type") != "image/png":
+            raise AssertionError("Galeriebild liefert falschen Content-Type")
+        if media_body != image_bytes:
+            raise AssertionError("Galeriebild wurde nicht binär korrekt ausgeliefert")
+
+        delete_body = urlencode({
+            "csrf_token": csrf_token,
+            "image_id": str(image_id),
+        })
+        delete_response = raw_request(request_text(
+            "POST",
+            "/admin/gallery/delete",
+            {
+                **auth_headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            delete_body,
+        ).encode())
+        delete_headers, _ = assert_status(delete_response, "303 See Other")
+        if delete_headers.get("location") != "/admin/gallery?saved=deleted":
+            raise AssertionError("Galerie-Löschen leitet nicht korrekt zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            remaining = connection.execute("SELECT COUNT(*) FROM gallery_images").fetchone()[0]
+        if remaining != 0:
+            raise AssertionError("Galeriebild wurde nicht gelöscht")
 
     def admin_status_workflow() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
@@ -1328,7 +1459,7 @@ def run_stateful_tests() -> int:
                 "smtp_username": "salon@example.invalid",
                 "smtp_password": password,
                 "from_address": "salon@example.invalid",
-                "from_name": "Styles 4 Dogs",
+                "from_name": "Styling 4 Dogs",
                 "admin_email": "admin@example.invalid",
                 "notify_admin_on_new_booking": "1",
             }),
@@ -1869,6 +2000,7 @@ def run_stateful_tests() -> int:
     check("Kontaktformular trennt Vor- und Nachname", contact_form_layout)
     check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
+    check("Admin lädt Galeriebilder hoch und löscht sie", admin_gallery_workflow)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
     check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)
@@ -1890,12 +2022,15 @@ def main() -> int:
         ("Startseite", "/"),
         ("Leistungen", "/leistungen"),
         ("Preise", "/preise"),
+        ("Galerie", "/galerie"),
         ("Kontakt", "/kontakt"),
         ("Impressum", "/impressum"),
         ("Datenschutz", "/datenschutz"),
         ("Stylesheet", "/style.css"),
         ("Kalender-JavaScript", "/calendar.js"),
         ("Admin-Kalender-JavaScript", "/admin-calendar.js"),
+        ("Galerie-JavaScript", "/gallery.js"),
+        ("Logo", "/logo.jpg"),
     ]
 
     for name, path in public_routes:
@@ -1916,6 +2051,11 @@ def main() -> int:
     add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "401 Unauthorized")
     add_status(cannon, "Admin-Kalender ohne Zugangsdaten", request_text("GET", "/admin/calendar"), "401 Unauthorized")
     add_status(cannon, "Admin-Terminkalender ohne Zugangsdaten", request_text("GET", "/admin/appointments"), "401 Unauthorized")
+    add_status(cannon, "Admin-Galerie ohne Zugangsdaten", request_text(
+        "GET",
+        "/admin/gallery",
+        proxy_headers("198.51.100.90"),
+    ), "401 Unauthorized")
     add_status(cannon, "Adminbereich mit ungültigem Basic Token", request_text(
         "GET", "/admin/bookings", {"Authorization": "Basic !!!"}
     ), "401 Unauthorized")

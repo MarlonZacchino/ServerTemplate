@@ -208,6 +208,7 @@ install_file 0644 root root "$PROJECT_ROOT/CADDY_DEPLOYMENT.md" "$APP_PATH/share
 install_file 0644 root root "$PROJECT_ROOT/RATE_LIMITING.md" "$APP_PATH/share/RATE_LIMITING.md"
 install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE5.md" "$APP_PATH/share/CALENDAR_PHASE5.md"
 install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE6.md" "$APP_PATH/share/CALENDAR_PHASE6.md"
+install_file 0644 root root "$PROJECT_ROOT/GALLERY_PHASE8.md" "$APP_PATH/share/GALLERY_PHASE8.md"
 install_file 0644 root root "$PROJECT_ROOT/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
 
 case "$WEB_PATH" in
@@ -262,7 +263,7 @@ STYLES4DOGS_DATA_DIR=$STATE_PATH
 STYLES4DOGS_DATABASE_FILE=$STATE_PATH/styles4dogs.db
 STYLES4DOGS_LEGACY_BOOKING_FILE=$STATE_PATH/bookings.txt
 STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TRUSTED_PROXY_TOKEN
-STYLES4DOGS_SALON_NAME=Styles 4 Dogs
+STYLES4DOGS_SALON_NAME=Styling 4 Dogs
 STYLES4DOGS_SALON_ADDRESS=
 STYLES4DOGS_SALON_PHONE=
 STYLES4DOGS_PUBLIC_BASE_URL=http://127.0.0.1:8080
@@ -283,11 +284,16 @@ ensure_env_setting() {
     fi
 }
 
-ensure_env_setting STYLES4DOGS_SALON_NAME 'Styles 4 Dogs'
+ensure_env_setting STYLES4DOGS_SALON_NAME 'Styling 4 Dogs'
 ensure_env_setting STYLES4DOGS_SALON_ADDRESS ''
 ensure_env_setting STYLES4DOGS_SALON_PHONE ''
 ensure_env_setting STYLES4DOGS_PUBLIC_BASE_URL 'http://127.0.0.1:8080'
 ensure_env_setting STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE '49'
+
+# Migrate only the former built-in brand value. Custom salon names remain untouched.
+if grep -Fxq 'STYLES4DOGS_SALON_NAME=Styles 4 Dogs' "$ENV_PATH"; then
+    sed -i 's/^STYLES4DOGS_SALON_NAME=Styles 4 Dogs$/STYLES4DOGS_SALON_NAME=Styling 4 Dogs/' "$ENV_PATH"
+fi
 
 chmod 0640 "$ENV_PATH"
 if [[ -z "$ROOT_PREFIX" ]]; then
@@ -300,6 +306,9 @@ if [[ ! -f "$NOTIFICATION_ENV_PATH" ]]; then
         "$PROJECT_ROOT/deploy/notification.env.example" \
         "$NOTIFICATION_ENV_PATH"
 else
+    if grep -Fxq 'STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs' "$NOTIFICATION_ENV_PATH"; then
+        sed -i 's/^STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs$/STYLES4DOGS_SMTP_FROM_NAME=Styling 4 Dogs/' "$NOTIFICATION_ENV_PATH"
+    fi
     chmod 0640 "$NOTIFICATION_ENV_PATH"
     if [[ -z "$ROOT_PREFIX" ]]; then
         chown root:"$SERVICE_GROUP" "$NOTIFICATION_ENV_PATH"
@@ -344,7 +353,7 @@ if [[ -z "$ROOT_PREFIX" ]]; then
 fi
 
 cat <<EOF_SUMMARY
-Styles 4 Dogs installed.
+Styling 4 Dogs installed.
   Binary:        $APP_PATH/bin/Server
   Mail worker:   $APP_PATH/bin/notification_worker
   Website:       $WEB_PATH

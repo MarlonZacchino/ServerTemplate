@@ -413,7 +413,7 @@ static int build_ics(
 
     out_ics[0] = '\0';
     if (append_text(out_ics, out_size, &position,
-            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Styles 4 Dogs//Terminbuchung//DE\r\n"
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Styling 4 Dogs//Terminbuchung//DE\r\n"
             "CALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\n") != 0 ||
         append_format(out_ics, out_size, &position,
             "UID:styles4dogs-booking-%lld@styles4dogs\r\nDTSTAMP:%s\r\n",

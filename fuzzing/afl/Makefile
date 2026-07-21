@@ -12,7 +12,7 @@ AFL_INSTANCES ?= 4
 
 help:
 	@printf '%s\n' \
-		'Styles 4 Dogs - AFL++' \
+		'Styling 4 Dogs - AFL++' \
 		'' \
 		'make / make build               AFL-Build erstellen' \
 		'make run                        Build erstellen/aktualisieren und AFL starten' \

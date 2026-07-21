@@ -26,9 +26,10 @@
 
 /**
  * Maximale Request-Größe.
- * Für den PSE-Server reicht 1 MiB locker aus und schützt vor zu großen Requests.
+ * Galerie-Uploads dürfen bis zu 8 MiB groß sein. Der zusätzliche Spielraum
+ * deckt Multipart-Header und Textfelder ab, ohne unbeschränkte Requests zu erlauben.
  */
-#define BUFFER_SIZE (1024 * 1024)
+#define BUFFER_SIZE (10 * 1024 * 1024)
 
 /**
  * Timeout für Socket-Lese- und Schreiboperationen.
@@ -1002,7 +1003,7 @@ int main(int argc, char *argv[])
     } else {
         fprintf(
                 stderr,
-                "Styles 4 Dogs server listening on %s:%u\n",
+                "Styling 4 Dogs server listening on %s:%u\n",
                 server_config_bind_address(),
                 (unsigned int)server_config_port());
         main_loop();

@@ -1,4 +1,4 @@
-# AFL++ für den Styles-4-Dogs-Server
+# AFL++ für den Styling-4-Dogs-Server
 
 Der Server besitzt einen `stdin`-Modus. AFL++ übergibt deshalb jeden Testfall
 direkt an:
@@ -145,3 +145,10 @@ Ein zusätzlicher Buchungsrequest füllt das unsichtbare Honeypot-Feld. Damit
 wird die neutrale Bot-Antwort samt früher Request-Verarbeitung im normalen
 HTTP-Fuzzing erreicht. Das zustandsabhängige Kontaktlimit bleibt Bestandteil
 der isolierten PewPew-Regressionsprüfung.
+
+## Galerie Phase 8
+
+Der HTTP-Korpus enthält zusätzlich öffentliche Galerieabfragen sowie geschützte
+Admin- und Upload-Routen. Binäre Bildinhalte werden in den regulären
+Regressionstests geprüft; AFL erhält bewusst kleine, auch fehlerhafte
+Multipart-Requests zur Parserhärtung.

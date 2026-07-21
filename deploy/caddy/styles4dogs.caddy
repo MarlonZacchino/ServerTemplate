@@ -1,4 +1,4 @@
-# Styles 4 Dogs reverse proxy.
+# Styling 4 Dogs reverse proxy.
 # Values are loaded from /etc/styles4dogs/caddy.env by a systemd drop-in.
 
 {$STYLES4DOGS_CADDY_SITE_ADDRESS:http://127.0.0.1:8080} {
@@ -50,10 +50,16 @@
         max_size 16KiB
     }
 
-    # Admin state changes carry only a small form body as well.
-    @admin_action_body path /admin/bookings/status
+    # Gallery uploads accept image files up to 8 MiB plus multipart overhead.
+    @gallery_upload_body path /admin/gallery/upload
+    request_body @gallery_upload_body {
+        max_size 9MiB
+    }
+
+    # Other admin state changes carry only a small form body.
+    @admin_action_body path /admin/bookings/status /admin/bookings/accept /admin/bookings/reject /admin/gallery/delete /admin/calendar/* /admin/notifications/*
     request_body @admin_action_body {
-        max_size 8KiB
+        max_size 64KiB
     }
 
     handle {

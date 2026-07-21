@@ -1,5 +1,5 @@
 [Unit]
-Description=Back up the Styles 4 Dogs SQLite database
+Description=Back up the Styling 4 Dogs SQLite database
 Documentation=file:/opt/styles4dogs/share/DEPLOYMENT.md
 ConditionPathExists=/var/lib/styles4dogs/styles4dogs.db
 

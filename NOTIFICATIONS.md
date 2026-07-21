@@ -23,7 +23,7 @@ oder STARTTLS:      smtp://smtp.anbieter.de:587
 Benutzername:       häufig die vollständige E-Mail-Adresse
 Passwort:           vorzugsweise ein separates App-Passwort
 Absenderadresse:    sichtbare Salon-Adresse
-Absendername:       Styles 4 Dogs
+Absendername:       Styling 4 Dogs
 Admin-Adresse:      Ziel für neue Terminanfragen
 ```
 
@@ -74,7 +74,7 @@ STYLES4DOGS_SMTP_URL=smtp://smtp.example.de:587
 STYLES4DOGS_SMTP_USERNAME=termine@example.de
 STYLES4DOGS_SMTP_PASSWORD=anwendungspasswort
 STYLES4DOGS_SMTP_FROM_ADDRESS=termine@example.de
-STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs
+STYLES4DOGS_SMTP_FROM_NAME=Styling 4 Dogs
 STYLES4DOGS_ADMIN_NOTIFICATION_EMAIL=termine@example.de
 STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING=1
 ```

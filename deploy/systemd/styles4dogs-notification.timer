@@ -1,5 +1,5 @@
 [Unit]
-Description=Process Styles 4 Dogs notification queue every five minutes
+Description=Process Styling 4 Dogs notification queue every five minutes
 Documentation=file:/opt/styles4dogs/share/NOTIFICATIONS.md
 
 [Timer]

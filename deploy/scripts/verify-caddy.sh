@@ -31,8 +31,8 @@ read_env_value() {
 [[ -r "$CADDYFILE" ]] && ok "Caddyfile exists" || bad "missing Caddyfile"
 [[ -r "$ENV_FILE" ]] && ok "Caddy environment exists" || bad "missing Caddy environment"
 [[ -r /etc/caddy/conf.d/styles4dogs.caddy ]] \
-    && ok "Styles 4 Dogs Caddy snippet exists" \
-    || bad "missing Styles 4 Dogs Caddy snippet"
+    && ok "Styling 4 Dogs Caddy snippet exists" \
+    || bad "missing Styling 4 Dogs Caddy snippet"
 
 if [[ -r "$ENV_FILE" ]]; then
     PROXY_TOKEN=$(read_env_value STYLES4DOGS_TRUSTED_PROXY_TOKEN || true)
@@ -50,6 +50,18 @@ if [[ -r "$ENV_FILE" ]]; then
     caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null \
         && ok "Caddy configuration is valid" \
         || bad "Caddy configuration is invalid"
+fi
+
+
+if [[ -r /etc/caddy/conf.d/styles4dogs.caddy ]]; then
+    grep -Fq '@gallery_upload_body path /admin/gallery/upload' \
+        /etc/caddy/conf.d/styles4dogs.caddy \
+        && ok "gallery upload route has a dedicated body limit" \
+        || bad "gallery upload body limit is missing"
+    grep -Fq 'max_size 9MiB' \
+        /etc/caddy/conf.d/styles4dogs.caddy \
+        && ok "gallery upload limit is 9 MiB" \
+        || bad "gallery upload limit is not 9 MiB"
 fi
 
 if [[ "$SKIP_SYSTEMD" != 1 ]]; then

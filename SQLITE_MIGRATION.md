@@ -118,3 +118,31 @@ sqlite3 /var/lib/styles4dogs/styles4dogs.db \
 Erwartet werden Version `6`, beide Tabellen und fünf Nachrichtenvorlagen.
 SMTP-Zugangsdaten liegen nicht in SQLite. Details stehen in
 `CALENDAR_PHASE6.md` und `NOTIFICATIONS.md`.
+
+
+## Galerieschema Version 7
+
+Phase 8 erweitert die Datenbank idempotent auf:
+
+```text
+PRAGMA user_version = 7
+```
+
+Neu angelegt wird:
+
+```text
+gallery_images
+```
+
+Die Tabelle enthält Titel, Alternativtext, Sichtbarkeit, Sortierreihenfolge,
+MIME-Type und die Bilddaten als SQLite-BLOB. Damit werden Galeriebilder durch
+die vorhandenen SQLite-Online-Backups automatisch mitgesichert und bei einer
+Wiederherstellung zusammen mit den übrigen Salon-Daten zurückgespielt.
+
+Prüfung nach der Installation:
+
+```bash
+sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT name FROM sqlite_master WHERE type='table' AND name='gallery_images';"
+```

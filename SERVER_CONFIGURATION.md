@@ -21,7 +21,7 @@ ein Netzwerk-Socket erstellt wird.
 | `STYLES4DOGS_DATABASE_FILE` | `data/styles4dogs.db` | SQLite-Datenbank oder für Tests `:memory:` |
 | `STYLES4DOGS_LEGACY_BOOKING_FILE` | `data/bookings.txt` | einmalig zu importierende TSV-Datei |
 | `STYLES4DOGS_TRUSTED_PROXY_TOKEN` | leer | gemeinsames Secret zur abgesicherten Übernahme von `X-Forwarded-For` |
-| `STYLES4DOGS_SALON_NAME` | `Styles 4 Dogs` | Anzeigename in E-Mails und ICS-Dateien |
+| `STYLES4DOGS_SALON_NAME` | `Styling 4 Dogs` | Anzeigename in E-Mails und ICS-Dateien |
 | `STYLES4DOGS_SALON_ADDRESS` | leer | Salonadresse in E-Mails und ICS-Dateien |
 | `STYLES4DOGS_SALON_PHONE` | leer | Salontelefonnummer in E-Mails |
 | `STYLES4DOGS_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | öffentliche Basis-URL für spätere Kundenlinks |

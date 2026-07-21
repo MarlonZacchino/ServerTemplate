@@ -8,7 +8,7 @@ usage() {
     cat <<'USAGE'
 Usage: sudo ./deploy/scripts/uninstall-caddy.sh [--disable-service]
 
-Removes only the Styles 4 Dogs Caddy snippet, environment and systemd drop-in.
+Removes only the Styling 4 Dogs Caddy snippet, environment and systemd drop-in.
 The Caddy package and unrelated Caddy sites are preserved.
 USAGE
 }
@@ -41,8 +41,8 @@ BACKUP_SUFFIX=$(date -u +%Y%m%dT%H%M%SZ)
 if [[ -f "$CADDYFILE" ]]; then
     cp -a -- "$CADDYFILE" "$CADDYFILE.backup-$BACKUP_SUFFIX"
     awk '
-        $0 == "# BEGIN Styles 4 Dogs managed include" { skip = 1; next }
-        $0 == "# END Styles 4 Dogs managed include"   { skip = 0; next }
+        $0 == "# BEGIN Styling 4 Dogs managed include" { skip = 1; next }
+        $0 == "# END Styling 4 Dogs managed include"   { skip = 0; next }
         !skip { print }
     ' "$CADDYFILE" > "$CADDYFILE.tmp"
     mv -- "$CADDYFILE.tmp" "$CADDYFILE"
@@ -68,4 +68,4 @@ else
     fi
 fi
 
-echo "Styles 4 Dogs Caddy integration removed."
+echo "Styling 4 Dogs Caddy integration removed."

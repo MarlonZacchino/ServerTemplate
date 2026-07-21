@@ -1,7 +1,7 @@
 # PewPewLaz0rTank-Regressionstests
 
 Dieser Ordner basiert auf dem bisherigen PSE-Testwerkzeug und ist auf den
-Styles-4-Dogs-Server angepasst. Der Testlauf verwendet bewusst eigene
+Styling-4-Dogs-Server angepasst. Der Testlauf verwendet bewusst eigene
 Laufzeitpfade im Build-Ordner. Bestehende Admin-Zugänge und echte Buchungen im
 Projekt werden weder gelesen noch verändert.
 
@@ -26,7 +26,7 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 
 ## Abgedeckte Bereiche
 
-- alle öffentlichen Website-Routen,
+- alle öffentlichen Website-Routen einschließlich Galerie,
 - CSS-Auslieferung und Query-Strings,
 - `400`, `401`, `403`, `404`, `405` und `201`,
 - HTTP/1.0-/HTTP/1.1-Request-Line und Ablehnung von HTTP/2.0,
@@ -47,13 +47,14 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 - Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
 - Runtime-Overrides für Port und Pfade,
 - kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root,
-- Kalenderschema Version 4 und Migration bestehender Buchungen zu `legacy`,
+- Kalenderschema Version 7 und Migration bestehender Buchungen zu `legacy`,
 - Leistungen mit Dauer und Puffer, Wochenöffnungszeiten und Sperrzeiten,
 - Mindestvorlauf, Buchungshorizont und deaktivierbare Leistungen,
 - ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz,
 - Annahme, Ablehnung und optionale automatische Bestätigung von Terminen,
 - strukturierte E-Mail-, Telefon- und WhatsApp-Kontaktwünsche,
-- Hinzufügen, Bearbeiten, Archivieren und Löschen von Leistungen.
+- Hinzufügen, Bearbeiten, Archivieren und Löschen von Leistungen,
+- geschützten Foto-Upload, SQLite-Speicherung, öffentliche Galerie und Löschen.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.

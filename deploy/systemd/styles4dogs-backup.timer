@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily backup timer for Styles 4 Dogs
+Description=Daily backup timer for Styling 4 Dogs
 Documentation=file:/opt/styles4dogs/share/DEPLOYMENT.md
 
 [Timer]

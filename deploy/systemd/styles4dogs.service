@@ -1,5 +1,5 @@
 [Unit]
-Description=Styles 4 Dogs web server
+Description=Styling 4 Dogs web server
 Documentation=file:/opt/styles4dogs/share/DEPLOYMENT.md
 After=local-fs.target network.target
 Wants=network.target

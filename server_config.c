@@ -415,7 +415,7 @@ static int load_public_identity(void)
     if (copy_nonempty_value(
             config.salon_name,
             sizeof(config.salon_name),
-            environment_or_default("STYLES4DOGS_SALON_NAME", "Styles 4 Dogs", NULL),
+            environment_or_default("STYLES4DOGS_SALON_NAME", "Styling 4 Dogs", NULL),
             "STYLES4DOGS_SALON_NAME") != 0 ||
         copy_optional_value(
             config.salon_address,

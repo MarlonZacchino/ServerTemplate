@@ -1,6 +1,6 @@
 # Tests und Fuzzing
 
-Die übernommenen PSE-Werkzeuge wurden auf den aktuellen Styles-4-Dogs-Server
+Die übernommenen PSE-Werkzeuge wurden auf den aktuellen Styling-4-Dogs-Server
 umgestellt. Produktionsdaten und Tests sind voneinander getrennt.
 
 ## HTTP-Regressionsprüfungen
@@ -83,7 +83,7 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 6, Legacy-Migration, sichere geschlossene Defaults,
+Er prüft Schema-Version 7, Legacy-Migration, sichere geschlossene Defaults,
 Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
 Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
 ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
@@ -205,5 +205,21 @@ Der Regressionstest prüft zusätzlich:
 - `429 Too Many Requests` und `Retry-After: 86400` beim Kontaktlimit,
 - Zurücksetzen gesendeter sowie Löschen fehlgeschlagener Mailjobs.
 
-Der vollständige HTTP-Lauf enthält jetzt 36 Beams. Das Datenbankschema bleibt
-auf Version 6.
+Der vollständige HTTP-Lauf enthält jetzt 40 Beams. Das Datenbankschema wird
+mit Phase 8 auf Version 7 erweitert.
+
+
+## Galerie Phase 8
+
+Der Regressionstest prüft zusätzlich:
+
+- öffentliche Route `/galerie` und `gallery.js`,
+- geschützten Zugriff auf `/admin/gallery`,
+- Multipart-Upload mit Admin-Authentifizierung und CSRF-Schutz,
+- serverseitige Erkennung eines echten PNG-Bildes,
+- Speicherung der Binärdaten in SQLite,
+- korrekte JSON-Ausgabe über `/api/gallery`,
+- binär korrekte Bildauslieferung über `/media/...`,
+- vollständiges Löschen des Galerieeintrags,
+- Schema-Migration auf Version 7,
+- Einbindung des Logos und des Namens „Styling 4 Dogs“.

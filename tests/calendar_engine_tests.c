@@ -237,7 +237,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 6, "Kalenderschema verwendet Version 6");
+    expect_int(schema_version, 7, "Kalenderschema verwendet Version 7");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -266,6 +266,11 @@ int main(void)
             &value), 0, "Benachrichtigungswarteschlange ist abfragbar");
     expect_int(value, 1, "Benachrichtigungswarteschlange wurde migriert");
     expect_int(query_single_int(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'gallery_images';",
+            &value), 0, "Galerietabelle ist abfragbar");
+    expect_int(value, 1, "Galerietabelle wurde migriert");
+    expect_int(query_single_int(
             "SELECT COUNT(*) FROM notification_templates;",
             &value), 0, "Nachrichtenvorlagen sind abfragbar");
     expect_int(value, 5, "Fünf Standard-Nachrichtenvorlagen wurden angelegt");
@@ -275,7 +280,7 @@ int main(void)
         notification_template_context context = {
                 "Marlon Test", "42", "21.08.2026", "09:00", "10:00",
                 "Komplettpflege", "Flocke", "Grund: Test",
-                "Styles 4 Dogs", "Teststraße 1", "02571 12345",
+                "Styling 4 Dogs", "Teststraße 1", "02571 12345",
                 "https://example.invalid"
         };
         char subject[NOTIFICATION_SUBJECT_SIZE];
@@ -331,6 +336,8 @@ int main(void)
                     "SMTP-Status bleibt gespeichert");
         expect_true(strcmp(loaded.password, saved.password) == 0,
                     "SMTP-Passwort wird korrekt entschlüsselt");
+        expect_true(strcmp(loaded.from_name, "Styling 4 Dogs") == 0,
+                    "Ehemaliger Standard-Absendername wird auf Styling 4 Dogs migriert");
 
         snprintf(path, sizeof(path), "%s/notification.smtp", server_config_secrets_dir());
         expect_true(stat(path, &status) == 0 && (status.st_mode & 0777) == 0600,

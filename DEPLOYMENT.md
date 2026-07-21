@@ -1,4 +1,4 @@
-# Styles 4 Dogs – Produktionsinstallation
+# Styling 4 Dogs – Produktionsinstallation
 
 Dieses Deployment installiert den C-Server als eigenen, gehärteten systemd-
 Dienst. Der Server lauscht ausschließlich auf `127.0.0.1:31337`. Öffentlicher
@@ -15,7 +15,7 @@ HTTPS-Verkehr wird über Caddy weitergeleitet.
 /etc/styles4dogs/notification.env       optionaler SMTP-Migrations-Fallback
 /etc/styles4dogs/secrets/admin.auth     vom Server erzeugtes Admin-Secret
 /etc/styles4dogs/secrets/notification.* verschlüsselte SMTP-Verbindung
-/var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank
+/var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank inklusive Galerie
 /var/backups/styles4dogs/               geprüfte Online-Backups
 ```
 
@@ -55,6 +55,15 @@ Der Installer:
 Eine vorhandene Konfiguration wird nur mit `--replace-env` ersetzt. Die alte
 Datei bleibt dabei als zeitgestempeltes Backup erhalten.
 
+
+
+## Fotogalerie
+
+Galeriebilder werden nicht lose im Document Root gespeichert, sondern als BLOB
+in der SQLite-Datenbank. Die bestehenden Backup- und Restore-Werkzeuge sichern
+damit Buchungen, Kalender, Benachrichtigungen und Fotos gemeinsam. Der Upload
+ist im Backend auf 8 MB und in Caddy auf 9 MiB inklusive Multipart-Overhead
+begrenzt.
 
 ## Caddy und HTTPS
 

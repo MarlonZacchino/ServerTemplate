@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 6
+#define CALENDAR_SCHEMA_VERSION 7
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -327,6 +327,27 @@ static int create_calendar_tables(void)
             "    body_template TEXT NOT NULL,"
             "    updated_at_utc TEXT NOT NULL"
             ");";
+
+    return execute_sql(sql);
+}
+
+
+static int create_gallery_tables(void)
+{
+    static const char *sql =
+            "CREATE TABLE IF NOT EXISTS gallery_images ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    created_at TEXT NOT NULL,"
+            "    title TEXT NOT NULL DEFAULT '',"
+            "    alt_text TEXT NOT NULL DEFAULT '',"
+            "    file_name TEXT NOT NULL UNIQUE,"
+            "    mime_type TEXT NOT NULL CHECK(mime_type IN ('image/jpeg','image/png','image/webp')),"
+            "    image_data BLOB NOT NULL,"
+            "    sort_order INTEGER NOT NULL DEFAULT 0,"
+            "    visible INTEGER NOT NULL DEFAULT 1 CHECK(visible IN (0,1))"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_gallery_images_listing "
+            "    ON gallery_images(visible DESC, sort_order ASC, id DESC);";
 
     return execute_sql(sql);
 }
@@ -657,11 +678,12 @@ static int migrate_schema(void)
     }
 
     if (create_calendar_tables() != 0 ||
+        create_gallery_tables() != 0 ||
         migrate_booking_columns() != 0 ||
         migrate_notification_jobs_v6() != 0 ||
         seed_calendar_defaults() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 6;") != 0 ||
+        execute_sql("PRAGMA user_version = 7;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;

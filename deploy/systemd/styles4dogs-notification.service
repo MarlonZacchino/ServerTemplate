@@ -1,5 +1,5 @@
 [Unit]
-Description=Send queued Styles 4 Dogs appointment notifications
+Description=Send queued Styling 4 Dogs appointment notifications
 Documentation=file:/opt/styles4dogs/share/NOTIFICATIONS.md
 After=network-online.target styles4dogs.service
 Wants=network-online.target
