@@ -1,0 +1,51 @@
+[Unit]
+Description=Send queued Styles 4 Dogs appointment notifications
+Documentation=file:/opt/styles4dogs/share/NOTIFICATIONS.md
+After=network-online.target styles4dogs.service
+Wants=network-online.target
+ConditionPathExists=/opt/styles4dogs/bin/notification_worker
+ConditionPathExists=/etc/styles4dogs/server.env
+ConditionPathExists=/etc/styles4dogs/notification.env
+ConditionPathExists=/var/lib/styles4dogs/styles4dogs.db
+
+[Service]
+Type=oneshot
+User=styles4dogs
+Group=styles4dogs
+WorkingDirectory=/opt/styles4dogs
+EnvironmentFile=/etc/styles4dogs/server.env
+EnvironmentFile=/etc/styles4dogs/notification.env
+ExecStart=/opt/styles4dogs/bin/notification_worker
+UMask=0077
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadOnlyPaths=/opt/styles4dogs /etc/styles4dogs
+ReadWritePaths=/var/lib/styles4dogs
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+LimitNOFILE=256
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

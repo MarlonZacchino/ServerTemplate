@@ -44,6 +44,8 @@ if [[ "$PURGE_DATA" -eq 1 && "$CONFIRM_PURGE" != "YES" ]]; then
     fail "set STYLES4DOGS_CONFIRM_PURGE=YES to confirm permanent deletion"
 fi
 
+systemctl disable --now styles4dogs-notification.timer 2>/dev/null || true
+systemctl stop styles4dogs-notification.service 2>/dev/null || true
 systemctl disable --now styles4dogs-backup.timer 2>/dev/null || true
 systemctl stop styles4dogs-backup.service 2>/dev/null || true
 systemctl disable --now styles4dogs.service 2>/dev/null || true
@@ -51,11 +53,14 @@ systemctl disable --now styles4dogs.service 2>/dev/null || true
 rm -f -- \
     /etc/systemd/system/styles4dogs.service \
     /etc/systemd/system/styles4dogs-backup.service \
-    /etc/systemd/system/styles4dogs-backup.timer
+    /etc/systemd/system/styles4dogs-backup.timer \
+    /etc/systemd/system/styles4dogs-notification.service \
+    /etc/systemd/system/styles4dogs-notification.timer
 rm -rf -- /opt/styles4dogs /var/www/styles4dogs
 
 systemctl daemon-reload
-systemctl reset-failed styles4dogs.service styles4dogs-backup.service 2>/dev/null || true
+systemctl reset-failed styles4dogs.service styles4dogs-backup.service \
+    styles4dogs-notification.service 2>/dev/null || true
 
 if [[ "$PURGE_DATA" -eq 1 ]]; then
     rm -rf -- /etc/styles4dogs /var/lib/styles4dogs /var/backups/styles4dogs

@@ -446,3 +446,54 @@ int calendar_time_format_hhmm(int minute, char out_text[6])
     written = snprintf(out_text, 6, "%02d:%02d", minute / 60, minute % 60);
     return written == 5 ? 0 : -1;
 }
+
+
+int calendar_local_datetime_to_epoch(
+        const char *timezone,
+        const char *date,
+        int minute,
+        time_t *out_epoch
+)
+{
+    int year;
+    int month;
+    int day;
+    struct tm local_time;
+    struct tm verification;
+    time_t epoch;
+
+    if (!timezone_is_valid(timezone) || !calendar_date_is_valid(date) ||
+        minute < 0 || minute > 1439 || out_epoch == NULL ||
+        !parse_date(date, &year, &month, &day)) {
+        return -1;
+    }
+
+    memset(&local_time, 0, sizeof(local_time));
+    local_time.tm_year = year - 1900;
+    local_time.tm_mon = month - 1;
+    local_time.tm_mday = day;
+    local_time.tm_hour = minute / 60;
+    local_time.tm_min = minute % 60;
+    local_time.tm_isdst = -1;
+
+    if (setenv("TZ", timezone, 1) != 0) {
+        return -1;
+    }
+    tzset();
+
+    epoch = mktime(&local_time);
+    if (epoch == (time_t)-1 || localtime_r(&epoch, &verification) == NULL) {
+        return -1;
+    }
+
+    if (verification.tm_year != year - 1900 ||
+        verification.tm_mon != month - 1 ||
+        verification.tm_mday != day ||
+        verification.tm_hour != minute / 60 ||
+        verification.tm_min != minute % 60) {
+        return -1;
+    }
+
+    *out_epoch = epoch;
+    return 0;
+}

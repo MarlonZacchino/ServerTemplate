@@ -43,6 +43,7 @@ check:
 	@command -v pkg-config >/dev/null || { echo 'Fehlt: pkg-config' >&2; exit 1; }
 	@pkg-config --exists libsodium || { echo 'Fehlt: libsodium für pkg-config' >&2; exit 1; }
 	@pkg-config --exists sqlite3 || { echo 'Fehlt: sqlite3 für pkg-config' >&2; exit 1; }
+	@pkg-config --exists libcurl || { echo 'Fehlt: libcurl für pkg-config' >&2; exit 1; }
 
 all: build
 

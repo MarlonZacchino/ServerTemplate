@@ -6,8 +6,10 @@ WEB_ROOT=${STYLES4DOGS_WEB_ROOT:-/var/www/styles4dogs}
 CONFIG_DIR=${STYLES4DOGS_CONFIG_DIR:-/etc/styles4dogs}
 STATE_DIR=${STYLES4DOGS_STATE_DIR:-/var/lib/styles4dogs}
 SERVICE_NAME=${STYLES4DOGS_SERVICE_NAME:-styles4dogs.service}
+NOTIFICATION_TIMER=${STYLES4DOGS_NOTIFICATION_TIMER:-styles4dogs-notification.timer}
 SKIP_SYSTEMD=${STYLES4DOGS_SKIP_SYSTEMD:-0}
 ENV_FILE=${STYLES4DOGS_ENV_FILE:-$CONFIG_DIR/server.env}
+NOTIFICATION_ENV_FILE=${STYLES4DOGS_NOTIFICATION_ENV_FILE:-$CONFIG_DIR/notification.env}
 
 failures=0
 
@@ -44,14 +46,21 @@ check_mode() {
 }
 
 [[ -x "$APP_DIR/bin/Server" ]] && ok "server binary exists" || bad "missing server binary"
+[[ -x "$APP_DIR/bin/notification_worker" ]] \
+    && ok "notification worker exists" \
+    || bad "missing notification worker"
 [[ -r "$WEB_ROOT/index.html" ]] && ok "website files exist" || bad "missing website files"
 [[ -r "$ENV_FILE" ]] && ok "server.env exists" || bad "missing server.env"
+[[ -r "$NOTIFICATION_ENV_FILE" ]] \
+    && ok "notification.env exists" \
+    || bad "missing notification.env"
 [[ -d "$CONFIG_DIR/secrets" ]] && ok "secret directory exists" || bad "missing secret directory"
 [[ -d "$STATE_DIR" ]] && ok "state directory exists" || bad "missing state directory"
 
 check_mode "$CONFIG_DIR" 750
 check_mode "$CONFIG_DIR/secrets" 700
 check_mode "$ENV_FILE" 640
+check_mode "$NOTIFICATION_ENV_FILE" 640
 check_mode "$STATE_DIR" 750
 check_mode "$STATE_DIR/styles4dogs.db" 600
 check_mode "$CONFIG_DIR/secrets/admin.auth" 600
@@ -63,6 +72,12 @@ if [[ "$SKIP_SYSTEMD" != 1 ]]; then
     systemctl is-active --quiet "$SERVICE_NAME" \
         && ok "$SERVICE_NAME is active" \
         || bad "$SERVICE_NAME is not active"
+    systemctl is-enabled --quiet "$NOTIFICATION_TIMER" \
+        && ok "$NOTIFICATION_TIMER is enabled" \
+        || bad "$NOTIFICATION_TIMER is not enabled"
+    systemctl is-active --quiet "$NOTIFICATION_TIMER" \
+        && ok "$NOTIFICATION_TIMER is active" \
+        || bad "$NOTIFICATION_TIMER is not active"
 fi
 
 if [[ -r "$ENV_FILE" ]]; then
@@ -71,6 +86,13 @@ if [[ -r "$ENV_FILE" ]]; then
         ok "trusted proxy token is configured"
     else
         bad "trusted proxy token is missing or invalid"
+    fi
+
+    COUNTRY_CODE=$(read_env_value STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE || true)
+    if [[ "$COUNTRY_CODE" =~ ^[1-9][0-9]{0,3}$ ]]; then
+        ok "default phone country code is configured"
+    else
+        bad "default phone country code is missing or invalid"
     fi
 
     HOST=$(read_env_value STYLES4DOGS_BIND_ADDRESS)
@@ -106,6 +128,18 @@ if [[ -r "$ENV_FILE" ]]; then
     [[ "$HTTP_READY" -eq 1 ]] \
         && ok "HTTP health check returned 200" \
         || bad "unexpected HTTP status: ${status_line:-no response from $HOST:$PORT}"
+fi
+
+if [[ -r "$NOTIFICATION_ENV_FILE" ]]; then
+    SMTP_URL=$(awk -F= '$1 == "STYLES4DOGS_SMTP_URL" {sub(/^[^=]*=/, ""); print; exit}' \
+        "$NOTIFICATION_ENV_FILE")
+    SMTP_FROM=$(awk -F= '$1 == "STYLES4DOGS_SMTP_FROM_ADDRESS" {sub(/^[^=]*=/, ""); print; exit}' \
+        "$NOTIFICATION_ENV_FILE")
+    if [[ -n "$SMTP_URL" && -n "$SMTP_FROM" ]]; then
+        ok "SMTP delivery is configured"
+    else
+        ok "SMTP delivery is not configured yet; queued mail remains unsent"
+    fi
 fi
 
 if ((failures > 0)); then

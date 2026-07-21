@@ -81,6 +81,14 @@ int booking_database_for_each_filtered(
         void *context
 );
 
+/* Liefert offene und bestätigte Termine in einem inklusiven Datumsbereich. */
+int booking_database_for_each_appointment(
+        const char *from_date,
+        const char *to_date,
+        booking_record_callback callback,
+        void *context
+);
+
 /* Liefert die globalen Anzahlen pro Status für die Adminübersicht. */
 int booking_database_get_status_counts(booking_status_counts *counts);
 

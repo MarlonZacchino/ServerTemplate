@@ -149,14 +149,15 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 4:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 4, erhalten {schema_version}")
+            if schema_version != 5:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 5, erhalten {schema_version}")
 
             required_tables = {
                 "services",
                 "calendar_settings",
                 "weekly_opening_hours",
                 "calendar_closures",
+                "notification_jobs",
             }
             existing_tables = {
                 row[0]
@@ -908,6 +909,8 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "reminder_lead_hours": "24",
+                "reminder_enabled": "1",
             }),
         ).encode())
         assert_status(invalid_csrf_response, "403 Forbidden")
@@ -922,6 +925,8 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "reminder_lead_hours": "24",
+                "reminder_enabled": "1",
             }),
         ).encode())
         settings_headers, _ = assert_status(settings_response, "303 See Other")
@@ -1089,7 +1094,8 @@ def run_stateful_tests() -> int:
         with sqlite3.connect(database_file) as connection:
             settings = connection.execute(
                 "SELECT min_notice_minutes, booking_horizon_days, "
-                "slot_interval_minutes, pending_hold_minutes, auto_confirm_bookings "
+                "slot_interval_minutes, pending_hold_minutes, auto_confirm_bookings, "
+                "email_notifications_enabled, reminder_enabled, reminder_lead_minutes "
                 "FROM calendar_settings WHERE id = 1"
             ).fetchone()
             periods = connection.execute(
@@ -1107,7 +1113,7 @@ def run_stateful_tests() -> int:
                 (target_date, target_date, "Testurlaub"),
             ).fetchone()
 
-        if settings != (0, 120, 30, 720, 0):
+        if settings != (0, 120, 30, 720, 0, 0, 1, 1440):
             raise AssertionError(f"Buchungsregeln wurden falsch gespeichert: {settings!r}")
         if periods != [(540, 720), (780, 1020)]:
             raise AssertionError(f"Öffnungszeiten wurden falsch gespeichert: {periods!r}")
@@ -1179,7 +1185,10 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "reminder_lead_hours": "168",
                 "auto_confirm_bookings": "1",
+                "email_notifications_enabled": "1",
+                "reminder_enabled": "1",
             }),
         ).encode())
         assert_status(enable_response, "303 See Other")
@@ -1231,14 +1240,35 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             row = connection.execute(
-                "SELECT decision_status, hold_expires_at, decision_at, contact_channel, email "
+                "SELECT id, decision_status, hold_expires_at, decision_at, contact_channel, email "
                 "FROM bookings WHERE customer_name = 'Auto Bestätigung' "
                 "ORDER BY id DESC LIMIT 1"
             ).fetchone()
-        if row is None or row[0] != "confirmed" or row[1] is not None or not row[2] or row[3:] != (
+            if row is None:
+                raise AssertionError("Automatisch bestätigter Termin fehlt")
+            notification = connection.execute(
+                "SELECT status, recipient_email, subject, body_text, ics_content "
+                "FROM notification_jobs WHERE booking_id = ? AND event_type = 'booking_confirmed'",
+                (row[0],),
+            ).fetchone()
+
+            reminder_date = (datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=1)).date().isoformat()
+            connection.execute(
+                "UPDATE bookings SET appointment_date = ? WHERE id = ?",
+                (reminder_date, row[0]),
+            )
+            connection.commit()
+
+        if row[1] != "confirmed" or row[2] is not None or not row[3] or row[4:] != (
             "email", "auto@example.invalid"
         ):
             raise AssertionError(f"Automatisch bestätigter Termin wurde falsch gespeichert: {row!r}")
+        if notification is None or notification[0] != "pending" or notification[1] != "auto@example.invalid":
+            raise AssertionError(f"Bestätigungs-E-Mail wurde nicht eingereiht: {notification!r}")
+        if "Termin bestätigt" not in notification[2] or "Auto Bestätigung" not in notification[3]:
+            raise AssertionError("Bestätigungs-E-Mail enthält nicht die erwarteten Termindaten")
+        if "BEGIN:VCALENDAR" not in notification[4] or "BEGIN:VEVENT" not in notification[4]:
+            raise AssertionError("Bestätigungs-E-Mail enthält keine gültige Kalenderdatei")
 
         disable_response = raw_request(request_text(
             "POST",
@@ -1250,9 +1280,70 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "reminder_lead_hours": "168",
+                "email_notifications_enabled": "1",
+                "reminder_enabled": "1",
             }),
         ).encode())
         assert_status(disable_response, "303 See Other")
+
+
+    def admin_appointments_workflow() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        with sqlite3.connect(database_file) as connection:
+            row = connection.execute(
+                "SELECT appointment_date, id FROM bookings "
+                "WHERE customer_name = 'Auto Bestätigung' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise AssertionError("Testtermin für die Adminansicht fehlt")
+
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        response = raw_request(request_text(
+            "GET",
+            f"/admin/appointments?view=day&date={row[0]}",
+            auth_headers,
+        ).encode())
+        headers, body = assert_status(response, "200 OK")
+        if headers.get("cache-control") != "no-store":
+            raise AssertionError("Admin-Terminkalender setzt Cache-Control: no-store nicht")
+
+        page = body.decode("utf-8")
+        for expected in (
+            "Terminkalender",
+            "Auto Bestätigung",
+            "Milo",
+            "Komplettpflege Premium",
+            "E-Mail schreiben",
+            f"/admin/bookings?search={row[1]}",
+            "Versandbereit",
+        ):
+            if expected not in page:
+                raise AssertionError(f"Admin-Terminkalender enthält {expected!r} nicht")
+
+        week_response = raw_request(request_text(
+            "GET",
+            f"/admin/appointments?view=week&date={row[0]}",
+            auth_headers,
+        ).encode())
+        _, week_body = assert_status(week_response, "200 OK")
+        if "Woche" not in week_body.decode("utf-8"):
+            raise AssertionError("Wochenansicht wurde nicht ausgeliefert")
+
+        invalid_response = raw_request(request_text(
+            "GET",
+            f"/admin/appointments?view=month&date={row[0]}",
+            auth_headers,
+        ).encode())
+        assert_status(invalid_response, "400 Bad Request")
+
 
 
     def rate_limiting() -> None:
@@ -1412,6 +1503,7 @@ def run_stateful_tests() -> int:
     check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)
     check("Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten", admin_calendar_workflow)
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
+    check("Admin sieht Termine in Tages- und Wochenansicht", admin_appointments_workflow)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 
     return failures
@@ -1448,6 +1540,7 @@ def main() -> int:
     add_status(cannon, "POST auf unbekannte Route", request_text("POST", "/unbekannt"), "404 Not Found")
     add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "401 Unauthorized")
     add_status(cannon, "Admin-Kalender ohne Zugangsdaten", request_text("GET", "/admin/calendar"), "401 Unauthorized")
+    add_status(cannon, "Admin-Terminkalender ohne Zugangsdaten", request_text("GET", "/admin/appointments"), "401 Unauthorized")
     add_status(cannon, "Adminbereich mit ungültigem Basic Token", request_text(
         "GET", "/admin/bookings", {"Authorization": "Basic !!!"}
     ), "401 Unauthorized")
@@ -1461,7 +1554,7 @@ def main() -> int:
         "POST",
         "/admin/calendar/settings",
         {"Content-Type": "application/x-www-form-urlencoded"},
-        "min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24&csrf_token=invalid",
+        "min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24&reminder_lead_hours=24&csrf_token=invalid",
     ), "401 Unauthorized")
     add_status(cannon, "Terminannahme ohne Zugangsdaten", request_text(
         "POST",

@@ -913,7 +913,8 @@ int booking_database_for_each_filtered(
             "       OR contact LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR email LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR phone_number LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
-            "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE) "
+            "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR CAST(id AS TEXT) LIKE ?2 ESCAPE '\\') "
             "ORDER BY created_at DESC, id DESC;",
             -1,
             &statement,
@@ -978,6 +979,93 @@ int booking_database_for_each_filtered(
 
     if (step_result != SQLITE_DONE) {
         set_sqlite_error("Gefilterte Buchungsabfrage konnte nicht vollständig ausgeführt werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
+
+int booking_database_for_each_appointment(
+        const char *from_date,
+        const char *to_date,
+        booking_record_callback callback,
+        void *context
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (database == NULL || from_date == NULL || to_date == NULL ||
+        strlen(from_date) != 10 || strlen(to_date) != 10 ||
+        strcmp(from_date, to_date) > 0 || callback == NULL) {
+        set_error_text("Ungültige Terminbereichsabfrage");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            database,
+            "SELECT id, created_at, status, customer_name, contact, dog_name, "
+            "       dog_size, service, preferred_date, message, legacy, "
+            "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
+            "       contact_channel, email, phone_number, phone_kind, contact_preference, "
+            "       decision_at, rejection_reason, service_name_snapshot, "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
+            "FROM bookings "
+            "WHERE appointment_date BETWEEN ?1 AND ?2 "
+            "  AND decision_status IN ('pending', 'confirmed') "
+            "ORDER BY appointment_date, start_minute, id;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, from_date, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, to_date, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Terminbereich konnte nicht vorbereitet werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        booking_record record = {
+                .id = sqlite3_column_int64(statement, 0),
+                .created_at = column_text_or_empty(statement, 1),
+                .status = column_text_or_empty(statement, 2),
+                .name = column_text_or_empty(statement, 3),
+                .contact = column_text_or_empty(statement, 4),
+                .dog_name = column_text_or_empty(statement, 5),
+                .dog_size = column_text_or_empty(statement, 6),
+                .service = column_text_or_empty(statement, 7),
+                .preferred_date = column_text_or_empty(statement, 8),
+                .message = column_text_or_empty(statement, 9),
+                .legacy = sqlite3_column_int(statement, 10) != 0,
+                .appointment_date = column_text_or_empty(statement, 11),
+                .start_minute = sqlite3_column_type(statement, 12) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 12),
+                .end_minute = sqlite3_column_type(statement, 13) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 13),
+                .decision_status = column_text_or_empty(statement, 14),
+                .hold_expires_at = column_text_or_empty(statement, 15),
+                .contact_channel = column_text_or_empty(statement, 16),
+                .email = column_text_or_empty(statement, 17),
+                .phone_number = column_text_or_empty(statement, 18),
+                .phone_kind = column_text_or_empty(statement, 19),
+                .contact_preference = column_text_or_empty(statement, 20),
+                .decision_at = column_text_or_empty(statement, 21),
+                .rejection_reason = column_text_or_empty(statement, 22),
+                .service_name_snapshot = column_text_or_empty(statement, 23),
+                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 24) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 24),
+                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 25) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 25)
+        };
+
+        callback(&record, context);
+    }
+
+    if (step_result != SQLITE_DONE) {
+        set_sqlite_error("Terminbereich konnte nicht vollständig gelesen werden");
         sqlite3_finalize(statement);
         return -1;
     }

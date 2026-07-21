@@ -21,6 +21,9 @@ typedef struct calendar_settings {
     int pending_hold_minutes;
     int capacity;
     bool auto_confirm_bookings;
+    bool email_notifications_enabled;
+    bool reminder_enabled;
+    int reminder_lead_minutes;
 } calendar_settings;
 
 typedef struct calendar_service {
@@ -131,6 +134,12 @@ int calendar_database_add_closure(
 );
 int calendar_database_delete_closure(int64_t closure_id);
 int calendar_database_for_each_closure(
+        calendar_closure_callback callback,
+        void *context
+);
+int calendar_database_for_each_closure_in_range(
+        const char *from_date,
+        const char *to_date,
         calendar_closure_callback callback,
         void *context
 );

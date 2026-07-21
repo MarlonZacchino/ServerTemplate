@@ -49,6 +49,11 @@
 #define CONFIG_ERROR_SIZE 512
 #define CONFIG_ADDRESS_SIZE INET_ADDRSTRLEN
 #define CONFIG_PROXY_TOKEN_SIZE 129
+#define CONFIG_SALON_NAME_SIZE 128
+#define CONFIG_SALON_ADDRESS_SIZE 256
+#define CONFIG_SALON_PHONE_SIZE 64
+#define CONFIG_PUBLIC_BASE_URL_SIZE 256
+#define CONFIG_COUNTRY_CODE_SIZE 5
 
 typedef struct server_config_state {
     bool initialized;
@@ -61,6 +66,11 @@ typedef struct server_config_state {
     char database_file[PATH_MAX];
     char legacy_booking_file[PATH_MAX];
     char trusted_proxy_token[CONFIG_PROXY_TOKEN_SIZE];
+    char salon_name[CONFIG_SALON_NAME_SIZE];
+    char salon_address[CONFIG_SALON_ADDRESS_SIZE];
+    char salon_phone[CONFIG_SALON_PHONE_SIZE];
+    char public_base_url[CONFIG_PUBLIC_BASE_URL_SIZE];
+    char default_phone_country_code[CONFIG_COUNTRY_CODE_SIZE];
 } server_config_state;
 
 static server_config_state config;
@@ -344,6 +354,119 @@ static int load_trusted_proxy_token(void)
     return 0;
 }
 
+
+static int copy_optional_value(
+        char *destination,
+        size_t destination_size,
+        const char *value,
+        const char *description
+)
+{
+    size_t length;
+
+    if (destination == NULL || destination_size == 0 || value == NULL) {
+        set_error("Interner Fehler beim Laden optionaler Serverkonfiguration");
+        return -1;
+    }
+
+    length = strlen(value);
+    if (length >= destination_size) {
+        set_error_with_value(description, "ist zu lang");
+        return -1;
+    }
+
+    memcpy(destination, value, length + 1);
+    return 0;
+}
+
+static bool public_value_is_single_line(const char *value)
+{
+    if (value == NULL) {
+        return false;
+    }
+
+    for (size_t index = 0; value[index] != '\0'; index++) {
+        unsigned char character = (unsigned char)value[index];
+
+        if (character < 32 || character == 127) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool public_url_is_valid(const char *url)
+{
+    if (!public_value_is_single_line(url)) {
+        return false;
+    }
+
+    return strncmp(url, "https://", strlen("https://")) == 0 ||
+           strncmp(url, "http://", strlen("http://")) == 0;
+}
+
+static int load_public_identity(void)
+{
+    const char *country_code = environment_or_default(
+            "STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE", "49", NULL);
+    size_t country_length = strlen(country_code);
+
+    if (copy_nonempty_value(
+            config.salon_name,
+            sizeof(config.salon_name),
+            environment_or_default("STYLES4DOGS_SALON_NAME", "Styles 4 Dogs", NULL),
+            "STYLES4DOGS_SALON_NAME") != 0 ||
+        copy_optional_value(
+            config.salon_address,
+            sizeof(config.salon_address),
+            environment_or_default("STYLES4DOGS_SALON_ADDRESS", "", NULL),
+            "STYLES4DOGS_SALON_ADDRESS") != 0 ||
+        copy_optional_value(
+            config.salon_phone,
+            sizeof(config.salon_phone),
+            environment_or_default("STYLES4DOGS_SALON_PHONE", "", NULL),
+            "STYLES4DOGS_SALON_PHONE") != 0 ||
+        copy_nonempty_value(
+            config.public_base_url,
+            sizeof(config.public_base_url),
+            environment_or_default(
+                    "STYLES4DOGS_PUBLIC_BASE_URL",
+                    "http://127.0.0.1:8080",
+                    NULL),
+            "STYLES4DOGS_PUBLIC_BASE_URL") != 0) {
+        return -1;
+    }
+
+    if (!public_value_is_single_line(config.salon_name) ||
+        !public_value_is_single_line(config.salon_address) ||
+        !public_value_is_single_line(config.salon_phone) ||
+        !public_url_is_valid(config.public_base_url)) {
+        set_error("Salonangaben müssen einzeilig sein; die öffentliche URL muss mit http:// oder https:// beginnen");
+        return -1;
+    }
+
+    if (country_length < 1 || country_length > 4) {
+        set_error("STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE muss 1 bis 4 Ziffern enthalten");
+        return -1;
+    }
+
+    for (size_t index = 0; index < country_length; index++) {
+        if (country_code[index] < '0' || country_code[index] > '9') {
+            set_error("STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE darf nur Ziffern enthalten");
+            return -1;
+        }
+    }
+
+    if (country_code[0] == '0') {
+        set_error("STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE darf nicht mit 0 beginnen");
+        return -1;
+    }
+
+    memcpy(config.default_phone_country_code, country_code, country_length + 1);
+    return 0;
+}
+
 static int load_file_path(
         char *destination,
         size_t destination_size,
@@ -434,6 +557,7 @@ int server_config_initialize(void)
             config.document_root,
             sizeof(config.document_root)) != 0 ||
         load_trusted_proxy_token() != 0 ||
+        load_public_identity() != 0 ||
         copy_nonempty_value(
             config.secrets_dir,
             sizeof(config.secrets_dir),
@@ -563,4 +687,29 @@ const char *server_config_legacy_booking_file(void)
 const char *server_config_trusted_proxy_token(void)
 {
     return config.trusted_proxy_token;
+}
+
+const char *server_config_salon_name(void)
+{
+    return config.salon_name;
+}
+
+const char *server_config_salon_address(void)
+{
+    return config.salon_address;
+}
+
+const char *server_config_salon_phone(void)
+{
+    return config.salon_phone;
+}
+
+const char *server_config_public_base_url(void)
+{
+    return config.public_base_url;
+}
+
+const char *server_config_default_phone_country_code(void)
+{
+    return config.default_phone_country_code;
 }

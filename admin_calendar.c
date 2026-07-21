@@ -341,6 +341,11 @@ static void append_settings_form(
     append_integer(page, settings->pending_hold_minutes / 60);
     str_cat_cstr(page,
             "\"></label>\n"
+            "                    <label>Erinnerung vor Termin in Stunden"
+            "<input name=\"reminder_lead_hours\" type=\"number\" min=\"1\" max=\"168\" required value=\"");
+    append_integer(page, settings->reminder_lead_minutes / 60);
+    str_cat_cstr(page,
+            "\"></label>\n"
             "                </div>\n"
             "                <label class=\"admin-checkbox admin-confirmation-setting\">"
             "<input type=\"checkbox\" name=\"auto_confirm_bookings\" value=\"1\"");
@@ -349,7 +354,22 @@ static void append_settings_form(
     }
     str_cat_cstr(page,
             "> Neue freie Termine automatisch verbindlich bestätigen</label>\n"
-            "                <p class=\"admin-calendar-hint\">Bei deaktivierter Automatik bleibt ein Termin bis zur Annahme im Status „angefragt“. Zeitzone: <strong>");
+            "                <label class=\"admin-checkbox\"><input type=\"checkbox\" "
+            "name=\"email_notifications_enabled\" value=\"1\"");
+    if (settings->email_notifications_enabled) {
+        str_cat_cstr(page, " checked");
+    }
+    str_cat_cstr(page,
+            "> E-Mail-Bestätigungen und Absagen in die Versandwarteschlange stellen</label>\n"
+            "                <label class=\"admin-checkbox\"><input type=\"checkbox\" "
+            "name=\"reminder_enabled\" value=\"1\"");
+    if (settings->reminder_enabled) {
+        str_cat_cstr(page, " checked");
+    }
+    str_cat_cstr(page,
+            "> Automatische E-Mail-Erinnerung vor bestätigten Terminen</label>\n"
+            "                <p class=\"admin-calendar-hint\">E-Mails werden asynchron über den Benachrichtigungs-Worker versendet. "
+            "Bei deaktivierter Automatik bleibt ein Termin bis zur Annahme im Status „angefragt“. Zeitzone: <strong>");
     append_html_text(page, settings->timezone);
     str_cat_cstr(page,
             "</strong>. Die Kapazität bleibt vorerst auf einen Hund gleichzeitig begrenzt.</p>\n"
@@ -719,7 +739,8 @@ string *admin_calendar_build_page(
             "        <nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
             "<a href=\"/\">Website öffnen</a>"
             "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
-            "<a href=\"/admin/calendar\" aria-current=\"page\">Kalender</a></nav>\n"
+            "<a href=\"/admin/appointments\">Termine</a>"
+            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a></nav>\n"
             "    </div></header>\n"
             "    <main class=\"page admin-page admin-calendar-page\">\n"
             "        <section class=\"card admin-card admin-calendar-intro\">\n"
@@ -760,20 +781,24 @@ admin_calendar_result admin_calendar_update_settings(const string *request)
     char horizon_text[32];
     char interval_text[32];
     char hold_hours_text[32];
+    char reminder_lead_hours_text[32];
     int min_notice_hours;
     int booking_horizon_days;
     int slot_interval_minutes;
     int hold_hours;
+    int reminder_lead_hours;
 
     if (request == NULL ||
         !get_required_field(request, "min_notice_hours", min_notice_hours_text, sizeof(min_notice_hours_text)) ||
         !get_required_field(request, "booking_horizon_days", horizon_text, sizeof(horizon_text)) ||
         !get_required_field(request, "slot_interval_minutes", interval_text, sizeof(interval_text)) ||
         !get_required_field(request, "pending_hold_hours", hold_hours_text, sizeof(hold_hours_text)) ||
+        !get_required_field(request, "reminder_lead_hours", reminder_lead_hours_text, sizeof(reminder_lead_hours_text)) ||
         !parse_integer_text(min_notice_hours_text, 0, 8760, &min_notice_hours) ||
         !parse_integer_text(horizon_text, 1, 730, &booking_horizon_days) ||
         !parse_integer_text(interval_text, 5, 60, &slot_interval_minutes) ||
-        !parse_integer_text(hold_hours_text, 1, 168, &hold_hours)) {
+        !parse_integer_text(hold_hours_text, 1, 168, &hold_hours) ||
+        !parse_integer_text(reminder_lead_hours_text, 1, 168, &reminder_lead_hours)) {
         set_error("Ungültige Buchungsregeln");
         return ADMIN_CALENDAR_BAD_REQUEST;
     }
@@ -799,6 +824,9 @@ admin_calendar_result admin_calendar_update_settings(const string *request)
     settings.pending_hold_minutes = hold_hours * 60;
     settings.capacity = 1;
     settings.auto_confirm_bookings = checkbox_is_checked(request, "auto_confirm_bookings");
+    settings.email_notifications_enabled = checkbox_is_checked(request, "email_notifications_enabled");
+    settings.reminder_enabled = checkbox_is_checked(request, "reminder_enabled");
+    settings.reminder_lead_minutes = reminder_lead_hours * 60;
 
     if (calendar_database_update_settings(&settings) != 0) {
         set_database_error("Buchungsregeln konnten nicht gespeichert werden");

@@ -2,6 +2,7 @@
 #define STYLES4DOGS_CALENDAR_TIME_H
 
 #include <stdbool.h>
+#include <time.h>
 
 typedef struct calendar_clock_snapshot {
     char local_date[11];
@@ -53,5 +54,13 @@ int calendar_time_parse_hhmm(const char *text, int *out_minute);
 
 /* Formatiert Minuten seit Mitternacht als HH:MM. */
 int calendar_time_format_hhmm(int minute, char out_text[6]);
+
+/* Wandelt ein lokales Salon-Datum samt Minute in einen Unix-Zeitpunkt um. */
+int calendar_local_datetime_to_epoch(
+        const char *timezone,
+        const char *date,
+        int minute,
+        time_t *out_epoch
+);
 
 #endif

@@ -7,10 +7,12 @@ HTTPS-Verkehr wird über Caddy weitergeleitet.
 ## Zielstruktur
 
 ```text
-/opt/styles4dogs/bin/Server             Programm
+/opt/styles4dogs/bin/Server             Webserver
+/opt/styles4dogs/bin/notification_worker Benachrichtigungs-Worker
 /opt/styles4dogs/bin/styles4dogs-*      Betriebswerkzeuge
 /var/www/styles4dogs/                   schreibgeschützte Website
-/etc/styles4dogs/server.env             root-verwaltete Konfiguration
+/etc/styles4dogs/server.env             root-verwaltete Serverkonfiguration
+/etc/styles4dogs/notification.env       geschützte SMTP-Konfiguration
 /etc/styles4dogs/secrets/admin.auth     vom Server erzeugtes Admin-Secret
 /var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank
 /var/backups/styles4dogs/               geprüfte Online-Backups
@@ -23,7 +25,7 @@ Verzeichnis. Der Server darf nur `secrets/` und `/var/lib/styles4dogs` ändern.
 
 ```bash
 sudo pacman -S --needed \
-  base-devel cmake ninja pkgconf libsodium sqlite systemd
+  base-devel cmake ninja pkgconf libsodium sqlite curl systemd
 ```
 
 ## Installation oder Upgrade
@@ -43,8 +45,9 @@ Der Installer:
 4. erhält eine bestehende `server.env`,
 5. erzeugt bei Bedarf ein zufälliges internes Proxy-Token,
 6. erstellt vor einem Upgrade ein SQLite-Backup,
-7. installiert und startet Service sowie täglichen Backup-Timer,
-8. prüft Rechte und lokale HTTP-Erreichbarkeit.
+7. installiert Webserver, Benachrichtigungs-Worker und systemd-Units,
+8. startet Backup- und Benachrichtigungs-Timer,
+9. prüft Rechte und lokale HTTP-Erreichbarkeit.
 
 Eine vorhandene Konfiguration wird nur mit `--replace-env` ersetzt. Die alte
 Datei bleibt dabei als zeitgestempeltes Backup erhalten.
@@ -97,9 +100,10 @@ sudo /opt/styles4dogs/bin/styles4dogs-verify
 Timer prüfen:
 
 ```bash
-systemctl list-timers styles4dogs-backup.timer
+systemctl list-timers styles4dogs-backup.timer styles4dogs-notification.timer
 sudo systemctl start styles4dogs-backup.service
 journalctl -u styles4dogs-backup.service
+journalctl -u styles4dogs-notification.service
 ```
 
 ## Manuelles Backup
@@ -165,4 +169,28 @@ sudo systemd-analyze verify /etc/systemd/system/styles4dogs.service
 sudo systemctl daemon-reload
 sudo systemctl restart styles4dogs
 systemd-analyze security styles4dogs.service
+```
+
+
+## Terminübersicht und E-Mail-Versand
+
+Der geschützte Tages-/Wochenkalender ist erreichbar unter:
+
+```text
+/admin/appointments
+```
+
+SMTP wird in `/etc/styles4dogs/notification.env` eingerichtet. Der Worker läuft
+als eigener gehärteter Oneshoot-Dienst und erhält – anders als der Webserver –
+ausgehenden Netzwerkzugriff. Der Webserver bleibt weiterhin auf localhost und
+ohne ausgehende Verbindungen beschränkt. Vollständige Hinweise stehen in
+`NOTIFICATIONS.md`.
+
+Nach Änderungen:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart styles4dogs
+sudo systemctl restart styles4dogs-notification.timer
+sudo /opt/styles4dogs/bin/styles4dogs-verify
 ```

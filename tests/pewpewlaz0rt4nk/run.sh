@@ -10,6 +10,7 @@ DATA_DIR="$RUNTIME_DIR/data"
 DATABASE_FILE="$DATA_DIR/styles4dogs.db"
 LEGACY_BOOKING_FILE="$DATA_DIR/bookings.txt"
 SERVER_LOG="$BUILD_DIR/server.log"
+NOTIFICATION_OUTPUT_DIR="$BUILD_DIR/notification-out"
 SERVER_PID=""
 TEST_HOST=127.0.0.1
 TEST_PORT=31338
@@ -68,7 +69,7 @@ chmod 600 "$LEGACY_BOOKING_FILE"
 cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug
 
-cmake --build "$BUILD_DIR" --target Server calendar_engine_tests
+cmake --build "$BUILD_DIR" --target Server notification_worker calendar_engine_tests
 
 CALENDAR_TEST_RUNTIME="$BUILD_DIR/calendar-engine-runtime"
 rm -rf -- "$CALENDAR_TEST_RUNTIME"
@@ -121,6 +122,31 @@ STYLES4DOGS_TEST_DATABASE_FILE="$DATABASE_FILE" \
 STYLES4DOGS_TEST_PROXY_TOKEN="$TEST_PROXY_TOKEN" \
     python3 "$SCRIPT_DIR/tests_styles4dogs.py" "$TEST_HOST" "$TEST_PORT"
 
+rm -rf -- "$NOTIFICATION_OUTPUT_DIR"
+mkdir -p -- "$NOTIFICATION_OUTPUT_DIR"
+
+env "${SERVER_ENV[@]}" \
+    "$BUILD_DIR/notification_worker" --dry-run "$NOTIFICATION_OUTPUT_DIR"
+
+CONFIRMATION_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
+    -name '*-booking_confirmed.eml' -print -quit)
+REMINDER_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
+    -name '*-appointment_reminder.eml' -print -quit)
+
+if [[ -z "$CONFIRMATION_MAIL" || -z "$REMINDER_MAIL" ]]; then
+    echo "Fehler: Bestätigungs- oder Erinnerungs-E-Mail wurde im Dry-Run nicht erzeugt." >&2
+    find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f -print >&2
+    exit 1
+fi
+
+grep -Fq 'BEGIN:VCALENDAR' "$CONFIRMATION_MAIL"
+grep -Fq 'BEGIN:VCALENDAR' "$REMINDER_MAIL"
+grep -Fq 'DTSTART:' "$CONFIRMATION_MAIL"
+grep -Fq 'DTEND:' "$REMINDER_MAIL"
+
+echo "* Benachrichtigungs-Worker"
+echo "    Bestätigung, Erinnerung und ICS-Daten im Dry-Run: Ok"
+
 COUNT_BEFORE=$(python3 - "$DATABASE_FILE" <<'PY'
 import sqlite3
 import sys
@@ -170,3 +196,11 @@ assert_configuration_rejected \
     "Zu kurzes Proxy-Token" \
     "STYLES4DOGS_TRUSTED_PROXY_TOKEN muss zwischen 32 und 128 Zeichen lang sein" \
     "STYLES4DOGS_TRUSTED_PROXY_TOKEN=zu-kurz"
+assert_configuration_rejected \
+    "Ungültige öffentliche URL" \
+    "öffentliche URL muss mit http:// oder https:// beginnen" \
+    "STYLES4DOGS_PUBLIC_BASE_URL=ftp://example.invalid"
+assert_configuration_rejected \
+    "Ungültige Telefon-Landesvorwahl" \
+    "STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE darf nicht mit 0 beginnen" \
+    "STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=049"

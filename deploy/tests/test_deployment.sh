@@ -23,17 +23,30 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
     --no-backup-timer
 
 [[ -x "$STAGING_ROOT/opt/styles4dogs/bin/Server" ]]
+[[ -x "$STAGING_ROOT/opt/styles4dogs/bin/notification_worker" ]]
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/index.html" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/server.env" ]]
+[[ -f "$STAGING_ROOT/etc/styles4dogs/notification.env" ]]
+[[ "$(stat -c '%a' "$STAGING_ROOT/etc/styles4dogs/notification.env")" == "640" ]]
 [[ -f "$STAGING_ROOT/etc/systemd/system/styles4dogs.service" ]]
+[[ -f "$STAGING_ROOT/etc/systemd/system/styles4dogs-notification.service" ]]
+[[ -f "$STAGING_ROOT/etc/systemd/system/styles4dogs-notification.timer" ]]
 [[ -x "$STAGING_ROOT/opt/styles4dogs/bin/styles4dogs-install-caddy" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CADDY_DEPLOYMENT.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/RATE_LIMITING.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE5.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Eq '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=[A-Za-z0-9_-]{32,128}$' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
+grep -Fq 'STYLES4DOGS_SALON_NAME=Styles 4 Dogs' \
+    "$STAGING_ROOT/etc/styles4dogs/server.env"
+grep -Fq 'STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49' \
+    "$STAGING_ROOT/etc/styles4dogs/server.env"
+grep -Fq 'STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs' \
+    "$STAGING_ROOT/etc/styles4dogs/notification.env"
 
 # Simulate the Arch Linux package Caddyfile, which already imports the whole
 # conf.d directory. The installer must reuse this import instead of adding a
@@ -78,7 +91,9 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     systemd-analyze verify --recursive-errors=no --root="$STAGING_ROOT" \
         styles4dogs.service \
         styles4dogs-backup.service \
-        styles4dogs-backup.timer
+        styles4dogs-backup.timer \
+        styles4dogs-notification.service \
+        styles4dogs-notification.timer
 fi
 
 sqlite3 "$TEST_DATABASE" <<'SQL'

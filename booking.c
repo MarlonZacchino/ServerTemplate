@@ -5,6 +5,8 @@
 #include "booking.h"
 
 #include "contact_validation.h"
+#include "contact_links.h"
+#include "server_config.h"
 
 #include "booking_database.h"
 #include "calendar_time.h"
@@ -825,6 +827,49 @@ static void append_contact_details(string *page, const booking_record *record)
     append_booking_detail(page, "Kontakt", record->contact, "Nicht angegeben");
 }
 
+
+static void append_contact_quick_actions(string *page, const booking_record *record)
+{
+    char e164[32];
+    char whatsapp_digits[32];
+
+    if (page == NULL || record == NULL) {
+        return;
+    }
+
+    str_cat_cstr(page, "<div class=\"contact-quick-actions\">");
+
+    if (record->contact_channel != NULL &&
+        strcmp(record->contact_channel, "email") == 0 &&
+        record->email != NULL && record->email[0] != '\0') {
+        str_cat_cstr(page, "<a class=\"button button-small button-secondary\" href=\"mailto:");
+        append_html_text(page, record->email);
+        str_cat_cstr(page, "\">E-Mail schreiben</a>");
+    } else if (record->contact_channel != NULL &&
+               strcmp(record->contact_channel, "phone") == 0 &&
+               record->phone_number != NULL &&
+               contact_phone_to_e164(
+                       record->phone_number,
+                       server_config_default_phone_country_code(),
+                       e164,
+                       sizeof(e164))) {
+        str_cat_cstr(page, "<a class=\"button button-small button-secondary\" href=\"tel:");
+        append_html_text(page, e164);
+        str_cat_cstr(page, "\">Anrufen</a>");
+
+        if (record->phone_kind != NULL && strcmp(record->phone_kind, "mobile") == 0 &&
+            contact_e164_to_whatsapp_digits(e164, whatsapp_digits, sizeof(whatsapp_digits))) {
+            str_cat_cstr(page,
+                    "<a class=\"button button-small button-whatsapp\" target=\"_blank\" "
+                    "rel=\"noopener noreferrer\" href=\"https://wa.me/");
+            append_html_text(page, whatsapp_digits);
+            str_cat_cstr(page, "\">WhatsApp öffnen</a>");
+        }
+    }
+
+    str_cat_cstr(page, "</div>");
+}
+
 static void append_decision_form(
         string *page,
         const booking_record *record,
@@ -959,9 +1004,9 @@ static void append_booking_card(
         append_booking_detail(page, "Format", "Frühere Anfrage", "Frühere Anfrage");
     }
 
-    str_cat_cstr(page,
-            "                </div>\n"
-            "                <div class=\"booking-message\">");
+    str_cat_cstr(page, "                </div>\n");
+    append_contact_quick_actions(page, record);
+    str_cat_cstr(page, "                <div class=\"booking-message\">");
     append_html_text_or_fallback(
             page,
             record->message,
@@ -1011,7 +1056,7 @@ string *build_booking_admin_page(
             "    <header class=\"site-header\">\n"
             "        <div class=\"container nav-wrap\">\n"
             "            <a class=\"brand\" href=\"/\"><span class=\"brand-mark\">S4D</span><span>Styles 4 Dogs</span></a>\n"
-            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a><a href=\"/admin/calendar\">Kalender</a></nav>\n"
+            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a></nav>\n"
             "        </div>\n"
             "    </header>\n"
             "    <main class=\"page admin-page\">\n"

@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 4
+#define CALENDAR_SCHEMA_VERSION 5
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -262,7 +262,13 @@ static int create_calendar_tables(void)
             "        CHECK(pending_hold_minutes BETWEEN 5 AND 10080),"
             "    capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity = 1),"
             "    auto_confirm_bookings INTEGER NOT NULL DEFAULT 0 "
-            "        CHECK(auto_confirm_bookings IN (0, 1))"
+            "        CHECK(auto_confirm_bookings IN (0, 1)),"
+            "    email_notifications_enabled INTEGER NOT NULL DEFAULT 0 "
+            "        CHECK(email_notifications_enabled IN (0, 1)),"
+            "    reminder_enabled INTEGER NOT NULL DEFAULT 1 "
+            "        CHECK(reminder_enabled IN (0, 1)),"
+            "    reminder_lead_minutes INTEGER NOT NULL DEFAULT 1440 "
+            "        CHECK(reminder_lead_minutes BETWEEN 60 AND 10080)"
             ");"
             "CREATE TABLE IF NOT EXISTS weekly_opening_hours ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -287,7 +293,30 @@ static int create_calendar_tables(void)
             "CREATE INDEX IF NOT EXISTS idx_opening_hours_weekday "
             "    ON weekly_opening_hours(weekday, start_minute);"
             "CREATE INDEX IF NOT EXISTS idx_calendar_closures_dates "
-            "    ON calendar_closures(start_date, end_date);";
+            "    ON calendar_closures(start_date, end_date);"
+            "CREATE TABLE IF NOT EXISTS notification_jobs ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    event_type TEXT NOT NULL CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', 'appointment_reminder'"
+            "    )),"
+            "    recipient_email TEXT NOT NULL,"
+            "    subject TEXT NOT NULL,"
+            "    body_text TEXT NOT NULL,"
+            "    ics_content TEXT NOT NULL DEFAULT '',"
+            "    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ("
+            "        'pending', 'processing', 'sent', 'failed'"
+            "    )),"
+            "    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 20),"
+            "    available_at TEXT NOT NULL,"
+            "    created_at TEXT NOT NULL,"
+            "    claimed_at TEXT,"
+            "    sent_at TEXT,"
+            "    last_error TEXT NOT NULL DEFAULT '',"
+            "    UNIQUE(booking_id, event_type)"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_notification_jobs_delivery "
+            "    ON notification_jobs(status, available_at, id);";
 
     return execute_sql(sql);
 }
@@ -297,8 +326,9 @@ static int seed_calendar_defaults(void)
     static const char *sql =
             "INSERT OR IGNORE INTO calendar_settings("
             "    id, timezone, min_notice_minutes, booking_horizon_days,"
-            "    slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings"
-            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1, 0);"
+            "    slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings,"
+            "    email_notifications_enabled, reminder_enabled, reminder_lead_minutes"
+            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1, 0, 0, 1, 1440);"
             "INSERT OR IGNORE INTO services("
             "    code, name, duration_minutes, buffer_minutes, active, sort_order"
             ") VALUES"
@@ -367,7 +397,19 @@ static int migrate_booking_columns(void)
         ensure_table_column(
             "calendar_settings",
             "auto_confirm_bookings",
-            "auto_confirm_bookings INTEGER NOT NULL DEFAULT 0 CHECK(auto_confirm_bookings IN (0, 1))") != 0) {
+            "auto_confirm_bookings INTEGER NOT NULL DEFAULT 0 CHECK(auto_confirm_bookings IN (0, 1))") != 0 ||
+        ensure_table_column(
+            "calendar_settings",
+            "email_notifications_enabled",
+            "email_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(email_notifications_enabled IN (0, 1))") != 0 ||
+        ensure_table_column(
+            "calendar_settings",
+            "reminder_enabled",
+            "reminder_enabled INTEGER NOT NULL DEFAULT 1 CHECK(reminder_enabled IN (0, 1))") != 0 ||
+        ensure_table_column(
+            "calendar_settings",
+            "reminder_lead_minutes",
+            "reminder_lead_minutes INTEGER NOT NULL DEFAULT 1440 CHECK(reminder_lead_minutes BETWEEN 60 AND 10080)") != 0) {
         return -1;
     }
 
@@ -509,7 +551,7 @@ static int migrate_schema(void)
         migrate_booking_columns() != 0 ||
         seed_calendar_defaults() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 4;") != 0 ||
+        execute_sql("PRAGMA user_version = 5;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -644,7 +686,9 @@ static bool settings_are_valid(const calendar_settings *settings)
             settings->slot_interval_minutes == 60) &&
            settings->pending_hold_minutes >= 5 &&
            settings->pending_hold_minutes <= 10080 &&
-           settings->capacity == 1;
+           settings->capacity == 1 &&
+           settings->reminder_lead_minutes >= 60 &&
+           settings->reminder_lead_minutes <= 10080;
 }
 
 int calendar_database_get_settings(calendar_settings *settings)
@@ -661,7 +705,8 @@ int calendar_database_get_settings(calendar_settings *settings)
     if (sqlite3_prepare_v2(
             calendar_database,
             "SELECT timezone, min_notice_minutes, booking_horizon_days, "
-            "       slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings "
+            "       slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings, "
+            "       email_notifications_enabled, reminder_enabled, reminder_lead_minutes "
             "FROM calendar_settings WHERE id = 1;",
             -1,
             &statement,
@@ -689,6 +734,9 @@ int calendar_database_get_settings(calendar_settings *settings)
     settings->pending_hold_minutes = sqlite3_column_int(statement, 4);
     settings->capacity = sqlite3_column_int(statement, 5);
     settings->auto_confirm_bookings = sqlite3_column_int(statement, 6) != 0;
+    settings->email_notifications_enabled = sqlite3_column_int(statement, 7) != 0;
+    settings->reminder_enabled = sqlite3_column_int(statement, 8) != 0;
+    settings->reminder_lead_minutes = sqlite3_column_int(statement, 9);
 
     sqlite3_finalize(statement);
     return 0;
@@ -709,7 +757,8 @@ int calendar_database_update_settings(const calendar_settings *settings)
             "UPDATE calendar_settings "
             "SET timezone = ?1, min_notice_minutes = ?2, booking_horizon_days = ?3, "
             "    slot_interval_minutes = ?4, pending_hold_minutes = ?5, capacity = ?6, "
-            "    auto_confirm_bookings = ?7 "
+            "    auto_confirm_bookings = ?7, email_notifications_enabled = ?8, "
+            "    reminder_enabled = ?9, reminder_lead_minutes = ?10 "
             "WHERE id = 1;",
             -1,
             &statement,
@@ -724,7 +773,10 @@ int calendar_database_update_settings(const calendar_settings *settings)
         sqlite3_bind_int(statement, 4, settings->slot_interval_minutes) != SQLITE_OK ||
         sqlite3_bind_int(statement, 5, settings->pending_hold_minutes) != SQLITE_OK ||
         sqlite3_bind_int(statement, 6, settings->capacity) != SQLITE_OK ||
-        sqlite3_bind_int(statement, 7, settings->auto_confirm_bookings ? 1 : 0) != SQLITE_OK) {
+        sqlite3_bind_int(statement, 7, settings->auto_confirm_bookings ? 1 : 0) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 8, settings->email_notifications_enabled ? 1 : 0) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 9, settings->reminder_enabled ? 1 : 0) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 10, settings->reminder_lead_minutes) != SQLITE_OK) {
         set_sqlite_error("Kalendereinstellungen konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -1457,6 +1509,73 @@ int calendar_database_for_each_closure(
 
     if (step_result != SQLITE_DONE) {
         set_sqlite_error("Sperrzeiten konnten nicht vollständig gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
+
+int calendar_database_for_each_closure_in_range(
+        const char *from_date,
+        const char *to_date,
+        calendar_closure_callback callback,
+        void *context
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (calendar_database == NULL || !calendar_date_is_valid(from_date) ||
+        !calendar_date_is_valid(to_date) || strcmp(from_date, to_date) > 0 ||
+        callback == NULL) {
+        set_error("Ungültige Sperrzeiten-Bereichsabfrage");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT id, start_date, end_date, start_minute, end_minute, label "
+            "FROM calendar_closures "
+            "WHERE start_date <= ?2 AND end_date >= ?1 "
+            "ORDER BY start_date, start_minute, end_date, end_minute, id;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, from_date, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, to_date, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Sperrzeiten-Bereich konnte nicht vorbereitet werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        calendar_closure closure;
+        const unsigned char *start_date = sqlite3_column_text(statement, 1);
+        const unsigned char *end_date = sqlite3_column_text(statement, 2);
+        const unsigned char *label = sqlite3_column_text(statement, 5);
+
+        memset(&closure, 0, sizeof(closure));
+        closure.id = sqlite3_column_int64(statement, 0);
+        snprintf(closure.start_date, sizeof(closure.start_date), "%s",
+                start_date == NULL ? "" : (const char *)start_date);
+        snprintf(closure.end_date, sizeof(closure.end_date), "%s",
+                end_date == NULL ? "" : (const char *)end_date);
+        closure.start_minute = sqlite3_column_int(statement, 3);
+        closure.end_minute = sqlite3_column_int(statement, 4);
+        snprintf(closure.label, sizeof(closure.label), "%s",
+                label == NULL ? "" : (const char *)label);
+
+        if (callback(&closure, context) != 0) {
+            sqlite3_finalize(statement);
+            return 1;
+        }
+    }
+
+    if (step_result != SQLITE_DONE) {
+        set_sqlite_error("Sperrzeiten-Bereich konnte nicht vollständig gelesen werden");
         sqlite3_finalize(statement);
         return -1;
     }

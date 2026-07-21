@@ -21,6 +21,11 @@ ein Netzwerk-Socket erstellt wird.
 | `STYLES4DOGS_DATABASE_FILE` | `data/styles4dogs.db` | SQLite-Datenbank oder für Tests `:memory:` |
 | `STYLES4DOGS_LEGACY_BOOKING_FILE` | `data/bookings.txt` | einmalig zu importierende TSV-Datei |
 | `STYLES4DOGS_TRUSTED_PROXY_TOKEN` | leer | gemeinsames Secret zur abgesicherten Übernahme von `X-Forwarded-For` |
+| `STYLES4DOGS_SALON_NAME` | `Styles 4 Dogs` | Anzeigename in E-Mails und ICS-Dateien |
+| `STYLES4DOGS_SALON_ADDRESS` | leer | Salonadresse in E-Mails und ICS-Dateien |
+| `STYLES4DOGS_SALON_PHONE` | leer | Salontelefonnummer in E-Mails |
+| `STYLES4DOGS_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | öffentliche Basis-URL für spätere Kundenlinks |
+| `STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE` | `49` | Landesvorwahl für lokale Telefon-/WhatsApp-Links |
 
 `STYLES4DOGS_BOOKING_FILE` wird vorläufig als rückwärtskompatibler Alias für
 `STYLES4DOGS_LEGACY_BOOKING_FILE` akzeptiert. Neue Konfigurationen sollen nur
@@ -99,3 +104,11 @@ Admin-Anmeldedaten bleiben ausschließlich in der geschützten `admin.auth`. Das
 Proxy-Token ist dagegen ein automatisch erzeugtes Maschinen-Secret und wird
 benötigt, damit der Backendserver weitergeleiteten Client-IP-Angaben nur von
 der eigenen Caddy-Instanz vertraut. Details stehen in `RATE_LIMITING.md`.
+
+
+## SMTP-Konfiguration
+
+SMTP-Zugangsdaten liegen getrennt in `/etc/styles4dogs/notification.env` und
+werden nur vom Benachrichtigungs-Worker gelesen. Variablen und Betriebshinweise
+stehen in `NOTIFICATIONS.md`. Der HTTP-Server benötigt keinen ausgehenden
+Netzwerkzugriff.

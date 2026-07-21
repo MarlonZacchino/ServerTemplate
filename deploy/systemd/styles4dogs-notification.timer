@@ -1,0 +1,13 @@
+[Unit]
+Description=Process Styles 4 Dogs notification queue every five minutes
+Documentation=file:/opt/styles4dogs/share/NOTIFICATIONS.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=styles4dogs-notification.service
+
+[Install]
+WantedBy=timers.target

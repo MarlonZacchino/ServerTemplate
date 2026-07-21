@@ -8,6 +8,7 @@ BUILD_DIR=${STYLES4DOGS_BUILD_DIR:-$PROJECT_ROOT/cmake-build-release}
 ROOT_PREFIX=""
 START_SERVICE=1
 ENABLE_BACKUP_TIMER=1
+ENABLE_NOTIFICATION_TIMER=1
 SKIP_BUILD=0
 REPLACE_ENV=0
 SKIP_PREINSTALL_BACKUP=0
@@ -29,6 +30,8 @@ Usage: sudo ./deploy/scripts/install.sh [options]
 Options:
   --no-start             Install files but do not enable/start the web service
   --no-backup-timer      Do not enable the daily backup timer
+  --no-notification-timer
+                         Do not enable the notification queue timer
   --skip-build           Reuse an existing cmake-build-release/Server binary
   --replace-env          Replace an existing server.env (a backup is kept)
   --skip-preinstall-backup
@@ -84,6 +87,10 @@ while (($# > 0)); do
             ENABLE_BACKUP_TIMER=0
             shift
             ;;
+        --no-notification-timer)
+            ENABLE_NOTIFICATION_TIMER=0
+            shift
+            ;;
         --skip-build)
             SKIP_BUILD=1
             shift
@@ -101,6 +108,7 @@ while (($# > 0)); do
             ROOT_PREFIX=$(realpath -m -- "$2")
             START_SERVICE=0
             ENABLE_BACKUP_TIMER=0
+            ENABLE_NOTIFICATION_TIMER=0
             shift 2
             ;;
         --help|-h)
@@ -129,15 +137,17 @@ fi
 
 pkg-config --exists libsodium || fail "libsodium development files are missing"
 pkg-config --exists sqlite3 || fail "sqlite3 development files are missing"
+pkg-config --exists libcurl || fail "libcurl development files are missing"
 
 if [[ "$SKIP_BUILD" -ne 1 ]]; then
     command -v ninja >/dev/null 2>&1 || fail "ninja is not installed"
     cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$BUILD_DIR" --target Server
+    cmake --build "$BUILD_DIR" --target Server notification_worker
 fi
 
 [[ -x "$BUILD_DIR/Server" ]] || fail "missing built server: $BUILD_DIR/Server"
+[[ -x "$BUILD_DIR/notification_worker" ]] || fail "missing notification worker: $BUILD_DIR/notification_worker"
 
 APP_PATH=$(rooted "$APP_DIR")
 WEB_PATH=$(rooted "$WEB_ROOT")
@@ -172,6 +182,7 @@ fi
 
 if [[ -z "$ROOT_PREFIX" ]] && systemctl list-unit-files styles4dogs.service >/dev/null 2>&1; then
     systemctl stop styles4dogs.service 2>/dev/null || true
+    systemctl stop styles4dogs-notification.timer styles4dogs-notification.service 2>/dev/null || true
 fi
 
 install_dir 0755 root root "$APP_PATH"
@@ -185,6 +196,7 @@ install_dir 0750 root "$SERVICE_GROUP" "$BACKUP_PATH"
 install_dir 0755 root root "$SYSTEMD_PATH"
 
 install_file 0755 root root "$BUILD_DIR/Server" "$APP_PATH/bin/Server"
+install_file 0755 root root "$BUILD_DIR/notification_worker" "$APP_PATH/bin/notification_worker"
 install_file 0755 root root "$SCRIPT_DIR/backup.sh" "$APP_PATH/bin/styles4dogs-backup"
 install_file 0755 root root "$SCRIPT_DIR/restore.sh" "$APP_PATH/bin/styles4dogs-restore"
 install_file 0755 root root "$SCRIPT_DIR/verify-installation.sh" "$APP_PATH/bin/styles4dogs-verify"
@@ -194,6 +206,8 @@ install_file 0755 root root "$SCRIPT_DIR/uninstall-caddy.sh" "$APP_PATH/bin/styl
 install_file 0644 root root "$PROJECT_ROOT/DEPLOYMENT.md" "$APP_PATH/share/DEPLOYMENT.md"
 install_file 0644 root root "$PROJECT_ROOT/CADDY_DEPLOYMENT.md" "$APP_PATH/share/CADDY_DEPLOYMENT.md"
 install_file 0644 root root "$PROJECT_ROOT/RATE_LIMITING.md" "$APP_PATH/share/RATE_LIMITING.md"
+install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE5.md" "$APP_PATH/share/CALENDAR_PHASE5.md"
+install_file 0644 root root "$PROJECT_ROOT/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
 
 case "$WEB_PATH" in
     */var/www/styles4dogs|*/staging/*|/var/www/styles4dogs) ;;
@@ -247,15 +261,48 @@ STYLES4DOGS_DATA_DIR=$STATE_PATH
 STYLES4DOGS_DATABASE_FILE=$STATE_PATH/styles4dogs.db
 STYLES4DOGS_LEGACY_BOOKING_FILE=$STATE_PATH/bookings.txt
 STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TRUSTED_PROXY_TOKEN
+STYLES4DOGS_SALON_NAME=Styles 4 Dogs
+STYLES4DOGS_SALON_ADDRESS=
+STYLES4DOGS_SALON_PHONE=
+STYLES4DOGS_PUBLIC_BASE_URL=http://127.0.0.1:8080
+STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49
 EOF_ENV
 fi
 
 if ! grep -q '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=' "$ENV_PATH"; then
     printf '\nSTYLES4DOGS_TRUSTED_PROXY_TOKEN=%s\n' "$TRUSTED_PROXY_TOKEN" >> "$ENV_PATH"
 fi
+
+ensure_env_setting() {
+    local key=$1
+    local value=$2
+
+    if ! grep -q "^${key}=" "$ENV_PATH"; then
+        printf '%s=%s\n' "$key" "$value" >> "$ENV_PATH"
+    fi
+}
+
+ensure_env_setting STYLES4DOGS_SALON_NAME 'Styles 4 Dogs'
+ensure_env_setting STYLES4DOGS_SALON_ADDRESS ''
+ensure_env_setting STYLES4DOGS_SALON_PHONE ''
+ensure_env_setting STYLES4DOGS_PUBLIC_BASE_URL 'http://127.0.0.1:8080'
+ensure_env_setting STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE '49'
+
 chmod 0640 "$ENV_PATH"
 if [[ -z "$ROOT_PREFIX" ]]; then
     chown root:"$SERVICE_GROUP" "$ENV_PATH"
+fi
+
+NOTIFICATION_ENV_PATH="$CONFIG_PATH/notification.env"
+if [[ ! -f "$NOTIFICATION_ENV_PATH" ]]; then
+    install_file 0640 root "$SERVICE_GROUP" \
+        "$PROJECT_ROOT/deploy/notification.env.example" \
+        "$NOTIFICATION_ENV_PATH"
+else
+    chmod 0640 "$NOTIFICATION_ENV_PATH"
+    if [[ -z "$ROOT_PREFIX" ]]; then
+        chown root:"$SERVICE_GROUP" "$NOTIFICATION_ENV_PATH"
+    fi
 fi
 
 install_file 0644 root root "$PROJECT_ROOT/deploy/systemd/styles4dogs.service" \
@@ -264,6 +311,10 @@ install_file 0644 root root "$PROJECT_ROOT/deploy/systemd/styles4dogs-backup.ser
     "$SYSTEMD_PATH/styles4dogs-backup.service"
 install_file 0644 root root "$PROJECT_ROOT/deploy/systemd/styles4dogs-backup.timer" \
     "$SYSTEMD_PATH/styles4dogs-backup.timer"
+install_file 0644 root root "$PROJECT_ROOT/deploy/systemd/styles4dogs-notification.service" \
+    "$SYSTEMD_PATH/styles4dogs-notification.service"
+install_file 0644 root root "$PROJECT_ROOT/deploy/systemd/styles4dogs-notification.timer" \
+    "$SYSTEMD_PATH/styles4dogs-notification.timer"
 
 if [[ -z "$ROOT_PREFIX" ]]; then
     systemctl daemon-reload
@@ -281,13 +332,23 @@ if [[ -z "$ROOT_PREFIX" ]]; then
             systemctl enable styles4dogs-backup.timer
         fi
     fi
+
+    if [[ "$ENABLE_NOTIFICATION_TIMER" -eq 1 ]]; then
+        if [[ "$START_SERVICE" -eq 1 ]]; then
+            systemctl enable --now styles4dogs-notification.timer
+        else
+            systemctl enable styles4dogs-notification.timer
+        fi
+    fi
 fi
 
 cat <<EOF_SUMMARY
 Styles 4 Dogs installed.
   Binary:        $APP_PATH/bin/Server
+  Mail worker:   $APP_PATH/bin/notification_worker
   Website:       $WEB_PATH
   Configuration: $ENV_PATH
+  SMTP config:   $NOTIFICATION_ENV_PATH
   Secrets:       $SECRETS_PATH
   Database:      $STATE_PATH/styles4dogs.db
   Backups:       $BACKUP_PATH

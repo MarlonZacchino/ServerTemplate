@@ -3,6 +3,7 @@
 //
 
 #include "admin_calendar.h"
+#include "admin_appointments.h"
 #include "auth.h"
 #include "process.h"
 #include "booking.h"
@@ -12,6 +13,7 @@
 #include "calendar_time.h"
 #include "form_urlencoded.h"
 #include "server_config.h"
+#include "notification_queue.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -1141,9 +1143,21 @@ static string *handle_booking(string *request)
     clear_request_body(request);
 
     if (result == CALENDAR_PUBLIC_OK) {
+        if (notification_queue_enqueue_booking_event(
+                booking_id,
+                "booking_received") != 0) {
+            fprintf(stderr, "Buchungsbestätigung konnte nicht eingereiht werden: %s\n",
+                    notification_queue_last_error());
+        }
         return handle_booking_created(false);
     }
     if (result == CALENDAR_PUBLIC_CONFIRMED) {
+        if (notification_queue_enqueue_booking_event(
+                booking_id,
+                "booking_confirmed") != 0) {
+            fprintf(stderr, "Terminbestätigung konnte nicht eingereiht werden: %s\n",
+                    notification_queue_last_error());
+        }
         return handle_booking_created(true);
     }
     if (result == CALENDAR_PUBLIC_UNAVAILABLE) {
@@ -1396,6 +1410,41 @@ static string *handle_admin_booking_status_post(string *request)
 }
 
 
+
+static string *handle_admin_appointments_page(
+        bool send_body,
+        const char *query,
+        size_t query_length
+)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    string *body;
+    string *response;
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+
+    body = admin_appointments_build_page(csrf_token, query, query_length);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+
+    if (body == NULL) {
+        fprintf(stderr, "Admin-Terminansicht konnte nicht erzeugt werden: %s\n",
+                admin_appointments_last_error());
+        return handle_bad_request(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
 static string *handle_admin_calendar_page(
         bool send_body,
         const char *query,
@@ -1550,6 +1599,12 @@ static string *handle_admin_booking_decision_post(
             rejection_reason);
 
     if (result == CALENDAR_BOOKING_DECISION_OK) {
+        if (notification_queue_enqueue_booking_event(
+                booking_id,
+                accept ? "booking_confirmed" : "booking_rejected") != 0) {
+            fprintf(stderr, "Terminentscheidung konnte nicht zur Benachrichtigung eingereiht werden: %s\n",
+                    notification_queue_last_error());
+        }
         return handle_admin_booking_decision_redirect();
     }
     if (result == CALENDAR_BOOKING_DECISION_NOT_FOUND) {
@@ -1786,6 +1841,14 @@ string *process(string *request)
      */
     if (strcmp(path, "/setup/admin") == 0) {
         return handle_admin_setup_page(send_body);
+    }
+
+    if (strcmp(path, "/admin/appointments") == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+
+        return handle_admin_appointments_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/calendar") == 0) {

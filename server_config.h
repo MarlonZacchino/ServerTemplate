@@ -28,4 +28,11 @@ const char *server_config_legacy_booking_file(void);
  */
 const char *server_config_trusted_proxy_token(void);
 
+/* Öffentliche Salonangaben für Nachrichten und Kontakt-Schnellaktionen. */
+const char *server_config_salon_name(void);
+const char *server_config_salon_address(void);
+const char *server_config_salon_phone(void);
+const char *server_config_public_base_url(void);
+const char *server_config_default_phone_country_code(void);
+
 #endif

@@ -17,7 +17,7 @@ strukturell gültigen Admin-Statusrequest und eine Admin-Filteranfrage mit ungü
 ## Abhängigkeiten unter Arch Linux
 
 ```bash
-sudo pacman -S --needed afl++ clang cmake ninja libsodium sqlite pkgconf
+sudo pacman -S --needed afl++ clang cmake ninja libsodium sqlite curl pkgconf
 ```
 
 ## Instrumentierten Server bauen
@@ -130,3 +130,11 @@ Das HTTP-Korpus enthält zusätzlich strukturierte E-Mail- und WhatsApp-Kontakte
 sowie ungültig authentifizierte Requests für Terminannahme und das Anlegen
 einer Leistung. Dadurch werden die neuen Parser- und Adminrouten vom normalen
 Server-Fuzzing erreicht.
+
+
+## Phase-5-Korpus
+
+Die Tages- und Wochenansicht unter `/admin/appointments` ist als weiterer
+geschützter Request im HTTP-Korpus enthalten. Der SMTP-Worker wird nicht mit
+Netzwerk-Fuzzing vermischt; Warteschlangen-, Erinnerungs- und ICS-Logik werden
+über die isolierten Regressionstests und den Worker-Dry-Run geprüft.

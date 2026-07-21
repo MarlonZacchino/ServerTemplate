@@ -80,23 +80,27 @@ systemctl start styles4dogs
 Vor dem Produktivbetrieb wird daraus noch ein automatisierter Backup- und
 Restore-Test erstellt.
 
-## Kalenderschema Version 4
+## Kalenderschema Version 5
 
-Die Kalenderphasen erweitern die Datenbank inzwischen auf
-`PRAGMA user_version = 4`. Bestehende Buchungszeilen bleiben sichtbar und
-werden ohne konkreten Kalendertermin als `decision_status = 'legacy'`
-behandelt. Zusätzlich werden strukturierte Kontaktfelder,
-Leistungssnapshots und die Einstellung für automatische Bestätigung idempotent
-ergänzt. Neue Tabellen für Leistungen, Einstellungen, Wochenöffnungszeiten
-und Sperrzeiten werden weiterhin ohne Datenverlust angelegt. Details stehen in
-`CALENDAR_PHASE1.md` bis `CALENDAR_PHASE4.md`.
+Phase 5 erweitert die Datenbank idempotent auf:
 
-Vor der Aktualisierung einer produktiven Installation muss ein geprüftes
-SQLite-Backup erstellt werden. Nach der Installation lässt sich die Version so
-kontrollieren:
+```text
+PRAGMA user_version = 5
+```
+
+Zusätzlich zu den bisherigen Kalender- und Kontaktdaten werden die
+E-Mail-/Erinnerungseinstellungen sowie `notification_jobs` angelegt. Vorhandene
+Buchungen und Phase-4-Einstellungen bleiben erhalten. Der Worker und der
+HTTP-Server verwenden dieselbe SQLite-Datei, aber getrennte Verbindungen mit
+Busy-Timeout und kurzen Transaktionen.
+
+Vor jeder Aktualisierung einer produktiven Installation muss ein geprüftes
+SQLite-Backup erstellt werden. Nach der Installation:
 
 ```bash
 sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+sqlite3 /var/lib/styles4dogs/styles4dogs.db   "SELECT name FROM sqlite_master WHERE type='table' AND name='notification_jobs';"
 ```
 
-Erwartet wird `4`.
+Erwartet werden `5` und `notification_jobs`. Details stehen in
+`CALENDAR_PHASE1.md` bis `CALENDAR_PHASE5.md`.

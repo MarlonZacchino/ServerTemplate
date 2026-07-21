@@ -9,6 +9,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
+pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 
 set(
         STYLES4DOGS_BIND_ADDRESS
@@ -82,6 +83,23 @@ add_executable(Server
         availability.c
         calendar_public.c
         admin_calendar.c
+        admin_appointments.c
+        notification_queue.c
+        contact_links.c
+)
+
+add_executable(notification_worker
+        notification_worker.c
+        notification_queue.c
+        booking_database.c
+        calendar_time.c
+        calendar_database.c
+        contact_validation.c
+        server_config.c
+)
+
+target_include_directories(notification_worker PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 add_executable(create_admin_user
@@ -135,6 +153,19 @@ target_compile_definitions(Server PRIVATE
         SERVER_DEFAULT_LEGACY_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
 )
 
+target_compile_definitions(notification_worker PRIVATE
+        _POSIX_C_SOURCE=200809L
+        _XOPEN_SOURCE=700
+        SERVER_DEFAULT_BIND_ADDRESS="${STYLES4DOGS_BIND_ADDRESS}"
+        SERVER_DEFAULT_PORT="${STYLES4DOGS_PORT}"
+        SERVER_DEFAULT_DOCUMENT_ROOT="${STYLES4DOGS_DOCUMENT_ROOT}"
+        SERVER_DEFAULT_SECRETS_DIR="${STYLES4DOGS_SECRETS_DIR}"
+        SERVER_DEFAULT_AUTH_FILE="${STYLES4DOGS_AUTH_FILE}"
+        SERVER_DEFAULT_DATA_DIR="${STYLES4DOGS_DATA_DIR}"
+        SERVER_DEFAULT_DATABASE_FILE="${STYLES4DOGS_DATABASE_FILE}"
+        SERVER_DEFAULT_LEGACY_BOOKING_FILE="${STYLES4DOGS_BOOKING_FILE}"
+)
+
 target_compile_definitions(calendar_engine_tests PRIVATE
         _POSIX_C_SOURCE=200809L
         _XOPEN_SOURCE=700
@@ -166,6 +197,11 @@ target_link_libraries(Server PRIVATE
         PkgConfig::SQLITE3
 )
 
+target_link_libraries(notification_worker PRIVATE
+        PkgConfig::SQLITE3
+        PkgConfig::CURL
+)
+
 target_link_libraries(create_admin_user PRIVATE
         PkgConfig::SODIUM
 )
@@ -180,6 +216,14 @@ target_link_libraries(calendar_fuzz_target PRIVATE
 
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(Server PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wstrict-prototypes
+    )
+
+    target_compile_options(notification_worker PRIVATE
             -Wall
             -Wextra
             -Wpedantic

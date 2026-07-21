@@ -170,6 +170,20 @@ int main(void)
                    "Minuten werden als HH:MM formatiert");
         expect_true(strcmp(time_text, "09:45") == 0,
                     "Zeitformatierung ist stabil");
+
+        {
+            time_t winter_epoch;
+            time_t summer_epoch;
+
+            expect_int(calendar_local_datetime_to_epoch(
+                    "Europe/Berlin", "2026-01-15", 540, &winter_epoch), 0,
+                    "Wintertermin wird in einen UTC-Zeitpunkt umgerechnet");
+            expect_int(calendar_local_datetime_to_epoch(
+                    "Europe/Berlin", "2026-07-15", 540, &summer_epoch), 0,
+                    "Sommertermin wird in einen UTC-Zeitpunkt umgerechnet");
+            expect_true(winter_epoch != summer_epoch,
+                        "Unterschiedliche Termine erhalten unterschiedliche Zeitpunkte");
+        }
     }
 
     if (server_config_initialize() != 0) {
@@ -214,7 +228,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 4, "Kalenderschema verwendet Version 4");
+    expect_int(schema_version, 5, "Kalenderschema verwendet Version 5");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -231,6 +245,17 @@ int main(void)
     expect_int(settings.slot_interval_minutes, 15, "Standard-Zeitraster beträgt 15 Minuten");
     expect_int(settings.capacity, 1, "Kalender unterstützt genau einen parallelen Termin");
     expect_true(!settings.auto_confirm_bookings, "Automatische Bestätigung ist standardmäßig deaktiviert");
+    expect_true(!settings.email_notifications_enabled,
+                "E-Mail-Versand ist standardmäßig deaktiviert");
+    expect_true(settings.reminder_enabled,
+                "Terminerinnerungen sind standardmäßig vorbereitet");
+    expect_int(settings.reminder_lead_minutes, 1440,
+               "Standard-Erinnerung erfolgt 24 Stunden vorher");
+    expect_int(query_single_int(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'notification_jobs';",
+            &value), 0, "Benachrichtigungswarteschlange ist abfragbar");
+    expect_int(value, 1, "Benachrichtigungswarteschlange wurde migriert");
 
     expect_int(calendar_database_get_service("wash_dry", &service), 0, "Standardleistung wash_dry existiert");
     expect_int(service.duration_minutes, 60, "Waschen und Föhnen dauert standardmäßig 60 Minuten");
@@ -240,7 +265,16 @@ int main(void)
     settings.min_notice_minutes = 0;
     settings.booking_horizon_days = 120;
     settings.pending_hold_minutes = 60;
+    settings.email_notifications_enabled = true;
+    settings.reminder_enabled = true;
+    settings.reminder_lead_minutes = 2880;
     expect_int(calendar_database_update_settings(&settings), 0, "Kalendereinstellungen sind änderbar");
+    expect_int(calendar_database_get_settings(&settings), 0,
+               "Erweiterte Kalendereinstellungen sind lesbar");
+    expect_true(settings.email_notifications_enabled,
+                "E-Mail-Versand bleibt gespeichert");
+    expect_int(settings.reminder_lead_minutes, 2880,
+               "Erinnerungsvorlauf bleibt gespeichert");
 
     query = make_query(
             "wash_dry",
