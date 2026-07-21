@@ -507,13 +507,9 @@ static request_kind classify_request(
         return REQUEST_KIND_BOOKING;
     }
 
-    if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
-        strcmp(path, "/admin/bookings") == 0) {
-        return REQUEST_KIND_ADMIN;
-    }
-
-    if (strcmp(method, "POST") == 0 &&
-        strcmp(path, "/admin/bookings/status") == 0) {
+    if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0 ||
+         strcmp(method, "POST") == 0) &&
+        strncmp(path, "/admin/", strlen("/admin/")) == 0) {
         return REQUEST_KIND_ADMIN;
     }
 
