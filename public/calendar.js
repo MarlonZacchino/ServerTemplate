@@ -20,6 +20,73 @@
     const nextButton = calendar.querySelector("[data-calendar-next]");
     const selectionText = calendar.querySelector("[data-calendar-selection]");
 
+    const contactChoice = form.querySelector("[data-contact-choice]");
+    const emailPanel = form.querySelector("[data-contact-email]");
+    const phonePanel = form.querySelector("[data-contact-phone]");
+    const emailInput = form.querySelector("#email");
+    const phoneInput = form.querySelector("#phone-number");
+    const channelInputs = [...form.querySelectorAll('input[name="contact_channel"]')];
+    const phoneKindInputs = [...form.querySelectorAll('input[name="phone_kind"]')];
+    const contactPreferenceInputs = [...form.querySelectorAll('input[name="contact_preference"]')];
+    const whatsappInput = form.querySelector('input[name="contact_preference"][value="whatsapp"]');
+    const confirmationNotes = [...document.querySelectorAll("[data-confirmation-note]")];
+
+    const setRadioGroupEnabled = (inputs, enabled) => {
+        inputs.forEach((input) => {
+            input.disabled = !enabled;
+            input.required = enabled;
+        });
+    };
+
+    const syncPhonePreference = () => {
+        const selectedKind = phoneKindInputs.find((input) => input.checked)?.value;
+        const isMobile = selectedKind === "mobile";
+
+        if (whatsappInput) {
+            whatsappInput.disabled = !isMobile || phonePanel.hidden;
+            if (!isMobile && whatsappInput.checked) {
+                const callInput = contactPreferenceInputs.find((input) => input.value === "call");
+                if (callInput) {
+                    callInput.checked = true;
+                }
+            }
+        }
+    };
+
+    const syncContactChoice = () => {
+        const channel = channelInputs.find((input) => input.checked)?.value ?? "email";
+        const useEmail = channel === "email";
+
+        emailPanel.hidden = !useEmail;
+        emailInput.disabled = !useEmail;
+        emailInput.required = useEmail;
+
+        phonePanel.hidden = useEmail;
+        phoneInput.disabled = useEmail;
+        phoneInput.required = !useEmail;
+        setRadioGroupEnabled(phoneKindInputs, !useEmail);
+        setRadioGroupEnabled(contactPreferenceInputs, !useEmail);
+
+        if (!useEmail) {
+            if (!phoneKindInputs.some((input) => input.checked)) {
+                const mobile = phoneKindInputs.find((input) => input.value === "mobile");
+                if (mobile) mobile.checked = true;
+            }
+            if (!contactPreferenceInputs.some((input) => input.checked)) {
+                const call = contactPreferenceInputs.find((input) => input.value === "call");
+                if (call) call.checked = true;
+            }
+        }
+
+        syncPhonePreference();
+    };
+
+    channelInputs.forEach((input) => input.addEventListener("change", syncContactChoice));
+    phoneKindInputs.forEach((input) => input.addEventListener("change", syncPhonePreference));
+    if (contactChoice) {
+        syncContactChoice();
+    }
+
     const today = new Date();
     let currentMonth = new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1));
     let maximumMonth = new Date(Date.UTC(today.getFullYear(), today.getMonth() + 3, 1));
@@ -94,6 +161,7 @@
     const renderSlots = (date) => {
         const day = daysByDate.get(date);
         slotsContainer.replaceChildren();
+        slotsContainer.removeAttribute("aria-label");
         appointmentDate.value = "";
         appointmentStart.value = "";
         submitButton.disabled = true;
@@ -106,7 +174,18 @@
             return;
         }
 
-        day.slots.forEach((slot) => slotsContainer.append(createSlotButton(slot, date)));
+        const availableSlots = day.slots.filter((slot) => slot.available);
+        if (availableSlots.length === 0) {
+            const message = document.createElement("p");
+            message.textContent = "An diesem Tag sind keine freien Uhrzeiten mehr verfügbar.";
+            slotsContainer.append(message);
+            return;
+        }
+
+        slotsContainer.setAttribute("aria-label", `Freie Uhrzeiten am ${formatDisplayDate(date)}`);
+        availableSlots.forEach((slot) => {
+            slotsContainer.append(createSlotButton(slot, date));
+        });
     };
 
     const renderDays = () => {
@@ -237,6 +316,14 @@
             }
 
             const data = await response.json();
+            confirmationNotes.forEach((note) => {
+                note.textContent = data.automatic_confirmation
+                    ? "Freie Termine werden sofort verbindlich bestätigt. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg."
+                    : "Der Zeitraum wird zunächst reserviert und anschließend vom Salon angenommen oder abgelehnt.";
+            });
+            submitButton.textContent = data.automatic_confirmation
+                ? "Termin verbindlich buchen"
+                : "Terminanfrage senden";
             const serverDate = parseDate(data.current_date);
             const horizonDate = new Date(serverDate);
             horizonDate.setUTCDate(horizonDate.getUTCDate() + data.booking_horizon_days);

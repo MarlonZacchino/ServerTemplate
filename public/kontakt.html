@@ -23,8 +23,8 @@
     <section class="page-hero compact-hero">
         <div class="container narrow">
             <p class="eyebrow">Kontakt</p>
-            <h1>Termin unverbindlich anfragen.</h1>
-            <p class="lead">Schreib uns kurz, worum es geht. Wir melden uns persönlich zurück und klären den passenden Termin.</p>
+            <h1>Passenden Termin auswählen.</h1>
+            <p class="lead">Wähle eine Leistung, einen freien Zeitraum und deinen bevorzugten Kontaktweg. Je nach Einstellung des Salons wird der Termin sofort bestätigt oder zunächst geprüft.</p>
         </div>
     </section>
 
@@ -35,8 +35,36 @@
                     <label for="name">Dein Name <span aria-hidden="true">*</span></label>
                     <input id="name" type="text" name="name" autocomplete="name" maxlength="120" required>
 
-                    <label for="contact">Telefonnummer oder E-Mail <span aria-hidden="true">*</span></label>
-                    <input id="contact" type="text" name="contact" autocomplete="email" maxlength="180" required>
+                    <fieldset class="contact-choice" data-contact-choice>
+                        <legend>Wie dürfen wir dich kontaktieren? <span aria-hidden="true">*</span></legend>
+                        <div class="contact-channel-options">
+                            <label><input type="radio" name="contact_channel" value="email" checked> E-Mail</label>
+                            <label><input type="radio" name="contact_channel" value="phone"> Telefon oder Mobilfunk</label>
+                        </div>
+
+                        <div class="contact-channel-panel" data-contact-email>
+                            <label for="email">E-Mail-Adresse <span aria-hidden="true">*</span></label>
+                            <input id="email" type="email" name="email" autocomplete="email" maxlength="255" required>
+                        </div>
+
+                        <div class="contact-channel-panel" data-contact-phone hidden>
+                            <label for="phone-number">Telefon- oder Mobilfunknummer <span aria-hidden="true">*</span></label>
+                            <input id="phone-number" type="tel" name="phone_number" autocomplete="tel" maxlength="63" disabled>
+
+                            <fieldset class="contact-subchoice">
+                                <legend>Art der Nummer</legend>
+                                <label><input type="radio" name="phone_kind" value="landline" disabled> Festnetz</label>
+                                <label><input type="radio" name="phone_kind" value="mobile" disabled> Mobilfunk</label>
+                            </fieldset>
+
+                            <fieldset class="contact-subchoice">
+                                <legend>Gewünschte Rückmeldung</legend>
+                                <label><input type="radio" name="contact_preference" value="call" disabled> Anruf</label>
+                                <label><input type="radio" name="contact_preference" value="whatsapp" disabled> WhatsApp-Nachricht</label>
+                            </fieldset>
+                            <p class="form-help" data-whatsapp-help>WhatsApp ist nur bei einer Mobilfunknummer möglich.</p>
+                        </div>
+                    </fieldset>
 
                     <label for="dog-name">Name des Hundes</label>
                     <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">
@@ -102,10 +130,10 @@
                 <p class="eyebrow">So geht es weiter</p>
                 <ol class="steps-list">
                     <li><span>1</span><div><strong>Anfrage senden</strong><p>Du beschreibst kurz deinen Hund und deinen Wunsch.</p></div></li>
-                    <li><span>2</span><div><strong>Rückmeldung erhalten</strong><p>Wir klären Leistung, Preisrahmen und mögliche Termine.</p></div></li>
-                    <li><span>3</span><div><strong>Termin bestätigen lassen</strong><p>Der Zeitraum wird vorläufig reserviert. Verbindlich ist er erst nach Bestätigung durch den Salon.</p></div></li>
+                    <li><span>2</span><div><strong>Rückmeldung erhalten</strong><p>Wir melden uns über den von dir ausgewählten Kontaktweg.</p></div></li>
+                    <li><span>3</span><div><strong>Terminstatus</strong><p data-confirmation-note>Der Zeitraum wird vorläufig reserviert und anschließend vom Salon bestätigt.</p></div></li>
                 </ol>
-                <div class="contact-note"><strong>Bitte beachten</strong><p>Freie Zeiten können direkt angefragt werden. Bis zur Bestätigung durch den Salon bleibt der Termin vorläufig reserviert.</p></div>
+                <div class="contact-note"><strong>Bitte beachten</strong><p data-confirmation-note>Freie Zeiten können direkt angefragt werden. Bis zur Bestätigung durch den Salon bleibt der Termin vorläufig reserviert.</p></div>
             </aside>
         </div>
     </section>

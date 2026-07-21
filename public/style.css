@@ -1477,3 +1477,165 @@ select:focus {
         width: 100%;
     }
 }
+
+/* Phase 4: Kontaktwahl, scrollbare Terminliste und Admin-Entscheidungen */
+.contact-choice,
+.contact-subchoice {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.contact-choice > legend,
+.contact-subchoice > legend {
+    margin-bottom: 10px;
+    font-weight: 800;
+}
+
+.contact-channel-options,
+.contact-subchoice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+}
+
+.contact-channel-options label,
+.contact-subchoice label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+}
+
+.contact-channel-panel {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 250, 245, 0.72);
+}
+
+.contact-channel-panel[hidden] {
+    display: none;
+}
+
+.form-help {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.calendar-slots {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+    max-height: 19rem;
+    margin-top: 0.85rem;
+    padding: 0.25rem 0.45rem 0.25rem 0.1rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.calendar-slot {
+    width: 100%;
+    min-height: 3.1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    text-align: left;
+}
+
+.booking-decision-panel {
+    display: grid;
+    gap: 12px;
+    margin-top: 18px;
+    padding: 18px;
+    border: 1px solid #9bbfa4;
+    border-radius: var(--radius-md);
+    background: #f1f8f3;
+}
+
+.booking-decision-panel h3 {
+    margin: 0;
+}
+
+.booking-decision-actions {
+    display: grid;
+    grid-template-columns: minmax(0, auto) minmax(260px, 1fr);
+    gap: 14px;
+    align-items: end;
+}
+
+.booking-reject-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.booking-reject-form label {
+    display: grid;
+    gap: 7px;
+    font-weight: 700;
+}
+
+.service-add-form {
+    margin: 18px 0 24px;
+}
+
+.service-admin-card {
+    display: grid;
+    gap: 10px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 250, 245, 0.72);
+    overflow: hidden;
+}
+
+.service-admin-card .service-admin-form {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.service-delete-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px 20px;
+}
+
+.service-delete-form .admin-calendar-hint {
+    flex: 1 1 300px;
+    margin: 0;
+}
+
+.admin-confirmation-setting {
+    padding: 14px;
+    border: 1px solid #8ab394;
+    border-radius: 12px;
+    background: #edf7ef;
+}
+
+@media (max-width: 700px) {
+    .booking-decision-actions,
+    .booking-reject-form {
+        grid-template-columns: 1fr;
+    }
+
+    .booking-decision-actions .button,
+    .booking-reject-form .button,
+    .service-delete-form .button {
+        width: 100%;
+    }
+
+    .contact-channel-options,
+    .contact-subchoice {
+        flex-direction: column;
+    }
+}
