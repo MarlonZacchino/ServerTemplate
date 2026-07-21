@@ -80,11 +80,23 @@ systemctl start styles4dogs
 Vor dem Produktivbetrieb wird daraus noch ein automatisierter Backup- und
 Restore-Test erstellt.
 
-## Kalenderschema Version 3
+## Kalenderschema Version 4
 
-Nach der ursprünglichen TSV-Migration erweitert Phase 1 des Kalenders die
-Datenbank auf `PRAGMA user_version = 3`. Bestehende Buchungszeilen bleiben
-unverändert sichtbar und werden als `decision_status = 'legacy'` markiert.
-Neue Tabellen für Leistungen, Einstellungen, Wochenöffnungszeiten und
-Sperrzeiten werden idempotent angelegt. Details stehen in
-`CALENDAR_PHASE1.md`.
+Die Kalenderphasen erweitern die Datenbank inzwischen auf
+`PRAGMA user_version = 4`. Bestehende Buchungszeilen bleiben sichtbar und
+werden ohne konkreten Kalendertermin als `decision_status = 'legacy'`
+behandelt. Zusätzlich werden strukturierte Kontaktfelder,
+Leistungssnapshots und die Einstellung für automatische Bestätigung idempotent
+ergänzt. Neue Tabellen für Leistungen, Einstellungen, Wochenöffnungszeiten
+und Sperrzeiten werden weiterhin ohne Datenverlust angelegt. Details stehen in
+`CALENDAR_PHASE1.md` bis `CALENDAR_PHASE4.md`.
+
+Vor der Aktualisierung einer produktiven Installation muss ein geprüftes
+SQLite-Backup erstellt werden. Nach der Installation lässt sich die Version so
+kontrollieren:
+
+```bash
+sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+```
+
+Erwartet wird `4`.

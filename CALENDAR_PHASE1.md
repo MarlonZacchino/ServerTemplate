@@ -7,8 +7,9 @@ Buchungsanfrage während der Migration unverändert nutzbar.
 
 ## Datenbankschema
 
-Beim Serverstart wird die SQLite-Datenbank auf `PRAGMA user_version = 3`
-migriert. Neu sind:
+Phase 1 führte ursprünglich `PRAGMA user_version = 3` ein. Der aktuelle
+Gesamtstand migriert inzwischen auf Version 4; die folgenden Tabellen stammen
+aus Phase 1:
 
 - `services` für Leistung, Dauer, Puffer, Aktivierung und Sortierung,
 - `calendar_settings` für Zeitzone, Vorlauf, Buchungshorizont, Raster und

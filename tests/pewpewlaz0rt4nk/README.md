@@ -47,10 +47,13 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 - Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
 - Runtime-Overrides für Port und Pfade,
 - kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root,
-- Kalenderschema Version 3 und Migration bestehender Buchungen zu `legacy`,
+- Kalenderschema Version 4 und Migration bestehender Buchungen zu `legacy`,
 - Leistungen mit Dauer und Puffer, Wochenöffnungszeiten und Sperrzeiten,
 - Mindestvorlauf, Buchungshorizont und deaktivierbare Leistungen,
-- ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz.
+- ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz,
+- Annahme, Ablehnung und optionale automatische Bestätigung von Terminen,
+- strukturierte E-Mail-, Telefon- und WhatsApp-Kontaktwünsche,
+- Hinzufügen, Bearbeiten, Archivieren und Löschen von Leistungen.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.
@@ -72,4 +75,6 @@ Der isolierte Lauf setzt ein eigenes Proxy-Token und prüft:
 Der Runner konfiguriert in seiner isolierten SQLite-Datenbank einen zukünftigen
 Öffnungstag, liest die freien Slots über die öffentliche JSON-API und legt eine
 Pending-Terminanfrage an. Anschließend muss derselbe Slot als belegt erscheinen
-und ein zweiter Buchungsversuch mit `409 Conflict` abgelehnt werden.
+und ein zweiter Buchungsversuch mit `409 Conflict` abgelehnt werden. Weitere
+Stateful-Tests prüfen Terminentscheidungen, automatische Bestätigung,
+Leistungsverwaltung und die strukturierten Kontaktwege.

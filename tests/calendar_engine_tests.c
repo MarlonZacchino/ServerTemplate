@@ -191,7 +191,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 3, "Kalenderschema verwendet Version 3");
+    expect_int(schema_version, 4, "Kalenderschema verwendet Version 4");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -206,7 +206,8 @@ int main(void)
     expect_int(settings.min_notice_minutes, 1440, "Standard-Vorlauf beträgt 24 Stunden");
     expect_int(settings.booking_horizon_days, 90, "Standard-Buchungshorizont beträgt 90 Tage");
     expect_int(settings.slot_interval_minutes, 15, "Standard-Zeitraster beträgt 15 Minuten");
-    expect_int(settings.capacity, 1, "Phase 1 unterstützt genau einen parallelen Termin");
+    expect_int(settings.capacity, 1, "Kalender unterstützt genau einen parallelen Termin");
+    expect_true(!settings.auto_confirm_bookings, "Automatische Bestätigung ist standardmäßig deaktiviert");
 
     expect_int(calendar_database_get_service("wash_dry", &service), 0, "Standardleistung wash_dry existiert");
     expect_int(service.duration_minutes, 60, "Waschen und Föhnen dauert standardmäßig 60 Minuten");
@@ -267,9 +268,37 @@ int main(void)
     reservation.hold_expires_at_utc = "2026-08-09T07:00:00Z";
     reservation.customer_name = "Kalender Test";
     reservation.contact = "calendar@example.invalid";
+    reservation.contact_channel = "email";
+    reservation.email = "calendar@example.invalid";
+    reservation.phone_number = "";
+    reservation.phone_kind = "";
+    reservation.contact_preference = "";
+    reservation.auto_confirm = false;
     reservation.dog_name = "Flocke";
     reservation.dog_size = "small";
     reservation.message = "Transaktionssichere Reservierung";
+
+    {
+        availability_reservation_request invalid_contact = reservation;
+
+        invalid_contact.contact = "+49 170 1234567";
+        invalid_contact.contact_channel = "phone";
+        invalid_contact.email = "";
+        invalid_contact.phone_number = "+49 170 1234567";
+        invalid_contact.phone_kind = "landline";
+        invalid_contact.contact_preference = "whatsapp";
+        expect_int(
+                availability_reserve_pending(&invalid_contact, NULL),
+                AVAILABILITY_RESERVATION_INVALID,
+                "WhatsApp ist nur mit einer Mobilfunknummer zulässig");
+
+        invalid_contact = reservation;
+        invalid_contact.contact = "abweichend@example.invalid";
+        expect_int(
+                availability_reserve_pending(&invalid_contact, NULL),
+                AVAILABILITY_RESERVATION_INVALID,
+                "Zusammengefasster Kontakt muss zu den strukturierten Feldern passen");
+    }
 
     expect_int(
             availability_reserve_pending(&reservation, &first_booking_id),
@@ -300,6 +329,83 @@ int main(void)
             AVAILABILITY_RESERVATION_OK,
             "Abgelaufener Slot kann erneut reserviert werden");
     expect_true(second_booking_id > first_booking_id, "Neue Reservierung erhält eine neue ID");
+
+    expect_int(
+            calendar_database_decide_booking(
+                    second_booking_id,
+                    true,
+                    "2026-08-09T08:05:00Z",
+                    ""),
+            CALENDAR_BOOKING_DECISION_OK,
+            "Offene Terminanfrage kann angenommen werden");
+    expect_int(query_single_int(
+            "SELECT COUNT(*) FROM bookings WHERE decision_status = 'confirmed' "
+            "AND appointment_date = '2026-08-10' AND start_minute = 540 "
+            "AND hold_expires_at IS NULL AND decision_at = '2026-08-09T08:05:00Z';",
+            &value), 0, "Angenommener Termin ist abfragbar");
+    expect_int(value, 1, "Annahme speichert einen bestätigten Termin");
+    expect_int(
+            calendar_database_decide_booking(
+                    second_booking_id,
+                    false,
+                    "2026-08-09T08:06:00Z",
+                    "zu spät"),
+            CALENDAR_BOOKING_DECISION_NOT_PENDING,
+            "Bereits entschiedener Termin kann nicht erneut entschieden werden");
+
+    reservation.start_minute = 615;
+    reservation.created_at_utc = "2026-08-09T08:10:00Z";
+    reservation.hold_expires_at_utc = "2026-08-09T09:10:00Z";
+    {
+        int64_t rejected_booking_id = 0;
+        expect_int(
+                availability_reserve_pending(&reservation, &rejected_booking_id),
+                AVAILABILITY_RESERVATION_OK,
+                "Weiterer freier Slot kann angefragt werden");
+        expect_int(
+                calendar_database_decide_booking(
+                        rejected_booking_id,
+                        false,
+                        "2026-08-09T08:15:00Z",
+                        "Termin nicht möglich"),
+                CALENDAR_BOOKING_DECISION_OK,
+                "Offene Terminanfrage kann abgelehnt werden");
+        expect_int(query_single_int(
+                "SELECT COUNT(*) FROM bookings WHERE decision_status = 'rejected' "
+                "AND rejection_reason = 'Termin nicht möglich';",
+                &value), 0, "Ablehnungsgrund ist abfragbar");
+        expect_true(value >= 1, "Ablehnung und Ablehnungsgrund werden gespeichert");
+    }
+
+    settings.auto_confirm_bookings = true;
+    expect_int(calendar_database_update_settings(&settings), 0,
+               "Automatische Terminbestätigung kann aktiviert werden");
+    query = make_query(
+            "wash_dry",
+            "2026-08-17",
+            "2026-08-16",
+            0,
+            "2026-08-16T00:00:00Z");
+    reservation.query = query;
+    reservation.start_minute = 540;
+    reservation.created_at_utc = "2026-08-16T00:00:00Z";
+    reservation.hold_expires_at_utc = "";
+    reservation.auto_confirm = true;
+    {
+        int64_t confirmed_booking_id = 0;
+        expect_int(
+                availability_reserve_pending(&reservation, &confirmed_booking_id),
+                AVAILABILITY_RESERVATION_OK,
+                "Freier Slot kann automatisch bestätigt werden");
+        expect_int(query_single_int(
+                "SELECT COUNT(*) FROM bookings WHERE decision_status = 'confirmed' "
+                "AND hold_expires_at IS NULL AND appointment_date = '2026-08-17';",
+                &value), 0, "Automatisch bestätigter Termin ist abfragbar");
+        expect_int(value, 1, "Automatische Bestätigung speichert direkt confirmed");
+    }
+    settings.auto_confirm_bookings = false;
+    expect_int(calendar_database_update_settings(&settings), 0,
+               "Manuelle Terminentscheidung kann wieder aktiviert werden");
 
     expect_true(execute_direct_sql(
             "INSERT INTO bookings("
@@ -361,6 +467,29 @@ int main(void)
 
     service.active = true;
     expect_int(calendar_database_update_service(&service), 0, "Leistung kann wieder aktiviert werden");
+
+    memset(&service, 0, sizeof(service));
+    snprintf(service.code, sizeof(service.code), "%s", "puppy_intro");
+    snprintf(service.name, sizeof(service.name), "%s", "Welpengewöhnung");
+    service.duration_minutes = 45;
+    service.buffer_minutes = 15;
+    service.active = true;
+    expect_int(calendar_database_add_service(&service), 0,
+               "Admin kann eine neue Leistung anlegen");
+    expect_int(calendar_database_add_service(&service), 1,
+               "Doppelte Leistungsschlüssel werden abgelehnt");
+    expect_int(calendar_database_delete_service("puppy_intro"),
+               CALENDAR_SERVICE_DELETE_OK,
+               "Unbenutzte Leistung wird vollständig gelöscht");
+    expect_int(calendar_database_get_service("puppy_intro", &service), 1,
+               "Gelöschte unbenutzte Leistung existiert nicht mehr");
+
+    expect_int(calendar_database_delete_service("wash_dry"),
+               CALENDAR_SERVICE_DELETE_ARCHIVED,
+               "Verwendete Leistung wird beim Löschen archiviert");
+    expect_int(calendar_database_get_service("wash_dry", &service), 0,
+               "Archivierte Leistung bleibt für historische Termine erhalten");
+    expect_true(!service.active, "Archivierte Leistung ist nicht mehr öffentlich aktiv");
 
     query.date = "2026-02-31";
     expect_true(

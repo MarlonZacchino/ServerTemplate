@@ -3,6 +3,6 @@ Host: localhost
 Content-Type: application/x-www-form-urlencoded
 X-Forwarded-For: 198.51.100.77
 X-Styles4Dogs-Proxy-Token: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-Content-Length: 137
+Content-Length: 219
 
-name=A&contact=a%40b.de&dog_size=medium&service=full_groom&appointment_date=2026-08-20&appointment_start=09%3A00&privacy_consent=accepted
+name=A&contact_channel=phone&phone_number=%2B49+170+1234567&phone_kind=mobile&contact_preference=whatsapp&dog_size=medium&service=full_groom&appointment_date=2026-08-20&appointment_start=09%3A00&privacy_consent=accepted

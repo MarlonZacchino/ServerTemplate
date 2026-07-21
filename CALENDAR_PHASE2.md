@@ -80,8 +80,10 @@ Server. Der Kalender:
 - verhindert das Absenden ohne ausgewählten Slot,
 - bleibt mobil und mit Tastatur bedienbar.
 
-Die endgültige Bestätigung erfolgt weiterhin nicht automatisch. In Phase 4
-nimmt der Admin Pending-Anfragen an oder lehnt sie ab.
+Im damaligen Phase-2-Stand erfolgte die endgültige Bestätigung noch nicht
+automatisch. Der aktuelle Stand unterstützt in Phase 4 sowohl manuelle
+Annahme beziehungsweise Ablehnung als auch eine optionale automatische
+Bestätigung.
 
 ## Sichere Ausgangslage
 

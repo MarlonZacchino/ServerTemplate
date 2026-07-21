@@ -83,10 +83,11 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 3, Legacy-Migration, sichere geschlossene Defaults,
-Leistungsdauer und Puffer, Wochenöffnungszeiten, Sperrzeiten,
-Buchungshorizont, Mindestvorlauf, ablaufende Pending-Reservierungen und den
-transaktionssicheren Doppelbuchungsschutz.
+Er prüft Schema-Version 4, Legacy-Migration, sichere geschlossene Defaults,
+Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
+Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
+ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
+Bestätigung sowie den transaktionssicheren Doppelbuchungsschutz.
 
 Die Verfügbarkeitsengine besitzt außerdem ein eigenes AFL-Ziel:
 
@@ -133,4 +134,20 @@ Der Stateful-Test `Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten` 
 - Löschen der Sperrzeit und erneute Freigabe der Slots
 - sichere Redirects mit `303 See Other`
 
-Der vollständige Lauf enthält nun 30 Beams und 8 Stateful-Tests.
+## Kalender Phase 4
+
+Zusätzlich werden geprüft:
+
+- strukturierte E-Mail- und Telefonkontakte
+- Mobilfunk mit gewünschter WhatsApp-Rückmeldung
+- Ablehnung von WhatsApp zusammen mit einer Festnetznummer
+- Annehmen und Ablehnen offener Terminanfragen
+- sofortige Freigabe eines abgelehnten Slots
+- Schutz gegen wiederholte Entscheidungen
+- automatische Bestätigung eines freien Termins
+- Hinzufügen und Löschen unbenutzter Leistungen
+- Archivierung verwendeter Leistungen im C-Engine-Test
+- Speicherung historischer Leistungssnapshots
+- scrollbare einspaltige Uhrzeitauswahl im Frontend
+
+Der vollständige Lauf enthält nun 34 Beams und 10 Stateful-Tests.

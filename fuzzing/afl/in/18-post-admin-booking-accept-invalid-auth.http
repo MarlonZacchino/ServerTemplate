@@ -1,0 +1,7 @@
+POST /admin/bookings/accept HTTP/1.1
+Host: localhost
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic !!!
+Content-Length: 88
+
+booking_id=1&csrf_token=0000000000000000000000000000000000000000000000000000000000000000

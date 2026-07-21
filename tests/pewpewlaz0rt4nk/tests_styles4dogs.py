@@ -45,6 +45,22 @@ def proxy_headers(client_ip: str, extra: dict[str, str] | None = None) -> dict[s
     }
 
 
+def email_contact(address: str) -> dict[str, str]:
+    return {
+        "contact_channel": "email",
+        "email": address,
+    }
+
+
+def phone_contact(number: str, kind: str = "mobile", preference: str = "call") -> dict[str, str]:
+    return {
+        "contact_channel": "phone",
+        "phone_number": number,
+        "phone_kind": kind,
+        "contact_preference": preference,
+    }
+
+
 def add_status(cannon: Laz0rCannon, description: str, request: str, status: str) -> None:
     cannon += Beam(
         description=description,
@@ -133,8 +149,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 3:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 3, erhalten {schema_version}")
+            if schema_version != 4:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 4, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -266,7 +282,7 @@ def run_stateful_tests() -> int:
         selected_slot = free_slots[0]
         body = urlencode({
             "name": "Pew Pew Test",
-            "contact": "test@example.invalid",
+            **email_contact("test@example.invalid"),
             "dog_name": "Bello",
             "dog_size": "medium",
             "service": "full_groom",
@@ -292,7 +308,9 @@ def run_stateful_tests() -> int:
                 "SELECT status, customer_name, contact, dog_name, dog_size, service, "
                 "       preferred_date, message, legacy, decision_status, appointment_date, "
                 "       start_minute, end_minute, blocked_until_minute, hold_expires_at, "
-                "       service_id IS NOT NULL "
+                "       service_id IS NOT NULL, contact_channel, email, phone_number, "
+                "       phone_kind, contact_preference, service_name_snapshot, "
+                "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
                 "FROM bookings ORDER BY id DESC LIMIT 1"
             ).fetchone()
 
@@ -316,6 +334,10 @@ def run_stateful_tests() -> int:
 
         if row[11] < 0 or row[12] <= row[11] or row[13] < row[12] or not row[14] or row[15] != 1:
             raise AssertionError(f"Gespeicherte Terminzeiten sind inkonsistent: {row!r}")
+        if row[16:21] != ("email", "test@example.invalid", "", "", ""):
+            raise AssertionError(f"Strukturierter E-Mail-Kontakt wurde falsch gespeichert: {row!r}")
+        if row[21] != "Komplettpflege" or row[22] != 120 or row[23] != 15:
+            raise AssertionError(f"Leistungssnapshot wurde falsch gespeichert: {row!r}")
 
         updated_response = raw_request(request_text(
             "GET",
@@ -658,6 +680,162 @@ def run_stateful_tests() -> int:
             raise AssertionError("Suchwert wird nicht sicher im Formular wiedergegeben")
 
 
+    def admin_booking_decisions() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {
+            **auth_headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        page_response = raw_request(request_text(
+            "GET",
+            "/admin/bookings",
+            auth_headers,
+        ).encode())
+        _, page_body = assert_status(page_response, "200 OK")
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', page_body)
+        if csrf_match is None:
+            raise AssertionError("CSRF-Token wurde im Buchungsbereich nicht gefunden")
+        csrf_token = csrf_match.group(1).decode("ascii")
+
+        with sqlite3.connect(database_file) as connection:
+            pending = connection.execute(
+                "SELECT id, appointment_date, service FROM bookings "
+                "WHERE decision_status = 'pending' ORDER BY id LIMIT 1"
+            ).fetchone()
+        if pending is None:
+            raise AssertionError("Keine offene Terminanfrage für den Annahmetest vorhanden")
+        pending_id, pending_date, pending_service = pending
+
+        if b'action="/admin/bookings/accept"' not in page_body or b'action="/admin/bookings/reject"' not in page_body:
+            raise AssertionError("Annehmen- und Ablehnen-Aktionen fehlen im Adminbereich")
+
+        accept_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/accept",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "booking_id": str(pending_id),
+            }),
+        ).encode())
+        accept_headers, _ = assert_status(accept_response, "303 See Other")
+        if accept_headers.get("location") != "/admin/bookings":
+            raise AssertionError("Terminannahme leitet nicht korrekt zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            accepted = connection.execute(
+                "SELECT decision_status, hold_expires_at, decision_at "
+                "FROM bookings WHERE id = ?",
+                (pending_id,),
+            ).fetchone()
+        if accepted is None or accepted[0] != "confirmed" or accepted[1] is not None or not accepted[2]:
+            raise AssertionError(f"Terminannahme wurde falsch gespeichert: {accepted!r}")
+
+        repeated_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/accept",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "booking_id": str(pending_id),
+            }),
+        ).encode())
+        assert_status(repeated_response, "409 Conflict")
+
+        next_date = (datetime.fromisoformat(pending_date) + timedelta(days=7)).date().isoformat()
+        availability_query = urlencode({
+            "service": pending_service,
+            "from": next_date,
+            "to": next_date,
+        })
+        availability_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{availability_query}",
+        ).encode())
+        _, availability_body = assert_status(availability_response, "200 OK")
+        availability = json.loads(availability_body)
+        free_slots = [slot for slot in availability["days"][0]["slots"] if slot["available"]]
+        if not free_slots:
+            raise AssertionError("Kein freier Folgetermin für den Ablehnungstest vorhanden")
+        selected_slot = free_slots[0]
+
+        phone_body = urlencode({
+            "name": "WhatsApp Kundin",
+            **phone_contact("+49 170 1234567", "mobile", "whatsapp"),
+            "dog_name": "Luna",
+            "dog_size": "small",
+            "service": pending_service,
+            "appointment_date": next_date,
+            "appointment_start": selected_slot["start"],
+            "message": "Bitte per WhatsApp melden",
+            "privacy_consent": "accepted",
+        })
+        phone_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            proxy_headers(
+                "198.51.100.61",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            phone_body,
+        ).encode())
+        assert_status(phone_response, "201 Created")
+
+        with sqlite3.connect(database_file) as connection:
+            phone_booking = connection.execute(
+                "SELECT id, decision_status, contact_channel, phone_number, phone_kind, "
+                "       contact_preference FROM bookings "
+                "WHERE customer_name = 'WhatsApp Kundin' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if phone_booking is None or phone_booking[1:] != (
+            "pending", "phone", "+49 170 1234567", "mobile", "whatsapp"
+        ):
+            raise AssertionError(f"WhatsApp-Kontakt wurde falsch gespeichert: {phone_booking!r}")
+
+        reject_response = raw_request(request_text(
+            "POST",
+            "/admin/bookings/reject",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "booking_id": str(phone_booking[0]),
+                "rejection_reason": "Der Termin ist intern nicht möglich",
+            }),
+        ).encode())
+        assert_status(reject_response, "303 See Other")
+
+        with sqlite3.connect(database_file) as connection:
+            rejected = connection.execute(
+                "SELECT decision_status, hold_expires_at, rejection_reason "
+                "FROM bookings WHERE id = ?",
+                (phone_booking[0],),
+            ).fetchone()
+        if rejected != ("rejected", None, "Der Termin ist intern nicht möglich"):
+            raise AssertionError(f"Terminablehnung wurde falsch gespeichert: {rejected!r}")
+
+        released_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{availability_query}",
+        ).encode())
+        _, released_body = assert_status(released_response, "200 OK")
+        released = json.loads(released_body)
+        released_slot = next(
+            slot for slot in released["days"][0]["slots"]
+            if slot["start"] == selected_slot["start"]
+        )
+        if not released_slot["available"]:
+            raise AssertionError("Abgelehnter Termin wurde nicht wieder freigegeben")
+
+
     def admin_calendar_workflow() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
         if not database_file_value:
@@ -688,6 +866,8 @@ def run_stateful_tests() -> int:
             "Regelmäßige Öffnungszeiten",
             "Leistungen und Dauer",
             "Urlaub und Sperrzeiten",
+            "Leistung hinzufügen",
+            "automatisch verbindlich bestätigen",
         ):
             if expected.encode("utf-8") not in page_body:
                 raise AssertionError(f"Admin-Kalender enthält {expected!r} nicht")
@@ -797,6 +977,23 @@ def run_stateful_tests() -> int:
         ).encode())
         assert_status(deactivate_response, "303 See Other")
 
+        add_service_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/service/add",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "code": "coat_consult",
+                "name": "Fellberatung",
+                "duration_minutes": "45",
+                "buffer_minutes": "15",
+                "active": "1",
+            }),
+        ).encode())
+        add_service_headers, _ = assert_status(add_service_response, "303 See Other")
+        if add_service_headers.get("location") != "/admin/calendar?saved=service-added":
+            raise AssertionError("Neue Leistung leitet nicht korrekt zurück")
+
         services_response = raw_request(request_text("GET", "/api/services").encode())
         _, services_body = assert_status(services_response, "200 OK")
         services = json.loads(services_body)["services"]
@@ -805,6 +1002,27 @@ def run_stateful_tests() -> int:
             raise AssertionError("Deaktivierte Beratung wird weiterhin öffentlich angeboten")
         if service_by_code.get("full_groom", {}).get("name") != "Komplettpflege Premium":
             raise AssertionError("Geänderter Leistungsname erscheint nicht in der API")
+        if service_by_code.get("coat_consult", {}).get("name") != "Fellberatung":
+            raise AssertionError("Neu angelegte Leistung erscheint nicht in der API")
+
+        delete_service_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/service/delete",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "code": "coat_consult",
+            }),
+        ).encode())
+        delete_service_headers, _ = assert_status(delete_service_response, "303 See Other")
+        if delete_service_headers.get("location") != "/admin/calendar?saved=service-deleted":
+            raise AssertionError("Leistungslöschung leitet nicht korrekt zurück")
+
+        services_after_delete_response = raw_request(request_text("GET", "/api/services").encode())
+        _, services_after_delete_body = assert_status(services_after_delete_response, "200 OK")
+        deleted_codes = {item["code"] for item in json.loads(services_after_delete_body)["services"]}
+        if "coat_consult" in deleted_codes:
+            raise AssertionError("Gelöschte unbenutzte Leistung wird weiterhin angeboten")
 
         availability_query = urlencode({
             "service": "full_groom",
@@ -850,7 +1068,7 @@ def run_stateful_tests() -> int:
         with sqlite3.connect(database_file) as connection:
             settings = connection.execute(
                 "SELECT min_notice_minutes, booking_horizon_days, "
-                "slot_interval_minutes, pending_hold_minutes "
+                "slot_interval_minutes, pending_hold_minutes, auto_confirm_bookings "
                 "FROM calendar_settings WHERE id = 1"
             ).fetchone()
             periods = connection.execute(
@@ -868,7 +1086,7 @@ def run_stateful_tests() -> int:
                 (target_date, target_date, "Testurlaub"),
             ).fetchone()
 
-        if settings != (0, 120, 30, 720):
+        if settings != (0, 120, 30, 720, 0):
             raise AssertionError(f"Buchungsregeln wurden falsch gespeichert: {settings!r}")
         if periods != [(540, 720), (780, 1020)]:
             raise AssertionError(f"Öffnungszeiten wurden falsch gespeichert: {periods!r}")
@@ -907,6 +1125,114 @@ def run_stateful_tests() -> int:
         _, notice_body = assert_status(notice_response, "200 OK")
         if "Die Buchungsregeln wurden gespeichert.".encode("utf-8") not in notice_body:
             raise AssertionError("Admin-Kalender zeigt keine Speicherbestätigung")
+
+
+    def automatic_confirmation() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+        database_file = Path(database_file_value)
+
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {
+            **auth_headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        page_response = raw_request(request_text("GET", "/admin/calendar", auth_headers).encode())
+        _, page_body = assert_status(page_response, "200 OK")
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', page_body)
+        if csrf_match is None:
+            raise AssertionError("CSRF-Token für automatische Bestätigung fehlt")
+        csrf_token = csrf_match.group(1).decode("ascii")
+
+        enable_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/settings",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "min_notice_hours": "0",
+                "booking_horizon_days": "120",
+                "slot_interval_minutes": "30",
+                "pending_hold_hours": "12",
+                "auto_confirm_bookings": "1",
+            }),
+        ).encode())
+        assert_status(enable_response, "303 See Other")
+
+        services_response = raw_request(request_text("GET", "/api/services").encode())
+        _, services_body = assert_status(services_response, "200 OK")
+        services_payload = json.loads(services_body)
+        if services_payload.get("automatic_confirmation") is not True:
+            raise AssertionError("Leistungs-API meldet die aktivierte Bestätigungsautomatik nicht")
+
+        target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=14)
+        target_date = target.date().isoformat()
+        query = urlencode({
+            "service": "full_groom",
+            "from": target_date,
+            "to": target_date,
+        })
+        availability_response = raw_request(request_text("GET", f"/api/availability?{query}").encode())
+        _, availability_body = assert_status(availability_response, "200 OK")
+        availability = json.loads(availability_body)
+        free_slots = [slot for slot in availability["days"][0]["slots"] if slot["available"]]
+        if not free_slots:
+            raise AssertionError("Kein freier Termin für automatische Bestätigung vorhanden")
+        selected_slot = free_slots[0]
+
+        booking_body = urlencode({
+            "name": "Auto Bestätigung",
+            **email_contact("auto@example.invalid"),
+            "dog_name": "Milo",
+            "dog_size": "medium",
+            "service": "full_groom",
+            "appointment_date": target_date,
+            "appointment_start": selected_slot["start"],
+            "message": "Automatiktest",
+            "privacy_consent": "accepted",
+        })
+        booking_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            proxy_headers(
+                "198.51.100.62",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            booking_body,
+        ).encode())
+        _, confirmation_body = assert_status(booking_response, "201 Created")
+        if "automatisch bestätigt".encode("utf-8") not in confirmation_body:
+            raise AssertionError("Kundenseite zeigt die automatische Bestätigung nicht an")
+
+        with sqlite3.connect(database_file) as connection:
+            row = connection.execute(
+                "SELECT decision_status, hold_expires_at, decision_at, contact_channel, email "
+                "FROM bookings WHERE customer_name = 'Auto Bestätigung' "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row is None or row[0] != "confirmed" or row[1] is not None or not row[2] or row[3:] != (
+            "email", "auto@example.invalid"
+        ):
+            raise AssertionError(f"Automatisch bestätigter Termin wurde falsch gespeichert: {row!r}")
+
+        disable_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/settings",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "min_notice_hours": "0",
+                "booking_horizon_days": "120",
+                "slot_interval_minutes": "30",
+                "pending_hold_hours": "12",
+            }),
+        ).encode())
+        assert_status(disable_response, "303 See Other")
+
 
     def rate_limiting() -> None:
         invalid_body = urlencode({"name": "Rate Limit"})
@@ -1061,7 +1387,9 @@ def run_stateful_tests() -> int:
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
+    check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)
     check("Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten", admin_calendar_workflow)
+    check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 
     return failures
@@ -1113,11 +1441,23 @@ def main() -> int:
         {"Content-Type": "application/x-www-form-urlencoded"},
         "min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24&csrf_token=invalid",
     ), "401 Unauthorized")
+    add_status(cannon, "Terminannahme ohne Zugangsdaten", request_text(
+        "POST",
+        "/admin/bookings/accept",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        "booking_id=1&csrf_token=invalid",
+    ), "401 Unauthorized")
+    add_status(cannon, "Leistung anlegen ohne Zugangsdaten", request_text(
+        "POST",
+        "/admin/calendar/service/add",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        "code=test&name=Test&duration_minutes=30&buffer_minutes=0&csrf_token=invalid",
+    ), "401 Unauthorized")
     add_status(cannon, "Setup-Seite beim ersten Start", request_text("GET", "/setup/admin"), "200 OK")
 
     missing_slot_booking = urlencode({
         "name": "Laz0r Test",
-        "contact": "laz0r@example.invalid",
+        **email_contact("laz0r@example.invalid"),
         "dog_name": "Flocke",
         "dog_size": "small",
         "service": "wash_dry",
@@ -1147,7 +1487,7 @@ def main() -> int:
 
     missing_privacy = urlencode({
         "name": "Ohne Zustimmung",
-        "contact": "privacy@example.invalid",
+        **email_contact("privacy@example.invalid"),
         "dog_size": "medium",
         "service": "full_groom",
     })
@@ -1163,7 +1503,7 @@ def main() -> int:
 
     invalid_service = urlencode({
         "name": "Ungültige Leistung",
-        "contact": "service@example.invalid",
+        **email_contact("service@example.invalid"),
         "dog_size": "medium",
         "service": "nicht-erlaubt",
         "privacy_consent": "accepted",
@@ -1180,7 +1520,7 @@ def main() -> int:
 
     invalid_date = urlencode({
         "name": "Ungültiges Datum",
-        "contact": "date@example.invalid",
+        **email_contact("date@example.invalid"),
         "dog_size": "medium",
         "service": "full_groom",
         "appointment_date": "2026-02-31",
@@ -1195,6 +1535,44 @@ def main() -> int:
             {"Content-Type": "application/x-www-form-urlencoded"},
         ),
         invalid_date,
+    ), "400 Bad Request")
+
+    invalid_whatsapp_landline = urlencode({
+        "name": "Ungültiger WhatsApp-Kontakt",
+        **phone_contact("02571 123456", "landline", "whatsapp"),
+        "dog_size": "small",
+        "service": "wash_dry",
+        "appointment_date": "2026-08-20",
+        "appointment_start": "09:00",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "WhatsApp mit Festnetznummer wird abgelehnt", request_text(
+        "POST",
+        "/booking",
+        proxy_headers(
+            "198.51.100.46",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
+        invalid_whatsapp_landline,
+    ), "400 Bad Request")
+
+    invalid_email = urlencode({
+        "name": "Ungültige E-Mail",
+        **email_contact("keine-adresse"),
+        "dog_size": "small",
+        "service": "wash_dry",
+        "appointment_date": "2026-08-20",
+        "appointment_start": "09:00",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "Ungültige E-Mail-Adresse wird abgelehnt", request_text(
+        "POST",
+        "/booking",
+        proxy_headers(
+            "198.51.100.47",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
+        invalid_email,
     ), "400 Bad Request")
 
     pew_ok = cannon.pewpew()

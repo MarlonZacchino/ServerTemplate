@@ -1,0 +1,7 @@
+POST /admin/calendar/service/add HTTP/1.1
+Host: localhost
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic !!!
+Content-Length: 158
+
+code=coat_consult&name=Fellberatung&duration_minutes=45&buffer_minutes=15&active=1&csrf_token=0000000000000000000000000000000000000000000000000000000000000000

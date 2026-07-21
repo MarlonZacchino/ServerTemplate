@@ -71,6 +71,6 @@ Erfolgreiche Aktionen antworten mit `303 See Other` und leiten zurück auf den A
 - keine Kundendaten in der öffentlichen Verfügbarkeits-API
 - `Cache-Control: no-store` im Adminbereich
 
-## Noch nicht Bestandteil dieser Phase
+## Weiterführung in Phase 4
 
-Das Annehmen und Ablehnen einer vorläufigen Terminanfrage folgt in Phase 4. Bis dahin blockieren `pending`-Anfragen den gewählten Slot bis zum konfigurierten Ablaufzeitpunkt.
+Das Annehmen und Ablehnen vorläufiger Terminanfragen, automatische Bestätigung, strukturierte Kontaktwege sowie das Hinzufügen und Löschen von Leistungen sind inzwischen in `CALENDAR_PHASE4.md` dokumentiert.
