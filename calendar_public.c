@@ -508,6 +508,9 @@ calendar_public_result calendar_public_reserve_booking(
     if (result == AVAILABILITY_RESERVATION_INVALID) {
         return CALENDAR_PUBLIC_BAD_REQUEST;
     }
+    if (result == AVAILABILITY_RESERVATION_CONTACT_LIMIT) {
+        return CALENDAR_PUBLIC_CONTACT_LIMIT;
+    }
 
     set_availability_error("Termin konnte nicht reserviert werden");
     return CALENDAR_PUBLIC_ERROR;

@@ -188,3 +188,19 @@ Postfach deshalb neu im Adminbereich verbunden. Eine separate Sicherung der
 Secrets ist nur verschlüsselt und mit besonders eingeschränktem Zugriff
 zulässig; Schlüssel und Chiffretext müssen dabei gemeinsam wiederhergestellt
 werden.
+
+## Zähler und Historie zurücksetzen
+
+Die Adminseite bietet getrennte Wartungsaktionen:
+
+- **Fehlgeschlagene erneut versuchen:** setzt endgültig fehlgeschlagene Jobs
+  wieder auf `pending`.
+- **Gesendet-Zähler zurücksetzen:** löscht ausschließlich bereits gesendete
+  Jobs und setzt dadurch den sichtbaren Zähler zurück.
+- **Fehlgeschlagene löschen:** entfernt ausschließlich Jobs mit Status
+  `failed`.
+- **Abgeschlossene Historie leeren:** entfernt `sent` und `failed` gemeinsam.
+
+Jobs mit Status `pending` oder `processing` werden nie durch eine
+Bereinigungsaktion entfernt. Alle Aktionen sind mit Basic Auth und CSRF-Schutz
+geschützt und erfordern in der Oberfläche eine Bestätigung.

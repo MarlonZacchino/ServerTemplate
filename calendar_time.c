@@ -237,6 +237,49 @@ int calendar_date_iso_weekday(const char *date, int *out_weekday)
     return 0;
 }
 
+int calendar_date_format_de(
+        const char *date,
+        bool include_weekday,
+        char *out_text,
+        size_t out_size
+)
+{
+    static const char *const weekday_names[] = {
+            "", "Montag", "Dienstag", "Mittwoch", "Donnerstag",
+            "Freitag", "Samstag", "Sonntag"
+    };
+    int year;
+    int month;
+    int day;
+    int weekday = 0;
+    int written;
+
+    if (out_text == NULL || out_size == 0 ||
+        !parse_date(date, &year, &month, &day) ||
+        (include_weekday && calendar_date_iso_weekday(date, &weekday) != 0)) {
+        return -1;
+    }
+
+    written = include_weekday
+            ? snprintf(
+                    out_text,
+                    out_size,
+                    "%02d.%02d.%04d - %s",
+                    day,
+                    month,
+                    year,
+                    weekday_names[weekday])
+            : snprintf(
+                    out_text,
+                    out_size,
+                    "%02d.%02d.%04d",
+                    day,
+                    month,
+                    year);
+
+    return written >= 0 && (size_t)written < out_size ? 0 : -1;
+}
+
 bool calendar_utc_timestamp_is_valid(const char *timestamp)
 {
     char date[11];

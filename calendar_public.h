@@ -13,7 +13,8 @@ typedef enum calendar_public_result {
     CALENDAR_PUBLIC_BAD_REQUEST = 1,
     CALENDAR_PUBLIC_NOT_FOUND = 2,
     CALENDAR_PUBLIC_UNAVAILABLE = 3,
-    CALENDAR_PUBLIC_CONFIRMED = 4
+    CALENDAR_PUBLIC_CONFIRMED = 4,
+    CALENDAR_PUBLIC_CONTACT_LIMIT = 5
 } calendar_public_result;
 
 calendar_public_result calendar_public_build_services_json(string **out_json);

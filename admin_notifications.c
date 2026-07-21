@@ -101,6 +101,9 @@ static const char *notice(const char *code)
     if (strcmp(code, "template") == 0) return "Die Nachrichtenvorlage wurde gespeichert.";
     if (strcmp(code, "template-reset") == 0) return "Die Standardvorlage wurde wiederhergestellt.";
     if (strcmp(code, "retry") == 0) return "Fehlgeschlagene Nachrichten werden erneut versucht.";
+    if (strcmp(code, "clear-sent") == 0) return "Der Zähler und die Historie gesendeter Nachrichten wurden zurückgesetzt.";
+    if (strcmp(code, "clear-failed") == 0) return "Alle fehlgeschlagenen Nachrichten wurden aus der Warteschlange entfernt.";
+    if (strcmp(code, "clear-completed") == 0) return "Gesendete und fehlgeschlagene Nachrichten wurden vollständig bereinigt.";
     return NULL;
 }
 
@@ -166,8 +169,11 @@ string *admin_notifications_build_page(const char *csrf_token, const char *notic
         str_cat_cstr(page, "\"></label><button class=\"button button-small\" type=\"submit\">Testmail einreihen</button></form><form method=\"post\" action=\"/admin/notifications/disconnect\">"); csrf(page, csrf_token);
         str_cat_cstr(page, "<button class=\"button button-small button-danger\" type=\"submit\">Verbindung deaktivieren</button></form></div>");
     }
-    str_cat_cstr(page, "</section><section class=\"card admin-card\"><p class=\"eyebrow\">Versand</p><h2>Warteschlange</h2><p>Fehlgeschlagene Nachrichten werden automatisch erneut versucht. Nach einer Korrektur kannst du alle Fehler sofort freigeben.</p><form method=\"post\" action=\"/admin/notifications/retry\">"); csrf(page, csrf_token);
-    str_cat_cstr(page, "<button class=\"button button-secondary\" type=\"submit\">Fehlgeschlagene erneut versuchen</button></form></section>");
+    str_cat_cstr(page, "</section><section class=\"card admin-card\"><p class=\"eyebrow\">Versand</p><h2>Warteschlange und Zähler</h2><p>Ausstehende Nachrichten bleiben unangetastet. Gesendete oder endgültig fehlgeschlagene Einträge können separat bereinigt werden.</p><div class=\"notification-queue-actions\"><form method=\"post\" action=\"/admin/notifications/retry\">"); csrf(page, csrf_token);
+    str_cat_cstr(page, "<button class=\"button button-secondary\" type=\"submit\">Fehlgeschlagene erneut versuchen</button></form><form method=\"post\" action=\"/admin/notifications/clear-sent\">"); csrf(page, csrf_token);
+    str_cat_cstr(page, "<button class=\"button button-secondary\" type=\"submit\" onclick=\"return confirm('Zähler und Historie gesendeter E-Mails zurücksetzen?')\">Gesendet-Zähler zurücksetzen</button></form><form method=\"post\" action=\"/admin/notifications/clear-failed\">"); csrf(page, csrf_token);
+    str_cat_cstr(page, "<button class=\"button button-danger\" type=\"submit\" onclick=\"return confirm('Alle fehlgeschlagenen Nachrichten endgültig entfernen?')\">Fehlgeschlagene löschen</button></form><form method=\"post\" action=\"/admin/notifications/clear-completed\">"); csrf(page, csrf_token);
+    str_cat_cstr(page, "<button class=\"button button-danger\" type=\"submit\" onclick=\"return confirm('Gesendete und fehlgeschlagene Nachrichten vollständig bereinigen?')\">Abgeschlossene Historie leeren</button></form></div><p class=\"admin-calendar-hint\">Ausstehende und gerade verarbeitete E-Mails werden durch diese Bereinigung nicht gelöscht.</p></section>");
 
     str_cat_cstr(page, "<section class=\"card admin-card notification-template-section\"><p class=\"eyebrow\">Texte</p><h2>Automatische Nachrichten individualisieren</h2><p>Bereits eingereihte E-Mails behalten ihren bisherigen Text.</p><details class=\"notification-placeholder-help\"><summary>Verfügbare Platzhalter</summary><code>{{customer_name}}</code> <code>{{booking_id}}</code> <code>{{appointment_date}}</code> <code>{{start_time}}</code> <code>{{end_time}}</code> <code>{{service_name}}</code> <code>{{dog_name}}</code> <code>{{rejection_reason}}</code> <code>{{salon_name}}</code> <code>{{salon_address}}</code> <code>{{salon_phone}}</code> <code>{{website_url}}</code></details><div class=\"notification-template-list\">");
     context.page = page; context.csrf_token = csrf_token;
@@ -232,3 +238,6 @@ admin_notifications_result admin_notifications_reset_template(const string *requ
 }
 
 admin_notifications_result admin_notifications_retry_failed(const string *request) { (void)request; if (notification_queue_retry_failed() != 0) { set_error(notification_queue_last_error()); return ADMIN_NOTIFICATIONS_ERROR; } return ADMIN_NOTIFICATIONS_OK; }
+admin_notifications_result admin_notifications_clear_sent(const string *request) { (void)request; if (notification_queue_clear_sent() != 0) { set_error(notification_queue_last_error()); return ADMIN_NOTIFICATIONS_ERROR; } return ADMIN_NOTIFICATIONS_OK; }
+admin_notifications_result admin_notifications_clear_failed(const string *request) { (void)request; if (notification_queue_clear_failed() != 0) { set_error(notification_queue_last_error()); return ADMIN_NOTIFICATIONS_ERROR; } return ADMIN_NOTIFICATIONS_OK; }
+admin_notifications_result admin_notifications_clear_completed(const string *request) { (void)request; if (notification_queue_clear_completed() != 0) { set_error(notification_queue_last_error()); return ADMIN_NOTIFICATIONS_ERROR; } return ADMIN_NOTIFICATIONS_OK; }

@@ -138,3 +138,10 @@ Die Tages- und Wochenansicht unter `/admin/appointments` ist als weiterer
 geschützter Request im HTTP-Korpus enthalten. Der SMTP-Worker wird nicht mit
 Netzwerk-Fuzzing vermischt; Warteschlangen-, Erinnerungs- und ICS-Logik werden
 über die isolierten Regressionstests und den Worker-Dry-Run geprüft.
+
+## Phase-7-Korpus
+
+Ein zusätzlicher Buchungsrequest füllt das unsichtbare Honeypot-Feld. Damit
+wird die neutrale Bot-Antwort samt früher Request-Verarbeitung im normalen
+HTTP-Fuzzing erreicht. Das zustandsabhängige Kontaktlimit bleibt Bestandteil
+der isolierten PewPew-Regressionsprüfung.

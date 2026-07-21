@@ -55,6 +55,9 @@ typedef struct booking_admin_filter {
  */
 bool parse_booking_request(const string *request, booking_request *booking);
 
+/* Unsichtbares Bot-Feld. Echte Nutzer lassen es leer. */
+bool booking_request_hits_honeypot(const string *request);
+
 /* Liest und validiert Status- und Suchfilter aus dem Query-String. */
 bool parse_booking_admin_filter(
         const char *query,

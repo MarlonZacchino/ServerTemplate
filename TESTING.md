@@ -187,3 +187,23 @@ Der Regressionstest prüft zusätzlich:
 
 Die Testumgebung verwendet ein eigenes temporäres Secrets-Verzeichnis. Echte
 SMTP-Zugangsdaten oder produktive Dateien werden dabei nicht gelesen.
+
+## Kalender Phase 7
+
+Der Regressionstest prüft zusätzlich:
+
+- das gemeinsame Speichern von Buchungsregeln, sieben Wochentagen und allen
+  vorhandenen Leistungen in einer Transaktion,
+- den nachlaufenden Speicherknopf und die statische Auslieferung von
+  `admin-calendar.js`,
+- verständlich getrennte Bezeichnungen für Mindestabstand und Freihaltezeit,
+- die Tages-, Wochen- und 30-Tage-Ansicht,
+- deutsches Datumsformat mit ausgeschriebenem Wochentag,
+- eindeutig markierte Termine und Sperrzeiten samt Legende,
+- das Honeypot-Verhalten ohne Datenbankeintrag,
+- höchstens drei Anfragen desselben Kontakts innerhalb von 24 Stunden,
+- `429 Too Many Requests` und `Retry-After: 86400` beim Kontaktlimit,
+- Zurücksetzen gesendeter sowie Löschen fehlgeschlagener Mailjobs.
+
+Der vollständige HTTP-Lauf enthält jetzt 36 Beams. Das Datenbankschema bleibt
+auf Version 6.

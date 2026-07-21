@@ -1129,11 +1129,40 @@ static string *handle_booking_unavailable(void)
             true);
 }
 
+static string *handle_booking_contact_limit(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<title>Zu viele Terminanfragen | Styles 4 Dogs</title>"
+            "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+            "<main class=\"page\"><section class=\"card\">"
+            "<p class=\"eyebrow\">Buchungsschutz</p>"
+            "<h1>Bitte nicht noch eine weitere Anfrage senden.</h1>"
+            "<p>Über diesen Kontakt wurden innerhalb der letzten 24 Stunden bereits mehrere Terminanfragen erstellt. "
+            "Bitte warte etwas oder melde dich direkt beim Salon.</p>"
+            "<p><a class=\"button\" href=\"/kontakt\">Zur Kontaktseite</a></p>"
+            "</section></main></body></html>";
+
+    return build_response_text(
+            "429 Too Many Requests",
+            "text/html; charset=utf-8",
+            "Cache-Control: no-store\r\nRetry-After: 86400\r\n",
+            body,
+            true);
+}
+
 static string *handle_booking(string *request)
 {
     booking_request booking;
     int64_t booking_id = 0;
     calendar_public_result result;
+
+    if (booking_request_hits_honeypot(request)) {
+        clear_request_body(request);
+        /* Bots erhalten absichtlich dieselbe neutrale Antwort wie echte Anfragen. */
+        return handle_booking_created(false);
+    }
 
     if (!parse_booking_request(request, &booking)) {
         clear_request_body(request);
@@ -1163,6 +1192,9 @@ static string *handle_booking(string *request)
     }
     if (result == CALENDAR_PUBLIC_UNAVAILABLE) {
         return handle_booking_unavailable();
+    }
+    if (result == CALENDAR_PUBLIC_CONTACT_LIMIT) {
+        return handle_booking_contact_limit();
     }
     if (result == CALENDAR_PUBLIC_BAD_REQUEST || result == CALENDAR_PUBLIC_NOT_FOUND) {
         return handle_bad_request(true);
@@ -1898,6 +1930,15 @@ string *process(string *request)
             if (strcmp(path, "/admin/notifications/retry") == 0)
                 return handle_admin_notifications_post(
                         request, admin_notifications_retry_failed, "retry");
+            if (strcmp(path, "/admin/notifications/clear-sent") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_clear_sent, "clear-sent");
+            if (strcmp(path, "/admin/notifications/clear-failed") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_clear_failed, "clear-failed");
+            if (strcmp(path, "/admin/notifications/clear-completed") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_clear_completed, "clear-completed");
         }
 
         if (strncmp(path, "/admin/calendar/", strlen("/admin/calendar/")) == 0) {
@@ -1910,6 +1951,12 @@ string *process(string *request)
                         request,
                         admin_calendar_update_settings,
                         "settings");
+            }
+            if (strcmp(path, "/admin/calendar/save-all") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_save_all,
+                        "all");
             }
             if (strcmp(path, "/admin/calendar/hours") == 0) {
                 return handle_admin_calendar_post(

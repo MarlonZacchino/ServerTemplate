@@ -2,6 +2,7 @@
 #define STYLES4DOGS_CALENDAR_TIME_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <time.h>
 
 typedef struct calendar_clock_snapshot {
@@ -32,6 +33,17 @@ int calendar_date_add_days(
 
 /* ISO-Wochentag: Montag = 1, Sonntag = 7. */
 int calendar_date_iso_weekday(const char *date, int *out_weekday);
+
+/*
+ * Formatiert YYYY-MM-DD für die Oberfläche als DD.MM.YYYY.
+ * Mit include_weekday entsteht zum Beispiel "21.07.2026 - Dienstag".
+ */
+int calendar_date_format_de(
+        const char *date,
+        bool include_weekday,
+        char *out_text,
+        size_t out_size
+);
 
 /* Validiert UTC-Zeitstempel im festen Format YYYY-MM-DDTHH:MM:SSZ. */
 bool calendar_utc_timestamp_is_valid(const char *timestamp);

@@ -151,6 +151,32 @@ static bool get_optional_message(
     return true;
 }
 
+bool booking_request_hits_honeypot(const string *request)
+{
+    char value[256];
+    form_value_result result;
+
+    if (request == NULL) {
+        return false;
+    }
+
+    result = form_urlencoded_get(
+            request,
+            "company_website",
+            value,
+            sizeof(value));
+
+    if (result == FORM_VALUE_NOT_FOUND) {
+        return false;
+    }
+    if (result != FORM_VALUE_OK) {
+        return true;
+    }
+
+    trim_ascii_whitespace(value);
+    return value[0] != '\0';
+}
+
 
 static bool parse_customer_name(const string *request, booking_request *booking)
 {
@@ -922,6 +948,7 @@ static void append_appointment_detail(
 )
 {
     char time_text[32];
+    char date_text[48];
     char start_text[6];
     char end_text[6];
 
@@ -929,7 +956,13 @@ static void append_appointment_detail(
         record->start_minute < 0 || record->end_minute < 0 ||
         calendar_time_format_hhmm(record->start_minute, start_text) != 0 ||
         calendar_time_format_hhmm(record->end_minute, end_text) != 0) {
-        append_booking_detail(page, "Termin", record->preferred_date, "Noch ohne festen Termin");
+        const char *preferred = record->preferred_date;
+
+        if (preferred != NULL && preferred[0] != '\0' &&
+            calendar_date_format_de(preferred, true, date_text, sizeof(date_text)) == 0) {
+            preferred = date_text;
+        }
+        append_booking_detail(page, "Wunschdatum", preferred, "Noch ohne festen Termin");
         return;
     }
 
@@ -938,7 +971,15 @@ static void append_appointment_detail(
         return;
     }
 
-    append_booking_detail(page, "Termindatum", record->appointment_date, "Nicht angegeben");
+    if (calendar_date_format_de(
+            record->appointment_date,
+            true,
+            date_text,
+            sizeof(date_text)) != 0) {
+        snprintf(date_text, sizeof(date_text), "%s", record->appointment_date);
+    }
+
+    append_booking_detail(page, "Termindatum", date_text, "Nicht angegeben");
     append_booking_detail(page, "Uhrzeit", time_text, "Nicht angegeben");
     append_booking_detail(
             page,
@@ -954,6 +995,7 @@ static void append_booking_card(
 {
     admin_page_context *context = context_value;
     string *page;
+    char created_at_display[80];
 
     if (record == NULL || context == NULL || context->page == NULL) {
         return;
@@ -961,11 +1003,36 @@ static void append_booking_card(
 
     page = context->page;
 
+    snprintf(
+            created_at_display,
+            sizeof(created_at_display),
+            "%s",
+            record->created_at == NULL ? "" : record->created_at);
+    if (record->created_at != NULL && strlen(record->created_at) >= 10) {
+        char iso_date[11];
+        char date_text[24];
+
+        memcpy(iso_date, record->created_at, 10);
+        iso_date[10] = '\0';
+        if (calendar_date_format_de(iso_date, false, date_text, sizeof(date_text)) == 0) {
+            if (strlen(record->created_at) >= 16) {
+                snprintf(
+                        created_at_display,
+                        sizeof(created_at_display),
+                        "%s, %.5s Uhr",
+                        date_text,
+                        record->created_at + 11);
+            } else {
+                snprintf(created_at_display, sizeof(created_at_display), "%s", date_text);
+            }
+        }
+    }
+
     str_cat_cstr(page,
             "            <article class=\"booking-card\">\n"
             "                <div class=\"booking-card-head\">\n"
             "                    <div><p class=\"booking-time\">");
-    append_html_text(page, record->created_at);
+    append_html_text(page, created_at_display);
     str_cat_cstr(page, "</p><p class=\"booking-id\">Anfrage #");
     {
         char id_text[32];

@@ -155,6 +155,7 @@ int main(void)
         char next_date[11];
         char next_timestamp[21];
         char time_text[6];
+        char display_date[48];
         int parsed_minute = -1;
 
         expect_int(calendar_date_add_days("2026-02-28", 1, next_date), 0,
@@ -173,6 +174,11 @@ int main(void)
                    "Minuten werden als HH:MM formatiert");
         expect_true(strcmp(time_text, "09:45") == 0,
                     "Zeitformatierung ist stabil");
+        expect_int(calendar_date_format_de(
+                "2026-07-21", true, display_date, sizeof(display_date)), 0,
+                "Deutsches Termindatum wird formatiert");
+        expect_true(strcmp(display_date, "21.07.2026 - Dienstag") == 0,
+                    "Termindatum enthält Datum und deutschen Wochentag");
 
         {
             time_t winter_epoch;

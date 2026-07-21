@@ -891,6 +891,12 @@ def run_stateful_tests() -> int:
             "Urlaub und Sperrzeiten",
             "Leistung hinzufügen",
             "automatisch verbindlich bestätigen",
+            "Frühester buchbarer Termin",
+            "Freihaltezeit für offene Anfragen",
+            "Alle Einstellungen speichern",
+            "/admin/calendar/save-all",
+            "/admin-calendar.js",
+            "Buchungsschutz",
         ):
             if expected.encode("utf-8") not in page_body:
                 raise AssertionError(f"Admin-Kalender enthält {expected!r} nicht")
@@ -937,6 +943,51 @@ def run_stateful_tests() -> int:
         target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=14)
         target_date = target.date().isoformat()
         target_weekday = target.isoweekday()
+
+        with sqlite3.connect(database_file) as connection:
+            service_rows = connection.execute(
+                "SELECT code, name, duration_minutes, buffer_minutes, active "
+                "FROM services ORDER BY sort_order, code"
+            ).fetchall()
+
+        save_all_body = {
+            "csrf_token": csrf_token,
+            "min_notice_hours": "0",
+            "booking_horizon_days": "120",
+            "slot_interval_minutes": "30",
+            "pending_hold_hours": "12",
+            "reminder_lead_hours": "24",
+            "reminder_enabled": "1",
+            f"day_{target_weekday}_start_1": "09:00",
+            f"day_{target_weekday}_end_1": "12:00",
+            f"day_{target_weekday}_start_2": "13:00",
+            f"day_{target_weekday}_end_2": "17:00",
+        }
+        for code, name, duration, buffer, active in service_rows:
+            save_all_body[f"service_{code}_name"] = name
+            save_all_body[f"service_{code}_duration"] = str(duration)
+            save_all_body[f"service_{code}_buffer"] = str(buffer)
+            if active:
+                save_all_body[f"service_{code}_active"] = "1"
+
+        save_all_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/save-all",
+            form_headers,
+            urlencode(save_all_body),
+        ).encode())
+        save_all_headers, _ = assert_status(save_all_response, "303 See Other")
+        if save_all_headers.get("location") != "/admin/calendar?saved=all":
+            raise AssertionError("Gemeinsames Speichern leitet nicht korrekt zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            stored_periods = connection.execute(
+                "SELECT start_minute, end_minute FROM weekly_opening_hours "
+                "WHERE weekday = ? ORDER BY start_minute",
+                (target_weekday,),
+            ).fetchall()
+        if stored_periods != [(540, 720), (780, 1020)]:
+            raise AssertionError(f"Gemeinsames Speichern hat Öffnungszeiten falsch ersetzt: {stored_periods!r}")
 
         hours_body = {
             "csrf_token": csrf_token,
@@ -1153,6 +1204,89 @@ def run_stateful_tests() -> int:
         _, notice_body = assert_status(notice_response, "200 OK")
         if "Die Buchungsregeln wurden gespeichert.".encode("utf-8") not in notice_body:
             raise AssertionError("Admin-Kalender zeigt keine Speicherbestätigung")
+
+
+    def booking_spam_protection() -> None:
+        database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+
+        with sqlite3.connect(database_file) as connection:
+            before_honeypot = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+
+        honeypot_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            proxy_headers(
+                "198.51.100.170",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            urlencode({"company_website": "https://spam.example.invalid"}),
+        ).encode())
+        assert_status(honeypot_response, "201 Created")
+
+        with sqlite3.connect(database_file) as connection:
+            after_honeypot = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+        if after_honeypot != before_honeypot:
+            raise AssertionError("Ausgefülltes Honeypot-Feld wurde als echte Buchung gespeichert")
+
+        target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=28)
+        target_date = target.date().isoformat()
+        query = urlencode({
+            "service": "claw_care",
+            "from": target_date,
+            "to": target_date,
+        })
+        contact_email = "spam-schutz@example.invalid"
+        booking_headers = proxy_headers(
+            "198.51.100.171",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        for index in range(4):
+            availability_response = raw_request(request_text(
+                "GET",
+                f"/api/availability?{query}",
+            ).encode())
+            _, availability_body = assert_status(availability_response, "200 OK")
+            payload = json.loads(availability_body)
+            free_slots = [slot for slot in payload["days"][0]["slots"] if slot["available"]]
+            if not free_slots:
+                raise AssertionError("Nicht genügend freie Slots für den Kontakt-Spamschutz")
+
+            booking_body = urlencode({
+                "first_name": "Spam",
+                "last_name": f"Schutz {index + 1}",
+                **email_contact(contact_email),
+                "dog_name": f"Hund {index + 1}",
+                "dog_size": "small",
+                "service": "claw_care",
+                "appointment_date": target_date,
+                "appointment_start": free_slots[0]["start"],
+                "message": "Kontaktlimit-Test",
+                "privacy_consent": "accepted",
+            })
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                booking_headers,
+                booking_body,
+            ).encode())
+
+            if index < 3:
+                assert_status(response, "201 Created")
+            else:
+                headers, body = assert_status(response, "429 Too Many Requests")
+                if headers.get("retry-after") != "86400":
+                    raise AssertionError("Kontaktlimit setzt nicht Retry-After: 86400")
+                if "Buchungsschutz" not in body.decode("utf-8"):
+                    raise AssertionError("Kontaktlimit erklärt die Ablehnung nicht")
+
+        with sqlite3.connect(database_file) as connection:
+            stored = connection.execute(
+                "SELECT COUNT(*) FROM bookings WHERE lower(email) = lower(?)",
+                (contact_email,),
+            ).fetchone()[0]
+        if stored != 3:
+            raise AssertionError(f"Kontaktlimit speicherte {stored} statt genau drei Anfragen")
 
 
     def admin_email_connection() -> None:
@@ -1464,6 +1598,48 @@ def run_stateful_tests() -> int:
         if retried != ("pending", 0, ""):
             raise AssertionError(f"Fehlgeschlagene Mail wurde nicht freigegeben: {retried!r}")
 
+        with sqlite3.connect(database_file) as connection:
+            connection.execute(
+                "UPDATE notification_jobs SET status='sent', sent_at='2026-07-21T12:00:00Z' "
+                "WHERE id = (SELECT id FROM notification_jobs ORDER BY id LIMIT 1)"
+            )
+            connection.execute(
+                "UPDATE notification_jobs SET status='failed', attempts=5, last_error='Endgültiger Testfehler' "
+                "WHERE id = (SELECT id FROM notification_jobs ORDER BY id DESC LIMIT 1)"
+            )
+            connection.commit()
+
+        clear_sent = raw_request(request_text(
+            "POST",
+            "/admin/notifications/clear-sent",
+            form_headers,
+            urlencode({"csrf_token": csrf_token}),
+        ).encode())
+        clear_sent_headers, _ = assert_status(clear_sent, "303 See Other")
+        if clear_sent_headers.get("location") != "/admin/notifications?saved=clear-sent":
+            raise AssertionError("Zurücksetzen gesendeter Nachrichten leitet falsch zurück")
+
+        clear_failed = raw_request(request_text(
+            "POST",
+            "/admin/notifications/clear-failed",
+            form_headers,
+            urlencode({"csrf_token": csrf_token}),
+        ).encode())
+        clear_failed_headers, _ = assert_status(clear_failed, "303 See Other")
+        if clear_failed_headers.get("location") != "/admin/notifications?saved=clear-failed":
+            raise AssertionError("Löschen fehlgeschlagener Nachrichten leitet falsch zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            sent_count = connection.execute(
+                "SELECT COUNT(*) FROM notification_jobs WHERE status='sent'"
+            ).fetchone()[0]
+            failed_count = connection.execute(
+                "SELECT COUNT(*) FROM notification_jobs WHERE status='failed'"
+            ).fetchone()[0]
+        if sent_count != 0 or failed_count != 0:
+            raise AssertionError(
+                f"Warteschlangen-Zähler wurden nicht bereinigt: sent={sent_count}, failed={failed_count}"
+            )
 
 
     def admin_appointments_workflow() -> None:
@@ -1494,6 +1670,19 @@ def run_stateful_tests() -> int:
             raise AssertionError("Admin-Terminkalender setzt Cache-Control: no-store nicht")
 
         page = body.decode("utf-8")
+        parsed_date = datetime.strptime(row[0], "%Y-%m-%d")
+        german_weekdays = [
+            "Montag", "Dienstag", "Mittwoch", "Donnerstag",
+            "Freitag", "Samstag", "Sonntag",
+        ]
+        expected_display_date = (
+            f"{parsed_date:%d.%m.%Y} - {german_weekdays[parsed_date.weekday()]}"
+        )
+        if expected_display_date not in page:
+            raise AssertionError(
+                f"Termindatum wird nicht deutsch mit Wochentag dargestellt: {expected_display_date}"
+            )
+
         for expected in (
             "Terminkalender",
             "Auto Bestätigung",
@@ -1515,12 +1704,16 @@ def run_stateful_tests() -> int:
         if "Woche" not in week_body.decode("utf-8"):
             raise AssertionError("Wochenansicht wurde nicht ausgeliefert")
 
-        invalid_response = raw_request(request_text(
+        month_response = raw_request(request_text(
             "GET",
             f"/admin/appointments?view=month&date={row[0]}",
             auth_headers,
         ).encode())
-        assert_status(invalid_response, "400 Bad Request")
+        _, month_body = assert_status(month_response, "200 OK")
+        month_page = month_body.decode("utf-8")
+        for expected in ("30 Tage", "Bestätigter Termin", "Sperrzeit oder Urlaub"):
+            if expected not in month_page:
+                raise AssertionError(f"30-Tage-Ansicht enthält {expected!r} nicht")
 
 
 
@@ -1679,11 +1872,12 @@ def run_stateful_tests() -> int:
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
     check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)
-    check("Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten", admin_calendar_workflow)
+    check("Admin speichert Kalendereinstellungen gemeinsam", admin_calendar_workflow)
+    check("Honeypot und Kontaktlimit schützen vor Quatschbuchungen", booking_spam_protection)
     check("Admin verbindet ein E-Mail-Konto und reiht eine Testmail ein", admin_email_connection)
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
-    check("Admin individualisiert Bestätigungen und Absagen", admin_message_templates)
-    check("Admin sieht Termine in Tages- und Wochenansicht", admin_appointments_workflow)
+    check("Admin individualisiert Bestätigungen, Absagen und bereinigt die Queue", admin_message_templates)
+    check("Admin sieht Termine in Tages-, Wochen- und 30-Tage-Ansicht", admin_appointments_workflow)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 
     return failures
@@ -1701,6 +1895,7 @@ def main() -> int:
         ("Datenschutz", "/datenschutz"),
         ("Stylesheet", "/style.css"),
         ("Kalender-JavaScript", "/calendar.js"),
+        ("Admin-Kalender-JavaScript", "/admin-calendar.js"),
     ]
 
     for name, path in public_routes:

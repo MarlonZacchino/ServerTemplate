@@ -32,6 +32,10 @@
         <div class="container contact-grid">
             <div class="form-card">
                 <form method="post" action="/booking" class="form" data-booking-form>
+                    <div class="booking-honeypot" aria-hidden="true">
+                        <label for="company-website">Eigene Website</label>
+                        <input id="company-website" type="text" name="company_website" tabindex="-1" autocomplete="off">
+                    </div>
                     <fieldset class="contact-choice" data-contact-choice>
                         <legend>Wie dürfen wir dich kontaktieren? <span aria-hidden="true">*</span></legend>
                         <div class="contact-channel-options">

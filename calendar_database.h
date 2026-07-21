@@ -162,6 +162,13 @@ int calendar_database_begin_immediate(void);
 int calendar_database_commit(void);
 void calendar_database_rollback(void);
 int calendar_database_expire_pending(const char *now_utc);
+int calendar_database_count_recent_contact_bookings(
+        const char *contact_channel,
+        const char *email,
+        const char *phone_digits,
+        const char *since_utc,
+        int *out_count
+);
 int calendar_database_insert_pending(
         const calendar_pending_booking *booking,
         int64_t *out_booking_id

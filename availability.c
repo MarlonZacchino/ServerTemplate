@@ -361,6 +361,33 @@ static bool reservation_request_is_valid(
     return true;
 }
 
+static bool phone_digits_only(
+        const char *phone_number,
+        char *out_digits,
+        size_t out_size
+)
+{
+    size_t output = 0;
+
+    if (phone_number == NULL || out_digits == NULL || out_size < 2) {
+        return false;
+    }
+
+    for (size_t index = 0; phone_number[index] != '\0'; index++) {
+        char character = phone_number[index];
+
+        if (character >= '0' && character <= '9') {
+            if (output + 1 >= out_size) {
+                return false;
+            }
+            out_digits[output++] = character;
+        }
+    }
+
+    out_digits[output] = '\0';
+    return output >= 6;
+}
+
 availability_reservation_result availability_reserve_pending(
         const availability_reservation_request *request,
         int64_t *out_booking_id
@@ -370,6 +397,9 @@ availability_reservation_result availability_reserve_pending(
     size_t slot_count = 0;
     const availability_slot *selected_slot;
     calendar_pending_booking pending_booking;
+    char since_utc[21];
+    char phone_digits[64] = "";
+    int recent_contact_bookings = 0;
 
     availability_error[0] = '\0';
 
@@ -387,6 +417,26 @@ availability_reservation_result availability_reserve_pending(
         set_database_error("Abgelaufene Reservierungen konnten nicht freigegeben werden");
         calendar_database_rollback();
         return AVAILABILITY_RESERVATION_ERROR;
+    }
+
+    if (calendar_utc_add_minutes(request->query.now_utc, -1440, since_utc) != 0 ||
+        (strcmp(request->contact_channel, "phone") == 0 &&
+         !phone_digits_only(request->phone_number, phone_digits, sizeof(phone_digits))) ||
+        calendar_database_count_recent_contact_bookings(
+                request->contact_channel,
+                request->email,
+                phone_digits,
+                since_utc,
+                &recent_contact_bookings) != 0) {
+        set_database_error("Buchungsschutz konnte nicht geprüft werden");
+        calendar_database_rollback();
+        return AVAILABILITY_RESERVATION_ERROR;
+    }
+
+    if (recent_contact_bookings >= 3) {
+        set_error("Für diesen Kontakt wurden innerhalb von 24 Stunden bereits drei Anfragen erstellt");
+        calendar_database_rollback();
+        return AVAILABILITY_RESERVATION_CONTACT_LIMIT;
     }
 
     if (availability_collect(

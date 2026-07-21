@@ -64,3 +64,29 @@ Server. Bei einem späteren Wechsel auf Threads oder mehrere Prozesse muss der
 Limiter synchronisiert oder durch eine gemeinsame externe Instanz ersetzt
 werden. Das feste In-Memory-Array begrenzt außerdem den Speicherverbrauch; bei
 voller Tabelle wird der am längsten nicht verwendete Eintrag ersetzt.
+
+## Zusätzlicher Buchungsschutz ab Kalender Phase 7
+
+Neben den IP-basierten Limits gelten zwei formularbezogene Schutzschichten:
+
+| Bereich | Limit | Fenster |
+|---|---:|---:|
+| gleiche E-Mail-Adresse oder Telefonnummer | 3 gespeicherte Anfragen | 24 Stunden |
+| ausgefülltes Honeypot-Feld | keine Speicherung | sofort |
+
+Das Kontaktlimit wird innerhalb derselben SQLite-Transaktion wie die
+Slotreservierung geprüft. Dadurch können parallele Requests die Begrenzung
+nicht durch eine Prüfung vor dem Speichern umgehen. Telefonnummern werden für
+den Vergleich auf Ziffern normalisiert; E-Mail-Adressen werden ohne Beachtung
+der Groß-/Kleinschreibung verglichen.
+
+Der Honeypot befindet sich außerhalb des sichtbaren Layouts, ist nicht per
+Tabulator erreichbar und hat deaktiviertes Autocomplete. Wird er ausgefüllt,
+erhält der Absender eine neutrale `201 Created`-Antwort, während keine Buchung
+angelegt wird. Dadurch bekommen einfache Bots kein verwertbares Signal über die
+Erkennung.
+
+Diese Maßnahmen ersetzen keinen optionalen Challenge-Dienst bei dauerhaftem
+öffentlichem Missbrauch. Sie reduzieren aber automatisierte Formularfüllung,
+rotierende IP-Adressen und wiederholte Anfragen mit derselben Kontaktadresse,
+ohne jeden legitimen Kunden mit einem CAPTCHA zu belasten.

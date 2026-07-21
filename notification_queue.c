@@ -459,13 +459,19 @@ static int build_payload(
     notification_template_context context;
     char start[6];
     char end[6];
+    char appointment_date_display[48];
     char booking_id[32];
     char rejection_reason[640];
 
     if (data == NULL || !internal_event_type_is_valid(event_type) ||
         calendar_time_format_hhmm(data->start_minute, start) != 0 ||
         calendar_time_format_hhmm(data->end_minute, end) != 0 ||
-        notification_template_get(event_type, &template_value) != 0) {
+        notification_template_get(event_type, &template_value) != 0 ||
+        calendar_date_format_de(
+                data->appointment_date,
+                true,
+                appointment_date_display,
+                sizeof(appointment_date_display)) != 0) {
         return -1;
     }
 
@@ -480,7 +486,7 @@ static int build_payload(
 
     context.customer_name = data->customer_name;
     context.booking_id = booking_id;
-    context.appointment_date = data->appointment_date;
+    context.appointment_date = appointment_date_display;
     context.start_time = start;
     context.end_time = end;
     context.service_name = data->service_name[0] == '\0'
@@ -1112,6 +1118,57 @@ cleanup:
     sqlite3_finalize(statement);
     sqlite3_close_v2(database);
     return result;
+}
+
+static int delete_jobs_with_status_filter(const char *where_clause)
+{
+    sqlite3 *database = NULL;
+    char sql[256];
+    int written;
+    int result;
+
+    queue_error[0] = '\0';
+    if (where_clause == NULL ||
+        (strcmp(where_clause, "status='sent'") != 0 &&
+         strcmp(where_clause, "status='failed'") != 0 &&
+         strcmp(where_clause, "status IN ('sent','failed')") != 0) ||
+        open_database(&database) != 0) {
+        sqlite3_close_v2(database);
+        if (where_clause == NULL) {
+            set_error("Ungültige Bereinigung der E-Mail-Warteschlange");
+        }
+        return -1;
+    }
+
+    written = snprintf(
+            sql,
+            sizeof(sql),
+            "DELETE FROM notification_jobs WHERE %s;",
+            where_clause);
+    if (written < 0 || (size_t)written >= sizeof(sql)) {
+        sqlite3_close_v2(database);
+        set_error("Bereinigungsanweisung ist zu lang");
+        return -1;
+    }
+
+    result = execute_simple(database, sql);
+    sqlite3_close_v2(database);
+    return result;
+}
+
+int notification_queue_clear_sent(void)
+{
+    return delete_jobs_with_status_filter("status='sent'");
+}
+
+int notification_queue_clear_failed(void)
+{
+    return delete_jobs_with_status_filter("status='failed'");
+}
+
+int notification_queue_clear_completed(void)
+{
+    return delete_jobs_with_status_filter("status IN ('sent','failed')");
 }
 
 int notification_queue_get_counts(notification_queue_counts *counts)

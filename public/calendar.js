@@ -107,13 +107,21 @@
         return new Date(Date.UTC(year, month - 1, day));
     };
 
-    const formatDisplayDate = (value) => new Intl.DateTimeFormat("de-DE", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-        timeZone: "UTC",
-    }).format(parseDate(value));
+    const formatDisplayDate = (value) => {
+        const date = parseDate(value);
+        const numeric = new Intl.DateTimeFormat("de-DE", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            timeZone: "UTC",
+        }).format(date);
+        const weekday = new Intl.DateTimeFormat("de-DE", {
+            weekday: "long",
+            timeZone: "UTC",
+        }).format(date);
+
+        return `${numeric} - ${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}`;
+    };
 
     const setStatus = (message, error = false) => {
         status.textContent = message;

@@ -1892,6 +1892,55 @@ cleanup:
     return result;
 }
 
+int calendar_database_count_recent_contact_bookings(
+        const char *contact_channel,
+        const char *email,
+        const char *phone_digits,
+        const char *since_utc,
+        int *out_count
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int result = -1;
+
+    if (calendar_database == NULL || contact_channel == NULL ||
+        email == NULL || phone_digits == NULL ||
+        !calendar_utc_timestamp_is_valid(since_utc) || out_count == NULL ||
+        (strcmp(contact_channel, "email") != 0 &&
+         strcmp(contact_channel, "phone") != 0)) {
+        set_error("Ungültige Kontaktprüfung für Buchungsschutz");
+        return -1;
+    }
+
+    *out_count = 0;
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT COUNT(*) FROM bookings "
+            "WHERE legacy = 0 AND created_at >= ?4 AND ("
+            " (?1 = 'email' AND contact_channel = 'email' AND lower(email) = lower(?2)) OR "
+            " (?1 = 'phone' AND contact_channel = 'phone' AND "
+            "  replace(replace(replace(replace(replace(replace(replace(phone_number, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '/', ''), '.', '') = ?3)"
+            ");",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, contact_channel, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, email, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 3, phone_digits, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 4, since_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_step(statement) != SQLITE_ROW) {
+        set_sqlite_error("Buchungsanzahl für Kontakt konnte nicht geprüft werden");
+        goto cleanup;
+    }
+
+    *out_count = sqlite3_column_int(statement, 0);
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
+}
+
 static bool pending_booking_is_valid(const calendar_pending_booking *booking)
 {
     if (booking == NULL ||

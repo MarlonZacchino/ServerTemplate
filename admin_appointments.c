@@ -71,35 +71,14 @@ static void append_html_text(string *output, const char *text)
     }
 }
 
-static const char *weekday_name(int weekday)
-{
-    static const char *const names[] = {
-            "", "Montag", "Dienstag", "Mittwoch", "Donnerstag",
-            "Freitag", "Samstag", "Sonntag"
-    };
-
-    return weekday >= 1 && weekday <= 7 ? names[weekday] : "Tag";
-}
-
 static void append_display_date(string *page, const char *date)
 {
-    int weekday = 0;
-    char display[32];
+    char display[48];
 
-    if (!calendar_date_is_valid(date) ||
-        calendar_date_iso_weekday(date, &weekday) != 0) {
+    if (calendar_date_format_de(date, true, display, sizeof(display)) != 0) {
         append_html_text(page, date);
         return;
     }
-
-    snprintf(
-            display,
-            sizeof(display),
-            "%s, %.2s.%.2s.%.4s",
-            weekday_name(weekday),
-            date + 8,
-            date + 5,
-            date);
     append_html_text(page, display);
 }
 
@@ -208,7 +187,7 @@ static void append_appointment_record(
     context->booking_count++;
     snprintf(id_text, sizeof(id_text), "%" PRId64, record->id);
 
-    str_cat_cstr(context->page, "<article class=\"appointment-entry ");
+    str_cat_cstr(context->page, "<article class=\"appointment-entry appointment-booking ");
     str_cat_cstr(context->page, decision_class(record->decision_status));
     str_cat_cstr(context->page, "\"><div class=\"appointment-entry-head\"><div><strong>");
     append_html_text(context->page, start);
@@ -220,7 +199,7 @@ static void append_appointment_record(
             record->service_name_snapshot != NULL && record->service_name_snapshot[0] != '\0'
                     ? record->service_name_snapshot
                     : record->service);
-    str_cat_cstr(context->page, "</span></div><span class=\"appointment-status\">");
+    str_cat_cstr(context->page, "</span></div><span class=\"appointment-status\">Termin · ");
     append_html_text(context->page, decision_label(record->decision_status));
     str_cat_cstr(context->page, "</span></div><div class=\"appointment-entry-details\"><p><span>Hund</span><strong>");
     append_html_text(context->page, record->dog_name == NULL || record->dog_name[0] == '\0'
@@ -271,7 +250,7 @@ static int append_closure_record(
         append_html_text(context->page, end);
         str_cat_cstr(context->page, " Uhr");
     }
-    str_cat_cstr(context->page, "</strong><span>Sperrzeit</span></div><span class=\"appointment-status\">Nicht buchbar</span></div><p>");
+    str_cat_cstr(context->page, "</strong><span>Kalendersperre</span></div><span class=\"appointment-status\">Sperrzeit · Nicht buchbar</span></div><p>");
     append_html_text(context->page, closure->label[0] == '\0' ? "Geschlossen" : closure->label);
     str_cat_cstr(context->page, "</p></article>");
     return 0;
@@ -280,15 +259,15 @@ static int append_closure_record(
 static bool parse_view_query(
         const char *query,
         size_t query_length,
-        char view[8],
+        char view[16],
         char date[11],
         const char *default_date
 )
 {
-    char parsed_view[8] = "";
+    char parsed_view[16] = "";
     char parsed_date[11] = "";
 
-    snprintf(view, 8, "week");
+    snprintf(view, 16, "week");
     snprintf(date, 11, "%s", default_date);
 
     if (query == NULL || query_length == 0) {
@@ -306,10 +285,12 @@ static bool parse_view_query(
     }
 
     if (view_result == FORM_VALUE_OK) {
-        if (strcmp(parsed_view, "day") != 0 && strcmp(parsed_view, "week") != 0) {
+        if (strcmp(parsed_view, "day") != 0 &&
+            strcmp(parsed_view, "week") != 0 &&
+            strcmp(parsed_view, "month") != 0) {
             return false;
         }
-        snprintf(view, 8, "%s", parsed_view);
+        snprintf(view, 16, "%s", parsed_view);
     }
 
     if (date_result == FORM_VALUE_OK) {
@@ -331,7 +312,9 @@ static void append_navigation(
 {
     char previous[11];
     char next[11];
-    int step = strcmp(view, "day") == 0 ? 1 : 7;
+    int step = strcmp(view, "day") == 0
+            ? 1
+            : (strcmp(view, "month") == 0 ? 30 : 7);
 
     if (calendar_date_add_days(range_start, -step, previous) != 0 ||
         calendar_date_add_days(range_start, step, next) != 0) {
@@ -362,7 +345,7 @@ string *admin_appointments_build_page(
     calendar_settings settings;
     calendar_clock_snapshot snapshot;
     notification_queue_counts queue_counts;
-    char view[8];
+    char view[16];
     char selected_date[11];
     char range_start[11];
     int weekday;
@@ -379,7 +362,9 @@ string *admin_appointments_build_page(
     }
 
     snprintf(range_start, sizeof(range_start), "%s", selected_date);
-    day_count = strcmp(view, "day") == 0 ? 1 : 7;
+    day_count = strcmp(view, "day") == 0
+            ? 1
+            : (strcmp(view, "month") == 0 ? 30 : 7);
     if (day_count == 7) {
         if (calendar_date_iso_weekday(selected_date, &weekday) != 0 ||
             calendar_date_add_days(selected_date, -(weekday - 1), range_start) != 0) {
@@ -421,8 +406,19 @@ string *admin_appointments_build_page(
     str_cat_cstr(page, strcmp(view, "week") == 0 ? "" : "button-secondary");
     str_cat_cstr(page, "\" href=\"/admin/appointments?view=week&amp;date=");
     append_html_text(page, selected_date);
-    str_cat_cstr(page, "\">Woche</a></div>");
+    str_cat_cstr(page, "\">Woche</a><a class=\"button button-small ");
+    str_cat_cstr(page, strcmp(view, "month") == 0 ? "" : "button-secondary");
+    str_cat_cstr(page, "\" href=\"/admin/appointments?view=month&amp;date=");
+    append_html_text(page, selected_date);
+    str_cat_cstr(page, "\">30 Tage</a></div>");
     append_navigation(page, view, range_start, snapshot.local_date);
+
+    str_cat_cstr(page,
+            "<div class=\"appointment-legend\" aria-label=\"Legende\">"
+            "<span class=\"appointment-legend-item appointment-legend-confirmed\">Bestätigter Termin</span>"
+            "<span class=\"appointment-legend-item appointment-legend-pending\">Offene Terminanfrage</span>"
+            "<span class=\"appointment-legend-item appointment-legend-closure\">Sperrzeit oder Urlaub</span>"
+            "</div>");
 
     str_cat_cstr(page, "<div class=\"notification-summary\"><span>Versandbereit <strong>");
     {
@@ -436,7 +432,11 @@ string *admin_appointments_build_page(
         snprintf(count, sizeof(count), "%zu", queue_counts.failed);
         append_html_text(page, count);
     }
-    str_cat_cstr(page, "</strong></span></div></section><section class=\"appointment-days\">");
+    str_cat_cstr(page, "</strong></span></div></section><section class=\"appointment-days ");
+    if (strcmp(view, "month") == 0) {
+        str_cat_cstr(page, "appointment-days-month");
+    }
+    str_cat_cstr(page, "\">");
 
     for (int index = 0; index < day_count; index++) {
         char date[11];
@@ -468,7 +468,7 @@ string *admin_appointments_build_page(
         }
 
         if (context.booking_count == 0 && context.closure_count == 0) {
-            str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine oder Sperrzeiten.</p>");
+            str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine.</p>");
         }
 
         str_cat_cstr(page, "</div></section>");

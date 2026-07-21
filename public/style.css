@@ -2104,3 +2104,226 @@ select:focus {
         gap: 8px;
     }
 }
+
+/* Gemeinsames Speichern der Kalenderkonfiguration */
+.admin-calendar-master-form {
+    display: contents;
+}
+
+.admin-field-help {
+    display: block;
+    margin-top: 0.45rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.admin-save-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    border-color: #8ab394;
+    background: #edf7ef;
+}
+
+.admin-save-section h2,
+.admin-save-section p:last-child {
+    margin-bottom: 0;
+}
+
+.admin-save-floating {
+    position: fixed;
+    right: max(1rem, calc((100vw - var(--container)) / 2));
+    bottom: 1rem;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    max-width: min(92vw, 520px);
+    padding: 0.75rem 0.85rem 0.75rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 253, 249, 0.96);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(12px);
+    transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+
+.admin-save-floating span {
+    color: var(--muted);
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.admin-save-floating-dirty {
+    border-color: var(--accent);
+}
+
+.admin-save-floating-dirty span {
+    color: var(--accent-dark);
+}
+
+.admin-save-floating-hidden {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(1rem);
+}
+
+/* Klare Zuordnung im Admin-Terminkalender */
+.appointment-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 1.25rem 0 0;
+}
+
+.appointment-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 0.84rem;
+    font-weight: 800;
+}
+
+.appointment-legend-item::before {
+    width: 0.72rem;
+    height: 0.72rem;
+    border-radius: 50%;
+    content: "";
+}
+
+.appointment-legend-confirmed::before {
+    background: #4b8059;
+}
+
+.appointment-legend-pending::before {
+    background: #cf8a32;
+}
+
+.appointment-legend-closure::before {
+    background: #8b3030;
+}
+
+.appointment-booking {
+    border-left: 5px solid #cf8a32;
+}
+
+.appointment-booking.appointment-status-confirmed {
+    border-left-color: #4b8059;
+}
+
+.appointment-closure {
+    border-left: 5px solid #8b3030;
+    background: #fff3f1;
+}
+
+.appointment-empty {
+    margin: 0;
+    padding: 1rem;
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.45);
+    text-align: center;
+}
+
+.appointment-days-month {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+
+.appointment-days-month .appointment-day h2 {
+    font-size: 1.35rem;
+}
+
+@media (max-width: 900px) {
+    .appointment-days-month {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 700px) {
+    .admin-save-section {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-save-section .button {
+        width: 100%;
+    }
+
+    .admin-save-floating {
+        right: 0.75rem;
+        bottom: 0.75rem;
+        left: 0.75rem;
+        justify-content: space-between;
+        border-radius: 18px;
+    }
+
+    .admin-save-floating .button {
+        flex: 0 0 auto;
+    }
+}
+
+/* Bot-Falle: für Menschen und Screenreader außerhalb der Seite */
+.booking-honeypot {
+    position: absolute !important;
+    left: -10000px !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.notification-queue-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.notification-queue-actions form {
+    margin: 0;
+}
+
+@media (max-width: 700px) {
+    .notification-queue-actions,
+    .notification-queue-actions form,
+    .notification-queue-actions .button {
+        width: 100%;
+    }
+}
+
+.booking-protection-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1.25rem 0;
+}
+
+.booking-protection-grid > div {
+    display: grid;
+    gap: 0.35rem;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 250, 245, 0.72);
+}
+
+.booking-protection-grid span {
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+@media (max-width: 700px) {
+    .booking-protection-grid {
+        grid-template-columns: 1fr;
+    }
+}
