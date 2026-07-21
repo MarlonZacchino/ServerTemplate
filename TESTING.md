@@ -16,7 +16,9 @@ Laufzeit über Umgebungsvariablen gesetzt. Zusätzlich werden ungültiger Port,
 ungültige Bind-Adresse und fehlender Document Root als Startfehler geprüft.
 Neben den öffentlichen Routen werden auch der authentifizierte Admin-Workflow,
 CSRF-Schutz, persistente Statusänderungen, Admin-Suche und Statusfilter sowie
-per-IP- und globale Rate-Limits geprüft. Gefälschte `X-Forwarded-For`-Header
+per-IP- und globale Rate-Limits geprüft. Der öffentliche Kalender wird über
+JSON-Endpunkte, Slot-Anzeige, Pending-Reservierung und einen echten
+Doppelbuchungsversuch geprüft. Gefälschte `X-Forwarded-For`-Header
 ohne gültiges Proxy-Token sind ebenfalls Teil des Regressionstests. Details stehen in
 `tests/pewpewlaz0rt4nk/README.md`.
 
@@ -100,3 +102,16 @@ Auswertung:
 make calendar-crashes
 make calendar-hangs
 ```
+
+
+## Öffentlicher Kalender
+
+Der HTTP-Testlauf prüft zusätzlich:
+
+- aktive Leistungen über `/api/services`,
+- validierte Monatsabfragen über `/api/availability`,
+- freie und belegte Slotdarstellung ohne personenbezogene Daten,
+- die Speicherung einer `pending`-Terminanfrage,
+- die sofortige Blockierung überlappender Slots,
+- `409 Conflict` bei einem erneuten Buchungsversuch,
+- die statische Auslieferung von `calendar.js`.

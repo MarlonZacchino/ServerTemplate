@@ -65,3 +65,11 @@ Der isolierte Lauf setzt ein eigenes Proxy-Token und prüft:
 - zehn fehlgeschlagene Admin-Anmeldungen führen zur Sperre,
 - erfolgreiche Admin-Anmeldung löscht vorherige Fehlversuche,
 - die globale Buchungs-Notbremse greift auch bei rotierenden IP-Adressen.
+
+
+## Kalender-Tests
+
+Der Runner konfiguriert in seiner isolierten SQLite-Datenbank einen zukünftigen
+Öffnungstag, liest die freien Slots über die öffentliche JSON-API und legt eine
+Pending-Terminanfrage an. Anschließend muss derselbe Slot als belegt erscheinen
+und ein zweiter Buchungsversuch mit `409 Conflict` abgelehnt werden.

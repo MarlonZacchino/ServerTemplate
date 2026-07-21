@@ -115,3 +115,11 @@ make calendar-fresh
 Das Eingabeformat ist ein kleiner URL-encoded Datensatz mit `service`, `date`,
 `current_date`, `current_minute` und `now_utc`. Die Datenbank liegt weiterhin
 nur im Arbeitsspeicher. Funde werden getrennt unter `calendar_out/` abgelegt.
+
+
+## Öffentliche Kalender-Routen
+
+Das HTTP-Korpus enthält Requests für `/api/services`, `/api/availability` und
+das neue Buchungsformular mit `appointment_date` und `appointment_start`. Die
+Kalender-Engine selbst bleibt zusätzlich über das separate `calendar_*`-Ziel
+instrumentiert.

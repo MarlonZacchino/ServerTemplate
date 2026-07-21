@@ -1,6 +1,7 @@
 #include "availability.h"
 #include "booking_database.h"
 #include "calendar_database.h"
+#include "calendar_time.h"
 #include "server_config.h"
 
 #include <sqlite3.h>
@@ -146,6 +147,30 @@ int main(void)
     int64_t first_booking_id = 0;
     int64_t second_booking_id = 0;
     size_t slot_count;
+
+    {
+        char next_date[11];
+        char next_timestamp[21];
+        char time_text[6];
+        int parsed_minute = -1;
+
+        expect_int(calendar_date_add_days("2026-02-28", 1, next_date), 0,
+                   "Datumsaddition funktioniert");
+        expect_true(strcmp(next_date, "2026-03-01") == 0,
+                    "Datumsaddition überschreitet Monatsgrenzen korrekt");
+        expect_int(calendar_utc_add_minutes(
+                "2026-12-31T23:30:00Z", 90, next_timestamp), 0,
+                "UTC-Minutenaddition funktioniert");
+        expect_true(strcmp(next_timestamp, "2027-01-01T01:00:00Z") == 0,
+                    "UTC-Minutenaddition überschreitet Jahresgrenzen korrekt");
+        expect_int(calendar_time_parse_hhmm("09:45", &parsed_minute), 0,
+                   "HH:MM wird geparst");
+        expect_int(parsed_minute, 585, "09:45 entspricht 585 Minuten");
+        expect_int(calendar_time_format_hhmm(parsed_minute, time_text), 0,
+                   "Minuten werden als HH:MM formatiert");
+        expect_true(strcmp(time_text, "09:45") == 0,
+                    "Zeitformatierung ist stabil");
+    }
 
     if (server_config_initialize() != 0) {
         fprintf(stderr, "Konfigurationsfehler: %s\n", server_config_last_error());

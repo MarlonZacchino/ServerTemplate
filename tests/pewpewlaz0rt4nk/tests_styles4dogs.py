@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import socket
 import sqlite3
 import sys
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -198,13 +201,77 @@ def run_stateful_tests() -> int:
             if migration_marker is None or not migration_marker[0].startswith("completed:2"):
                 raise AssertionError("Der einmalige TSV-Import wurde nicht als abgeschlossen markiert")
 
+    def public_calendar_and_pending_booking() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=2)
+        target_date = target.date().isoformat()
+        target_weekday = target.isoweekday()
+
+        with sqlite3.connect(database_file) as connection:
+            before_count = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+            connection.execute("DELETE FROM weekly_opening_hours")
+            connection.execute(
+                "INSERT INTO weekly_opening_hours(weekday, start_minute, end_minute) "
+                "VALUES(?, 540, 780)",
+                (target_weekday,),
+            )
+            connection.execute(
+                "UPDATE calendar_settings "
+                "SET min_notice_minutes = 0, booking_horizon_days = 90, "
+                "    slot_interval_minutes = 15, pending_hold_minutes = 1440 "
+                "WHERE id = 1"
+            )
+
+        services_response = raw_request(request_text("GET", "/api/services").encode())
+        services_headers, services_body = assert_status(services_response, "200 OK")
+        if services_headers.get("content-type") != "application/json; charset=utf-8":
+            raise AssertionError("Leistungs-API liefert keinen JSON-Content-Type")
+
+        services = json.loads(services_body)
+        if services.get("timezone") != "Europe/Berlin" or not services.get("current_date"):
+            raise AssertionError("Leistungs-API liefert keine Salonzeit")
+        if services.get("booking_horizon_days") != 90:
+            raise AssertionError("Leistungs-API liefert den Buchungshorizont nicht")
+        service_codes = {service["code"] for service in services["services"]}
+        if "full_groom" not in service_codes or "other" in service_codes:
+            raise AssertionError("Aktive und deaktivierte Leistungen werden nicht korrekt gefiltert")
+
+        query = urlencode({
+            "service": "full_groom",
+            "from": target_date,
+            "to": target_date,
+        })
+        availability_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{query}",
+        ).encode())
+        _, availability_body = assert_status(availability_response, "200 OK")
+        availability = json.loads(availability_body)
+
+        if availability["timezone"] != "Europe/Berlin":
+            raise AssertionError("Verfügbarkeits-API liefert die falsche Zeitzone")
+        if len(availability["days"]) != 1 or availability["days"][0]["date"] != target_date:
+            raise AssertionError("Verfügbarkeits-API liefert den falschen Tag")
+
+        free_slots = [
+            slot for slot in availability["days"][0]["slots"] if slot["available"]
+        ]
+        if not free_slots:
+            raise AssertionError("Der konfigurierte Öffnungstag enthält keine freien Slots")
+
+        selected_slot = free_slots[0]
         body = urlencode({
             "name": "Pew Pew Test",
             "contact": "test@example.invalid",
             "dog_name": "Bello",
             "dog_size": "medium",
             "service": "full_groom",
-            "preferred_date": "2026-08-20",
+            "appointment_date": target_date,
+            "appointment_start": selected_slot["start"],
             "message": "Zeile 1\nZeile 2",
             "privacy_consent": "accepted",
         })
@@ -220,39 +287,59 @@ def run_stateful_tests() -> int:
         assert_status(response, "201 Created")
 
         with sqlite3.connect(database_file) as connection:
-            after_count = connection.execute(
-                "SELECT COUNT(*) FROM bookings"
-            ).fetchone()[0]
-
-            if after_count != before_count + 1:
-                raise AssertionError(
-                    f"Erwartet genau eine neue SQLite-Zeile, Anzahl vorher={before_count}, nachher={after_count}"
-                )
-
+            after_count = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
             row = connection.execute(
                 "SELECT status, customer_name, contact, dog_name, dog_size, service, "
-                "preferred_date, message, legacy, decision_status, appointment_date, "
-                "service_id IS NOT NULL "
+                "       preferred_date, message, legacy, decision_status, appointment_date, "
+                "       start_minute, end_minute, blocked_until_minute, hold_expires_at, "
+                "       service_id IS NOT NULL "
                 "FROM bookings ORDER BY id DESC LIMIT 1"
             ).fetchone()
 
-        expected = (
+        if after_count != before_count + 1:
+            raise AssertionError("Terminanfrage wurde nicht genau einmal gespeichert")
+
+        if row[:11] != (
             "neu",
             "Pew Pew Test",
             "test@example.invalid",
             "Bello",
             "medium",
             "full_groom",
-            "2026-08-20",
+            target_date,
             "Zeile 1\nZeile 2",
             0,
-            "legacy",
-            None,
-            1,
-        )
+            "pending",
+            target_date,
+        ):
+            raise AssertionError(f"Pending-Termin wurde nicht korrekt gespeichert: {row!r}")
 
-        if row != expected:
-            raise AssertionError(f"SQLite-Buchung wurde nicht korrekt gespeichert: {row!r}")
+        if row[11] < 0 or row[12] <= row[11] or row[13] < row[12] or not row[14] or row[15] != 1:
+            raise AssertionError(f"Gespeicherte Terminzeiten sind inkonsistent: {row!r}")
+
+        updated_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{query}",
+        ).encode())
+        _, updated_body = assert_status(updated_response, "200 OK")
+        updated = json.loads(updated_body)
+        selected_after = next(
+            slot for slot in updated["days"][0]["slots"]
+            if slot["start"] == selected_slot["start"]
+        )
+        if selected_after["available"]:
+            raise AssertionError("Vorläufig reservierter Termin wird weiterhin als frei angezeigt")
+
+        duplicate_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            proxy_headers(
+                "198.51.100.32",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            body,
+        ).encode())
+        assert_status(duplicate_response, "409 Conflict")
 
     def first_run_admin_setup() -> None:
         setup_response = raw_request(request_text("GET", "/setup/admin").encode())
@@ -305,6 +392,8 @@ def run_stateful_tests() -> int:
             raise AssertionError("Adminseite enthält die erwartete Überschrift nicht")
         if b"Komplettpflege" not in valid_body or b"Mittel" not in valid_body:
             raise AssertionError("Adminseite zeigt die erweiterten Buchungsfelder nicht an")
+        if "Angefragt – vorläufig reserviert".encode("utf-8") not in valid_body or b"Uhrzeit" not in valid_body:
+            raise AssertionError("Adminseite zeigt den Pending-Termin nicht verständlich an")
         if b"Legacy Test" not in valid_body or "Frühere Anfrage".encode("utf-8") not in valid_body:
             raise AssertionError("Adminseite liest das frühere fünfspaltige Format nicht mehr")
         if b'action="/admin/bookings/status"' not in valid_body:
@@ -716,7 +805,8 @@ def run_stateful_tests() -> int:
             raise AssertionError(f"Ungültiger globaler Retry-After-Wert: {global_retry}")
 
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
-    check("Buchung wird isoliert und escaped gespeichert", booking_persistence)
+    check("TSV-Altbestand und Kalenderschema werden korrekt geladen", booking_persistence)
+    check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
@@ -736,10 +826,14 @@ def main() -> int:
         ("Impressum", "/impressum"),
         ("Datenschutz", "/datenschutz"),
         ("Stylesheet", "/style.css"),
+        ("Kalender-JavaScript", "/calendar.js"),
     ]
 
     for name, path in public_routes:
         add_status(cannon, f"GET {name}", request_text("GET", path), "200 OK")
+
+    add_status(cannon, "GET aktive Leistungen", request_text("GET", "/api/services"), "200 OK")
+    add_status(cannon, "Verfügbarkeit ohne Parameter", request_text("GET", "/api/availability"), "400 Bad Request")
 
     add_status(cannon, "Query-String wird von Route getrennt", request_text("GET", "/kontakt?quelle=test"), "200 OK")
     add_status(cannon, "Unbekannte Datei", request_text("GET", "/gibt-es-nicht.html"), "404 Not Found")
@@ -762,25 +856,24 @@ def main() -> int:
     ), "401 Unauthorized")
     add_status(cannon, "Setup-Seite beim ersten Start", request_text("GET", "/setup/admin"), "200 OK")
 
-    valid_booking = urlencode({
+    missing_slot_booking = urlencode({
         "name": "Laz0r Test",
         "contact": "laz0r@example.invalid",
         "dog_name": "Flocke",
         "dog_size": "small",
         "service": "wash_dry",
-        "preferred_date": "2026-08-21",
         "message": "Regressionstest",
         "privacy_consent": "accepted",
     })
-    add_status(cannon, "Gültige Buchungsanfrage", request_text(
+    add_status(cannon, "Terminanfrage ohne ausgewählten Slot", request_text(
         "POST",
         "/booking",
         proxy_headers(
             "198.51.100.41",
             {"Content-Type": "application/x-www-form-urlencoded"},
         ),
-        valid_booking,
-    ), "201 Created")
+        missing_slot_booking,
+    ), "400 Bad Request")
 
     invalid_booking = urlencode({"name": "Ohne Kontakt"})
     add_status(cannon, "Buchung ohne Pflichtfeld", request_text(
@@ -831,7 +924,8 @@ def main() -> int:
         "contact": "date@example.invalid",
         "dog_size": "medium",
         "service": "full_groom",
-        "preferred_date": "2026-02-31",
+        "appointment_date": "2026-02-31",
+        "appointment_start": "09:00",
         "privacy_consent": "accepted",
     })
     add_status(cannon, "Buchung mit ungültigem Wunschdatum", request_text(
