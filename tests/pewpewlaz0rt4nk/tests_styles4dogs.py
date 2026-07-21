@@ -149,8 +149,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 5:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 5, erhalten {schema_version}")
+            if schema_version != 6:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 6, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -158,6 +158,7 @@ def run_stateful_tests() -> int:
                 "weekly_opening_hours",
                 "calendar_closures",
                 "notification_jobs",
+                "notification_templates",
             }
             existing_tables = {
                 row[0]
@@ -1154,6 +1155,84 @@ def run_stateful_tests() -> int:
             raise AssertionError("Admin-Kalender zeigt keine Speicherbestätigung")
 
 
+    def admin_email_connection() -> None:
+        database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+        secrets_dir = Path(os.environ["STYLES4DOGS_TEST_SECRETS_DIR"])
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {**auth_headers, "Content-Type": "application/x-www-form-urlencoded"}
+
+        response = raw_request(request_text("GET", "/admin/notifications", auth_headers).encode())
+        headers, body = assert_status(response, "200 OK")
+        if headers.get("cache-control") != "no-store":
+            raise AssertionError("E-Mail-Adminseite setzt Cache-Control: no-store nicht")
+        for expected in (
+            "E-Mail-Konto verbinden",
+            "Automatische Nachrichten individualisieren",
+            "Terminbestätigung",
+            "Terminabsage",
+            "{{customer_name}}",
+        ):
+            if expected.encode("utf-8") not in body:
+                raise AssertionError(f"E-Mail-Adminseite enthält {expected!r} nicht")
+
+        match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
+        if match is None:
+            raise AssertionError("CSRF-Token auf E-Mail-Adminseite fehlt")
+        csrf_token = match.group(1).decode("ascii")
+        password = "smtp-app-password-test"
+
+        response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/smtp",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "smtp_url": "smtps://smtp.example.invalid:465",
+                "smtp_username": "salon@example.invalid",
+                "smtp_password": password,
+                "from_address": "salon@example.invalid",
+                "from_name": "Styles 4 Dogs",
+                "admin_email": "admin@example.invalid",
+                "notify_admin_on_new_booking": "1",
+            }),
+        ).encode())
+        response_headers, _ = assert_status(response, "303 See Other")
+        if response_headers.get("location") != "/admin/notifications?saved=smtp":
+            raise AssertionError("SMTP-Speicherung leitet falsch zurück")
+
+        smtp_file = secrets_dir / "notification.smtp"
+        key_file = secrets_dir / "notification.key"
+        if not smtp_file.is_file() or not key_file.is_file():
+            raise AssertionError("Verschlüsselte SMTP-Dateien fehlen")
+        if smtp_file.stat().st_mode & 0o777 != 0o600 or key_file.stat().st_mode & 0o777 != 0o600:
+            raise AssertionError("SMTP-Secrets besitzen nicht den Modus 0600")
+        if password.encode() in smtp_file.read_bytes():
+            raise AssertionError("SMTP-Passwort wurde unverschlüsselt gespeichert")
+
+        response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/test",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "recipient_email": "admin@example.invalid",
+            }),
+        ).encode())
+        assert_status(response, "303 See Other")
+
+        with sqlite3.connect(database_file) as connection:
+            row = connection.execute(
+                "SELECT booking_id, recipient_email, status FROM notification_jobs "
+                "WHERE event_type='smtp_test' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row != (None, "admin@example.invalid", "pending"):
+            raise AssertionError(f"Testmail wurde falsch eingereiht: {row!r}")
+
+
+
     def automatic_confirmation() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
         if not database_file_value:
@@ -1286,6 +1365,105 @@ def run_stateful_tests() -> int:
             }),
         ).encode())
         assert_status(disable_response, "303 See Other")
+
+
+    def admin_message_templates() -> None:
+        database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {**auth_headers, "Content-Type": "application/x-www-form-urlencoded"}
+
+        response = raw_request(request_text("GET", "/admin/notifications", auth_headers).encode())
+        _, body = assert_status(response, "200 OK")
+        match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
+        if match is None:
+            raise AssertionError("CSRF-Token für Vorlagen fehlt")
+        csrf_token = match.group(1).decode("ascii")
+
+        subject = "Dein Termin für {{dog_name}} ist bestätigt"
+        message = (
+            "Hallo {{customer_name}},\n\n"
+            "dein Termin am {{appointment_date}} von {{start_time}} bis {{end_time}} Uhr "
+            "für {{service_name}} ist fest eingetragen.\n\nViele Grüße\n{{salon_name}}"
+        )
+        response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/template",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "event_type": "booking_confirmed",
+                "subject_template": subject,
+                "body_template": message,
+            }),
+        ).encode())
+        assert_status(response, "303 See Other")
+
+        response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/template",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "event_type": "booking_rejected",
+                "subject_template": "Rückmeldung zu deiner Terminanfrage",
+                "body_template": "Hallo {{customer_name}},\n{{rejection_reason}}\n{{salon_name}}",
+            }),
+        ).encode())
+        assert_status(response, "303 See Other")
+
+        invalid = raw_request(request_text(
+            "POST",
+            "/admin/notifications/template",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "event_type": "booking_confirmed",
+                "subject_template": "Ungültig {{nicht_erlaubt}}",
+                "body_template": "Text",
+            }),
+        ).encode())
+        assert_status(invalid, "400 Bad Request")
+
+        with sqlite3.connect(database_file) as connection:
+            stored = connection.execute(
+                "SELECT subject_template, body_template FROM notification_templates "
+                "WHERE event_type='booking_confirmed'"
+            ).fetchone()
+            admin_job = connection.execute(
+                "SELECT recipient_email, status, subject, body_text FROM notification_jobs "
+                "WHERE event_type='admin_new_booking' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            connection.execute(
+                "UPDATE notification_jobs SET status='failed', attempts=5, last_error='Test' "
+                "WHERE event_type='smtp_test'"
+            )
+            connection.commit()
+
+        if stored != (subject, message):
+            raise AssertionError("Individualisierte Bestätigung wurde nicht gespeichert")
+        if admin_job is None or admin_job[0] != "admin@example.invalid" or admin_job[1] != "pending":
+            raise AssertionError(f"Admin-Benachrichtigung fehlt: {admin_job!r}")
+        if "Auto Bestätigung" not in admin_job[3]:
+            raise AssertionError("Admin-Benachrichtigung enthält Kundendaten nicht")
+
+        retry = raw_request(request_text(
+            "POST",
+            "/admin/notifications/retry",
+            form_headers,
+            urlencode({"csrf_token": csrf_token}),
+        ).encode())
+        assert_status(retry, "303 See Other")
+        with sqlite3.connect(database_file) as connection:
+            retried = connection.execute(
+                "SELECT status, attempts, last_error FROM notification_jobs "
+                "WHERE event_type='smtp_test' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if retried != ("pending", 0, ""):
+            raise AssertionError(f"Fehlgeschlagene Mail wurde nicht freigegeben: {retried!r}")
+
 
 
     def admin_appointments_workflow() -> None:
@@ -1502,7 +1680,9 @@ def run_stateful_tests() -> int:
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
     check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)
     check("Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten", admin_calendar_workflow)
+    check("Admin verbindet ein E-Mail-Konto und reiht eine Testmail ein", admin_email_connection)
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
+    check("Admin individualisiert Bestätigungen und Absagen", admin_message_templates)
     check("Admin sieht Termine in Tages- und Wochenansicht", admin_appointments_workflow)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 

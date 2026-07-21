@@ -35,6 +35,7 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CADDY_DEPLOYMENT.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/RATE_LIMITING.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE5.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE6.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
@@ -46,6 +47,8 @@ grep -Fq 'STYLES4DOGS_SALON_NAME=Styles 4 Dogs' \
 grep -Fq 'STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Fq 'STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs' \
+    "$STAGING_ROOT/etc/styles4dogs/notification.env"
+grep -Fq 'STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING=0' \
     "$STAGING_ROOT/etc/styles4dogs/notification.env"
 
 # Simulate the Arch Linux package Caddyfile, which already imports the whole

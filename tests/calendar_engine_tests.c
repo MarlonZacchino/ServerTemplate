@@ -2,6 +2,8 @@
 #include "booking_database.h"
 #include "calendar_database.h"
 #include "calendar_time.h"
+#include "notification_settings.h"
+#include "notification_templates.h"
 #include "server_config.h"
 
 #include <sqlite3.h>
@@ -10,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static int failures = 0;
 
@@ -228,7 +231,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 5, "Kalenderschema verwendet Version 5");
+    expect_int(schema_version, 6, "Kalenderschema verwendet Version 6");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -256,6 +259,88 @@ int main(void)
             "AND name = 'notification_jobs';",
             &value), 0, "Benachrichtigungswarteschlange ist abfragbar");
     expect_int(value, 1, "Benachrichtigungswarteschlange wurde migriert");
+    expect_int(query_single_int(
+            "SELECT COUNT(*) FROM notification_templates;",
+            &value), 0, "Nachrichtenvorlagen sind abfragbar");
+    expect_int(value, 5, "Fünf Standard-Nachrichtenvorlagen wurden angelegt");
+
+    {
+        notification_template template_value;
+        notification_template_context context = {
+                "Marlon Test", "42", "21.08.2026", "09:00", "10:00",
+                "Komplettpflege", "Flocke", "Grund: Test",
+                "Styles 4 Dogs", "Teststraße 1", "02571 12345",
+                "https://example.invalid"
+        };
+        char subject[NOTIFICATION_SUBJECT_SIZE];
+        char body[NOTIFICATION_BODY_SIZE];
+
+        expect_int(notification_template_get("booking_confirmed", &template_value), 0,
+                   "Standard-Terminbestätigung ist lesbar");
+        snprintf(template_value.subject_template, sizeof(template_value.subject_template),
+                 "%s", "Termin für {{dog_name}} bestätigt");
+        snprintf(template_value.body_template, sizeof(template_value.body_template),
+                 "%s", "Hallo {{customer_name}}, Buchung {{booking_id}} ist bestätigt.");
+        expect_int(notification_template_update(&template_value), 0,
+                   "Nachrichtenvorlage kann individualisiert werden");
+        expect_int(notification_template_render(&template_value, &context, subject, body), 0,
+                   "Individualisierte Vorlage wird gerendert");
+        expect_true(strcmp(subject, "Termin für Flocke bestätigt") == 0,
+                    "Platzhalter im Betreff wird ersetzt");
+        expect_true(strstr(body, "Marlon Test") != NULL && strstr(body, "42") != NULL,
+                    "Platzhalter im Text werden ersetzt");
+
+        snprintf(template_value.body_template, sizeof(template_value.body_template),
+                 "%s", "{{unbekannt}}");
+        expect_true(notification_template_update(&template_value) != 0,
+                    "Unbekannte Platzhalter werden abgelehnt");
+        expect_int(notification_template_reset("booking_confirmed"), 0,
+                   "Vorlage kann auf Standard zurückgesetzt werden");
+    }
+
+    {
+        notification_smtp_settings saved;
+        notification_smtp_settings loaded;
+        struct stat status;
+        char path[1024];
+
+        memset(&saved, 0, sizeof(saved));
+        saved.enabled = true;
+        saved.managed_by_admin = true;
+        saved.notify_admin_on_new_booking = true;
+        snprintf(saved.url, sizeof(saved.url), "%s", "smtps://smtp.example.invalid:465");
+        snprintf(saved.username, sizeof(saved.username), "%s", "salon@example.invalid");
+        snprintf(saved.password, sizeof(saved.password), "%s", "app-password-test");
+        snprintf(saved.from_address, sizeof(saved.from_address), "%s", "salon@example.invalid");
+        snprintf(saved.from_name, sizeof(saved.from_name), "%s", "Styles 4 Dogs");
+        snprintf(saved.admin_email, sizeof(saved.admin_email), "%s", "admin@example.invalid");
+
+        expect_int(notification_settings_save(&saved), 0,
+                   "SMTP-Verbindung kann verschlüsselt gespeichert werden");
+        memset(&loaded, 0, sizeof(loaded));
+        expect_int(notification_settings_load(&loaded), 0,
+                   "Verschlüsselte SMTP-Verbindung ist lesbar");
+        expect_true(loaded.enabled && loaded.managed_by_admin &&
+                    loaded.notify_admin_on_new_booking,
+                    "SMTP-Status bleibt gespeichert");
+        expect_true(strcmp(loaded.password, saved.password) == 0,
+                    "SMTP-Passwort wird korrekt entschlüsselt");
+
+        snprintf(path, sizeof(path), "%s/notification.smtp", server_config_secrets_dir());
+        expect_true(stat(path, &status) == 0 && (status.st_mode & 0777) == 0600,
+                    "SMTP-Konfiguration besitzt Dateimodus 0600");
+        snprintf(path, sizeof(path), "%s/notification.key", server_config_secrets_dir());
+        expect_true(stat(path, &status) == 0 && (status.st_mode & 0777) == 0600,
+                    "SMTP-Schlüssel besitzt Dateimodus 0600");
+
+        expect_int(notification_settings_disconnect(), 0,
+                   "SMTP-Verbindung kann deaktiviert werden");
+        memset(&loaded, 0, sizeof(loaded));
+        expect_int(notification_settings_load(&loaded), 0,
+                   "Deaktivierter Zustand ist lesbar");
+        expect_true(!loaded.enabled && loaded.managed_by_admin,
+                    "Deaktivieren verhindert den Umgebungsvariablen-Fallback");
+    }
 
     expect_int(calendar_database_get_service("wash_dry", &service), 0, "Standardleistung wash_dry existiert");
     expect_int(service.duration_minutes, 60, "Waschen und Föhnen dauert standardmäßig 60 Minuten");

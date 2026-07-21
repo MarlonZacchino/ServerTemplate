@@ -10,6 +10,8 @@ NOTIFICATION_TIMER=${STYLES4DOGS_NOTIFICATION_TIMER:-styles4dogs-notification.ti
 SKIP_SYSTEMD=${STYLES4DOGS_SKIP_SYSTEMD:-0}
 ENV_FILE=${STYLES4DOGS_ENV_FILE:-$CONFIG_DIR/server.env}
 NOTIFICATION_ENV_FILE=${STYLES4DOGS_NOTIFICATION_ENV_FILE:-$CONFIG_DIR/notification.env}
+NOTIFICATION_SECRET_FILE=${STYLES4DOGS_NOTIFICATION_SECRET_FILE:-$CONFIG_DIR/secrets/notification.smtp}
+NOTIFICATION_KEY_FILE=${STYLES4DOGS_NOTIFICATION_KEY_FILE:-$CONFIG_DIR/secrets/notification.key}
 
 failures=0
 
@@ -64,6 +66,16 @@ check_mode "$NOTIFICATION_ENV_FILE" 640
 check_mode "$STATE_DIR" 750
 check_mode "$STATE_DIR/styles4dogs.db" 600
 check_mode "$CONFIG_DIR/secrets/admin.auth" 600
+check_mode "$NOTIFICATION_SECRET_FILE" 600
+check_mode "$NOTIFICATION_KEY_FILE" 600
+
+if [[ -e "$NOTIFICATION_SECRET_FILE" || -e "$NOTIFICATION_KEY_FILE" ]]; then
+    if [[ -f "$NOTIFICATION_SECRET_FILE" && -f "$NOTIFICATION_KEY_FILE" ]]; then
+        ok "admin-managed SMTP configuration files exist"
+    else
+        bad "admin-managed SMTP configuration is incomplete"
+    fi
+fi
 
 if [[ "$SKIP_SYSTEMD" != 1 ]]; then
     systemctl is-enabled --quiet "$SERVICE_NAME" \
@@ -130,13 +142,15 @@ if [[ -r "$ENV_FILE" ]]; then
         || bad "unexpected HTTP status: ${status_line:-no response from $HOST:$PORT}"
 fi
 
-if [[ -r "$NOTIFICATION_ENV_FILE" ]]; then
+if [[ -f "$NOTIFICATION_SECRET_FILE" && -f "$NOTIFICATION_KEY_FILE" ]]; then
+    ok "SMTP delivery is managed through the admin area"
+elif [[ -r "$NOTIFICATION_ENV_FILE" ]]; then
     SMTP_URL=$(awk -F= '$1 == "STYLES4DOGS_SMTP_URL" {sub(/^[^=]*=/, ""); print; exit}' \
         "$NOTIFICATION_ENV_FILE")
     SMTP_FROM=$(awk -F= '$1 == "STYLES4DOGS_SMTP_FROM_ADDRESS" {sub(/^[^=]*=/, ""); print; exit}' \
         "$NOTIFICATION_ENV_FILE")
     if [[ -n "$SMTP_URL" && -n "$SMTP_FROM" ]]; then
-        ok "SMTP delivery is configured"
+        ok "SMTP delivery uses the legacy environment fallback"
     else
         ok "SMTP delivery is not configured yet; queued mail remains unsent"
     fi

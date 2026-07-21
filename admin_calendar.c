@@ -740,7 +740,7 @@ string *admin_calendar_build_page(
             "<a href=\"/\">Website öffnen</a>"
             "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
             "<a href=\"/admin/appointments\">Termine</a>"
-            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a></nav>\n"
+            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
             "    </div></header>\n"
             "    <main class=\"page admin-page admin-calendar-page\">\n"
             "        <section class=\"card admin-card admin-calendar-intro\">\n"

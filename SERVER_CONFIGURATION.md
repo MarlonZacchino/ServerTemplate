@@ -78,7 +78,7 @@ STYLES4DOGS_DATA_DIR="$runtime_dir/data" \
 ```text
 /opt/styles4dogs/bin/Server
 /var/www/styles4dogs/
-/etc/styles4dogs/admin.auth
+/etc/styles4dogs/secrets/admin.auth
 /var/lib/styles4dogs/styles4dogs.db
 ```
 
@@ -108,7 +108,36 @@ der eigenen Caddy-Instanz vertraut. Details stehen in `RATE_LIMITING.md`.
 
 ## SMTP-Konfiguration
 
-SMTP-Zugangsdaten liegen getrennt in `/etc/styles4dogs/notification.env` und
-werden nur vom Benachrichtigungs-Worker gelesen. Variablen und Betriebshinweise
-stehen in `NOTIFICATIONS.md`. Der HTTP-Server benötigt keinen ausgehenden
-Netzwerkzugriff.
+Für neue Installationen verbindet der Admin das Salon-Postfach unter:
+
+```text
+/admin/notifications
+```
+
+Der HTTP-Server speichert die SMTP-Daten authentifiziert verschlüsselt in:
+
+```text
+<STYLES4DOGS_SECRETS_DIR>/notification.smtp
+<STYLES4DOGS_SECRETS_DIR>/notification.key
+```
+
+Der separate Benachrichtigungs-Worker liest diese Dateien und übernimmt den
+eigentlichen Netzwerkversand. Der Webserver selbst behält seine systemd-
+Netzwerkbeschränkung auf localhost.
+
+Die bisherigen Variablen in `/etc/styles4dogs/notification.env` bleiben als
+Migrations-Fallback unterstützt:
+
+| Variable | Bedeutung |
+|---|---|
+| `STYLES4DOGS_SMTP_URL` | `smtp://...:587` oder `smtps://...:465` |
+| `STYLES4DOGS_SMTP_USERNAME` | SMTP-Benutzername |
+| `STYLES4DOGS_SMTP_PASSWORD` | SMTP- oder App-Passwort |
+| `STYLES4DOGS_SMTP_FROM_ADDRESS` | sichtbare Absenderadresse |
+| `STYLES4DOGS_SMTP_FROM_NAME` | sichtbarer Absendername |
+| `STYLES4DOGS_ADMIN_NOTIFICATION_EMAIL` | Empfänger neuer Terminanfragen |
+| `STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING` | `1` aktiviert Admin-Mails |
+
+Sobald der Admin eine Verbindung speichert oder deaktiviert, hat die
+verschlüsselte Konfiguration Vorrang. Details zu Testmails, Vorlagen,
+Warteschlange und Backups stehen in `NOTIFICATIONS.md`.

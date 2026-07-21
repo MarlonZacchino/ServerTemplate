@@ -4,6 +4,7 @@
 
 #include "admin_calendar.h"
 #include "admin_appointments.h"
+#include "admin_notifications.h"
 #include "auth.h"
 #include "process.h"
 #include "booking.h"
@@ -1445,6 +1446,43 @@ static string *handle_admin_appointments_page(
     return response;
 }
 
+static string *handle_admin_notifications_page(
+        bool send_body,
+        const char *query,
+        size_t query_length
+)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    char notice_code[32] = {0};
+    string *body;
+    string *response;
+
+    if (query != NULL && query_length > 0) {
+        form_value_result result = form_urlencoded_get_from_data(
+                query, query_length, "saved", notice_code, sizeof(notice_code));
+        if (result != FORM_VALUE_OK && result != FORM_VALUE_NOT_FOUND)
+            return handle_bad_request(send_body);
+    }
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token)))
+        return handle_internal_error(send_body);
+
+    body = admin_notifications_build_page(
+            csrf_token, notice_code[0] == '\0' ? NULL : notice_code);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    if (body == NULL) {
+        fprintf(stderr, "E-Mail-Adminseite konnte nicht erzeugt werden: %s\n",
+                admin_notifications_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK", "text/html; charset=utf-8", admin_security_headers(),
+            get_char_str(body), get_length(body), send_body);
+    free_str(body);
+    return response;
+}
+
 static string *handle_admin_calendar_page(
         bool send_body,
         const char *query,
@@ -1620,6 +1658,69 @@ static string *handle_admin_booking_decision_post(
     return handle_internal_error(true);
 }
 
+static string *handle_admin_notifications_bad_request(void)
+{
+    return build_response_text(
+            "400 Bad Request",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>400 Bad Request</title></head><body>"
+            "<h1>Ungültige E-Mail-Einstellung</h1>"
+            "<p>Die Änderung wurde nicht gespeichert. Bitte prüfe Eingaben und Platzhalter.</p>"
+            "<p><a href=\"/admin/notifications\">Zurück zu E-Mail und Nachrichten</a></p>"
+            "</body></html>",
+            true);
+}
+
+static string *handle_admin_notifications_redirect(const char *code)
+{
+    char headers[512];
+    char body[512];
+    int h, b;
+
+    if (code == NULL || code[0] == '\0') return handle_internal_error(true);
+    h = snprintf(headers, sizeof(headers),
+                 "Location: /admin/notifications?saved=%s\r\n%s",
+                 code, admin_security_headers());
+    b = snprintf(body, sizeof(body),
+                 "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+                 "<title>E-Mail-Einstellung gespeichert</title></head><body>"
+                 "<p>Die E-Mail-Einstellung wurde gespeichert.</p>"
+                 "<p><a href=\"/admin/notifications\">Zurück</a></p></body></html>");
+    if (h < 0 || (size_t)h >= sizeof(headers) || b < 0 || (size_t)b >= sizeof(body))
+        return handle_internal_error(true);
+    return build_response_text("303 See Other", "text/html; charset=utf-8",
+                               headers, body, true);
+}
+
+typedef admin_notifications_result (*admin_notifications_action)(const string *);
+
+static string *handle_admin_notifications_post(
+        string *request,
+        admin_notifications_action action,
+        const char *saved_code
+)
+{
+    admin_notifications_result result;
+    if (!request_has_valid_admin_csrf(request))
+        return handle_admin_action_forbidden();
+
+    result = action(request);
+    if (result == ADMIN_NOTIFICATIONS_OK)
+        return handle_admin_notifications_redirect(saved_code);
+    if (result == ADMIN_NOTIFICATIONS_BAD_REQUEST) {
+        fprintf(stderr, "Ungültige E-Mail-Einstellung: %s\n",
+                admin_notifications_last_error());
+        return handle_admin_notifications_bad_request();
+    }
+
+    fprintf(stderr, "E-Mail-Einstellung fehlgeschlagen: %s\n",
+            admin_notifications_last_error());
+    return handle_internal_error(true);
+}
+
 static string *handle_admin_calendar_bad_request(void)
 {
     const char *body =
@@ -1775,6 +1876,30 @@ string *process(string *request)
                     strcmp(path, "/admin/bookings/accept") == 0);
         }
 
+        if (strncmp(path, "/admin/notifications/", strlen("/admin/notifications/")) == 0) {
+            if (!request_has_valid_admin_auth(request))
+                return handle_unauthorized(true);
+
+            if (strcmp(path, "/admin/notifications/smtp") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_update_smtp, "smtp");
+            if (strcmp(path, "/admin/notifications/disconnect") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_disconnect_smtp, "disconnected");
+            if (strcmp(path, "/admin/notifications/test") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_enqueue_test, "test");
+            if (strcmp(path, "/admin/notifications/template") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_update_template, "template");
+            if (strcmp(path, "/admin/notifications/template/reset") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_reset_template, "template-reset");
+            if (strcmp(path, "/admin/notifications/retry") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_retry_failed, "retry");
+        }
+
         if (strncmp(path, "/admin/calendar/", strlen("/admin/calendar/")) == 0) {
             if (!request_has_valid_admin_auth(request)) {
                 return handle_unauthorized(true);
@@ -1841,6 +1966,12 @@ string *process(string *request)
      */
     if (strcmp(path, "/setup/admin") == 0) {
         return handle_admin_setup_page(send_body);
+    }
+
+    if (strcmp(path, "/admin/notifications") == 0) {
+        if (!request_has_valid_admin_auth(request))
+            return handle_unauthorized(send_body);
+        return handle_admin_notifications_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/appointments") == 0) {

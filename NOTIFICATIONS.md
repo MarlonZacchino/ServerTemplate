@@ -1,97 +1,190 @@
-# E-Mail-Bestätigungen und Erinnerungen
+# E-Mail-Verbindung, Vorlagen und Versandwarteschlange
 
-Der HTTP-Server versendet keine E-Mail direkt. Er legt einen Job in
-`notification_jobs` ab. `/opt/styles4dogs/bin/notification_worker` liest diese
-Queue, versendet über SMTP und wird durch
-`styles4dogs-notification.timer` alle fünf Minuten gestartet.
+Der HTTP-Server sendet E-Mails nicht während einer Buchungsanfrage. Er erzeugt
+einen Job in `notification_jobs`. Der separate
+`/opt/styles4dogs/bin/notification_worker` verarbeitet die Queue über SMTP und
+wird von `styles4dogs-notification.timer` alle fünf Minuten gestartet. Eine
+Buchung bleibt dadurch auch erhalten, wenn der Mailanbieter vorübergehend nicht
+erreichbar ist.
 
-## SMTP konfigurieren
+## Postfach im Adminbereich verbinden
 
-Datei:
+Geschützte Seite:
 
 ```text
-/etc/styles4dogs/notification.env
+/admin/notifications
 ```
 
-Beispiel mit STARTTLS auf Port 587:
+Benötigt werden gewöhnlich:
+
+```text
+SMTP-Adresse:       smtps://smtp.anbieter.de:465
+oder STARTTLS:      smtp://smtp.anbieter.de:587
+Benutzername:       häufig die vollständige E-Mail-Adresse
+Passwort:           vorzugsweise ein separates App-Passwort
+Absenderadresse:    sichtbare Salon-Adresse
+Absendername:       Styles 4 Dogs
+Admin-Adresse:      Ziel für neue Terminanfragen
+```
+
+Nach dem Speichern:
+
+1. eine Testmail einreihen,
+2. den Worker einmal manuell starten,
+3. das Journal und den Posteingang prüfen,
+4. unter `/admin/calendar` Kunden-E-Mails und Erinnerungen aktivieren.
+
+```bash
+sudo systemctl start styles4dogs-notification.service
+sudo journalctl -u styles4dogs-notification.service --since "10 minutes ago" --no-pager
+```
+
+Die Testmail wird wie alle Nachrichten über die persistente Warteschlange
+verschickt. Der Browser zeigt das SMTP-Passwort nach dem Speichern niemals
+wieder an. Ein leeres Passwortfeld behält beim Bearbeiten das vorhandene
+Passwort.
+
+## Verschlüsselte Speicherung
+
+Admin-verwaltete SMTP-Daten liegen nicht in SQLite und nicht im Git-Checkout:
+
+```text
+/etc/styles4dogs/secrets/notification.smtp
+/etc/styles4dogs/secrets/notification.key
+```
+
+Die Konfiguration wird mit libsodium `crypto_secretbox` authentifiziert
+verschlüsselt. Beide Dateien müssen dem Dienstbenutzer gehören und Modus `0600`
+besitzen; das Verzeichnis bleibt `0700`.
+
+Der Schlüssel befindet sich auf demselben Server, weil Webserver und Worker die
+Daten ohne manuelle Eingabe lesen müssen. Diese Verschlüsselung verhindert
+Klartext in Dateiansichten und versehentlich kopierten Konfigurationen. Sie ist
+kein Schutz gegen Root-Zugriff oder einen vollständig kompromittierten
+Dienstbenutzer. Für den Salon ist deshalb ein separates Postfach mit
+App-Passwort und möglichst eingeschränkten Rechten vorgesehen.
+
+## Alte Environment-Konfiguration
+
+`/etc/styles4dogs/notification.env` bleibt für bestehende Installationen als
+Fallback unterstützt:
 
 ```text
 STYLES4DOGS_SMTP_URL=smtp://smtp.example.de:587
 STYLES4DOGS_SMTP_USERNAME=termine@example.de
-STYLES4DOGS_SMTP_PASSWORD=starkes-anwendungspasswort
+STYLES4DOGS_SMTP_PASSWORD=anwendungspasswort
 STYLES4DOGS_SMTP_FROM_ADDRESS=termine@example.de
 STYLES4DOGS_SMTP_FROM_NAME=Styles 4 Dogs
+STYLES4DOGS_ADMIN_NOTIFICATION_EMAIL=termine@example.de
+STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING=1
 ```
 
-Beispiel mit implizitem TLS auf Port 465:
+Für neue Installationen ist die Eingabe über `/admin/notifications` der
+bevorzugte Weg. Sobald dort gespeichert oder deaktiviert wurde, hat diese
+verwaltete Einstellung Vorrang und der Worker fällt nicht mehr automatisch auf
+alte Environment-Zugangsdaten zurück.
+
+## Automatische Nachrichten bearbeiten
+
+Unter `/admin/notifications` können Betreff und Nachrichtentext separat für
+folgende Ereignisse angepasst werden:
 
 ```text
-STYLES4DOGS_SMTP_URL=smtps://smtp.example.de:465
+booking_received       Anfrage eingegangen
+booking_confirmed      Termin bestätigt
+booking_rejected       Termin abgesagt
+appointment_reminder   Erinnerung
+admin_new_booking      neue Anfrage für den Admin
 ```
 
-Die Datei muss `root:styles4dogs` gehören und Modus `0640` besitzen. Sie darf
-nicht in Git eingecheckt werden.
-
-## Saloninformationen
-
-In `/etc/styles4dogs/server.env` werden für E-Mails und ICS-Dateien gesetzt:
+Erlaubte Platzhalter:
 
 ```text
-STYLES4DOGS_SALON_NAME=Styles 4 Dogs
-STYLES4DOGS_SALON_ADDRESS=Musterstraße 1, 48369 Saerbeck
-STYLES4DOGS_SALON_PHONE=+49 2574 123456
-STYLES4DOGS_PUBLIC_BASE_URL=https://example.de
-STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49
+{{customer_name}}      vollständiger Kundenname
+{{booking_id}}         Buchungsnummer
+{{appointment_date}}   Termindatum
+{{start_time}}         Beginn
+{{end_time}}           Ende
+{{service_name}}       gebuchte Leistung
+{{dog_name}}           Name des Hundes
+{{rejection_reason}}   optionaler Ablehnungsgrund
+{{salon_name}}         Salonname aus server.env
+{{salon_address}}      Salonadresse aus server.env
+{{salon_phone}}        Salontelefon aus server.env
+{{website_url}}        öffentliche Basis-URL
 ```
 
-## Aktivieren
+Unbekannte Platzhalter, unvollständige `{{...}}`-Ausdrücke und Zeilenumbrüche
+im Betreff werden abgelehnt. Jede Vorlage kann einzeln auf den mitgelieferten
+Standard zurückgesetzt werden.
 
-1. SMTP-Zugangsdaten eintragen.
-2. Im Adminbereich `/admin/calendar` E-Mail-Benachrichtigungen aktivieren.
-3. Erinnerungen und Vorlauf festlegen.
-4. Timer neu starten:
+Bereits eingereihte Nachrichten behalten den Text, der zum Zeitpunkt der
+Einreihung erzeugt wurde. Dadurch ändern spätere Bearbeitungen keine bereits
+geplanten Bestätigungen oder Erinnerungen.
 
-```bash
-sudo systemctl restart styles4dogs-notification.timer
-sudo systemctl start styles4dogs-notification.service
-```
+## Aktivierung und Erinnerungen
 
-## Kontrolle
+Die technische SMTP-Verbindung und die fachliche Versandfreigabe sind bewusst
+getrennt:
 
-```bash
-systemctl status styles4dogs-notification.timer
-journalctl -u styles4dogs-notification.service --since today
-```
+- `/admin/notifications`: Postfach, Testmail, Admin-Mail, Vorlagen und Queue
+- `/admin/calendar`: Kunden-E-Mails, Erinnerungen und Erinnerungszeitpunkt
 
-Warteschlange prüfen, ohne Nachrichtentexte auszugeben:
+Damit löst das bloße Speichern eines Postfachs nicht unbeabsichtigt sofort alle
+möglichen Kundenmails aus.
+
+## Warteschlange und Wiederholungen
+
+Ein Job wird höchstens fünfmal automatisch versucht. Die Wartezeiten steigen
+schrittweise. Ein länger als 15 Minuten als `processing` markierter Job wird
+beim nächsten Worker-Lauf wieder freigegeben. Fehlgeschlagene Jobs können im
+Adminbereich erneut auf `pending` gesetzt werden.
+
+Statusübersicht ohne Nachrichtentexte:
 
 ```bash
 sudo sqlite3 /var/lib/styles4dogs/styles4dogs.db \
   "SELECT status, event_type, COUNT(*) FROM notification_jobs GROUP BY status, event_type;"
 ```
 
-## Dry-Run ohne SMTP
+Timer und Journal:
 
-In einer Entwicklungsumgebung schreibt der Worker die erzeugten Nachrichten
-ohne SMTP-Zugriff in ein lokales Verzeichnis:
+```bash
+systemctl status styles4dogs-notification.timer --no-pager
+systemctl list-timers styles4dogs-notification.timer
+sudo journalctl -u styles4dogs-notification.service --since today --no-pager
+```
+
+## Dry-Run ohne externen Versand
+
+In einer isolierten Entwicklungsumgebung erzeugt der Worker `.eml`- und
+`.ics`-Dateien lokal:
 
 ```bash
 rm -rf ./notification-out
 STYLES4DOGS_DATA_DIR="$PWD/data" \
+STYLES4DOGS_SECRETS_DIR="$PWD/.secrets" \
   ./cmake-build-debug/notification_worker --dry-run ./notification-out
 ```
 
-Der vollständige Regressionstest erzeugt Bestätigung, Erinnerung und ICS-Datei
-in einer vollständig isolierten Testdatenbank:
+Der vollständige Regressionstest nutzt eigene temporäre Secrets und eine
+isolierte SQLite-Datenbank:
 
 ```bash
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-## Wiederholungen
+## Backup und Wiederherstellung
 
-Ein Job wird höchstens fünfmal versucht. Die Wartezeiten steigen schrittweise.
-Ein unterbrochener Worker gibt einen länger als 15 Minuten als `processing`
-markierten Job automatisch wieder frei. Die Kombination aus Buchung und
-Ereignistyp ist eindeutig, sodass Bestätigung und Erinnerung nicht doppelt in
-die Warteschlange gelangen.
+Das normale SQLite-Backup enthält:
+
+- Buchungen,
+- Benachrichtigungsjobs,
+- individualisierte Nachrichtenvorlagen.
+
+Die SMTP-Dateien und ihr Schlüssel werden bewusst nicht in das
+Datenbank-Backup kopiert. Nach einem vollständigen Serververlust wird das
+Postfach deshalb neu im Adminbereich verbunden. Eine separate Sicherung der
+Secrets ist nur verschlüsselt und mit besonders eingeschränktem Zugriff
+zulässig; Schlüssel und Chiffretext müssen dabei gemeinsam wiederhergestellt
+werden.

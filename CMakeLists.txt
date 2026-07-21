@@ -84,13 +84,18 @@ add_executable(Server
         calendar_public.c
         admin_calendar.c
         admin_appointments.c
+        admin_notifications.c
         notification_queue.c
+        notification_settings.c
+        notification_templates.c
         contact_links.c
 )
 
 add_executable(notification_worker
         notification_worker.c
         notification_queue.c
+        notification_settings.c
+        notification_templates.c
         booking_database.c
         calendar_time.c
         calendar_database.c
@@ -113,6 +118,8 @@ add_executable(calendar_engine_tests EXCLUDE_FROM_ALL
         calendar_database.c
         availability.c
         contact_validation.c
+        notification_settings.c
+        notification_templates.c
         server_config.c
 )
 
@@ -198,6 +205,7 @@ target_link_libraries(Server PRIVATE
 )
 
 target_link_libraries(notification_worker PRIVATE
+        PkgConfig::SODIUM
         PkgConfig::SQLITE3
         PkgConfig::CURL
 )
@@ -207,6 +215,7 @@ target_link_libraries(create_admin_user PRIVATE
 )
 
 target_link_libraries(calendar_engine_tests PRIVATE
+        PkgConfig::SODIUM
         PkgConfig::SQLITE3
 )
 

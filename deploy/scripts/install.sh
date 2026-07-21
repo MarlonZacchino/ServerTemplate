@@ -207,6 +207,7 @@ install_file 0644 root root "$PROJECT_ROOT/DEPLOYMENT.md" "$APP_PATH/share/DEPLO
 install_file 0644 root root "$PROJECT_ROOT/CADDY_DEPLOYMENT.md" "$APP_PATH/share/CADDY_DEPLOYMENT.md"
 install_file 0644 root root "$PROJECT_ROOT/RATE_LIMITING.md" "$APP_PATH/share/RATE_LIMITING.md"
 install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE5.md" "$APP_PATH/share/CALENDAR_PHASE5.md"
+install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE6.md" "$APP_PATH/share/CALENDAR_PHASE6.md"
 install_file 0644 root root "$PROJECT_ROOT/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
 
 case "$WEB_PATH" in

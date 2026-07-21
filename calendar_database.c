@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 5
+#define CALENDAR_SCHEMA_VERSION 6
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -296,9 +296,10 @@ static int create_calendar_tables(void)
             "    ON calendar_closures(start_date, end_date);"
             "CREATE TABLE IF NOT EXISTS notification_jobs ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "    booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
-            "        'booking_received', 'booking_confirmed', 'booking_rejected', 'appointment_reminder'"
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -316,7 +317,16 @@ static int create_calendar_tables(void)
             "    UNIQUE(booking_id, event_type)"
             ");"
             "CREATE INDEX IF NOT EXISTS idx_notification_jobs_delivery "
-            "    ON notification_jobs(status, available_at, id);";
+            "    ON notification_jobs(status, available_at, id);"
+            "CREATE TABLE IF NOT EXISTS notification_templates ("
+            "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking'"
+            "    )),"
+            "    subject_template TEXT NOT NULL,"
+            "    body_template TEXT NOT NULL,"
+            "    updated_at_utc TEXT NOT NULL"
+            ");";
 
     return execute_sql(sql);
 }
@@ -336,7 +346,19 @@ static int seed_calendar_defaults(void)
             "    ('wash_dry', 'Waschen und Föhnen', 60, 15, 1, 20),"
             "    ('full_groom', 'Komplettpflege', 120, 15, 1, 30),"
             "    ('claw_care', 'Krallenpflege', 30, 0, 1, 40),"
-            "    ('other', 'Sonstiges', 60, 15, 0, 50);";
+            "    ('other', 'Sonstiges', 60, 15, 0, 50);"
+            "INSERT OR IGNORE INTO notification_templates("
+            "event_type, subject_template, body_template, updated_at_utc) VALUES"
+            "('booking_received', 'Terminanfrage erhalten – {{salon_name}}', "
+            "'Hallo {{customer_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('booking_confirmed', 'Termin bestätigt – {{salon_name}}', "
+            "'Hallo {{customer_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('booking_rejected', 'Terminanfrage nicht möglich – {{salon_name}}', "
+            "'Hallo {{customer_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('appointment_reminder', 'Erinnerung an deinen Termin – {{salon_name}}', "
+            "'Hallo {{customer_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('admin_new_booking', 'Neue Terminanfrage #{{booking_id}} – {{customer_name}}', "
+            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
 
     return execute_sql(sql);
 }
@@ -541,6 +563,93 @@ static int create_booking_calendar_guards(void)
     return 0;
 }
 
+static int notification_jobs_need_v6_migration(bool *out_needed)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+    bool found = false;
+
+    if (out_needed == NULL) {
+        set_error("Ausgabe für Benachrichtigungsmigration fehlt");
+        return -1;
+    }
+    *out_needed = false;
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "PRAGMA table_info(notification_jobs);",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Benachrichtigungsschema konnte nicht geprüft werden");
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(statement, 1);
+        if (name != NULL && strcmp((const char *)name, "booking_id") == 0) {
+            found = true;
+            *out_needed = sqlite3_column_int(statement, 3) != 0;
+            break;
+        }
+    }
+
+    if (step_result != SQLITE_ROW && step_result != SQLITE_DONE) {
+        set_sqlite_error("Benachrichtigungsschema konnte nicht gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    if (!found) {
+        set_error("notification_jobs besitzt keine booking_id-Spalte");
+        return -1;
+    }
+    return 0;
+}
+
+static int migrate_notification_jobs_v6(void)
+{
+    bool needed;
+    static const char *sql =
+            "ALTER TABLE notification_jobs RENAME TO notification_jobs_v5;"
+            "DROP INDEX IF EXISTS idx_notification_jobs_delivery;"
+            "CREATE TABLE notification_jobs ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    event_type TEXT NOT NULL CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'smtp_test'"
+            "    )),"
+            "    recipient_email TEXT NOT NULL,"
+            "    subject TEXT NOT NULL,"
+            "    body_text TEXT NOT NULL,"
+            "    ics_content TEXT NOT NULL DEFAULT '',"
+            "    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ("
+            "        'pending', 'processing', 'sent', 'failed'"
+            "    )),"
+            "    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 20),"
+            "    available_at TEXT NOT NULL,"
+            "    created_at TEXT NOT NULL,"
+            "    claimed_at TEXT,"
+            "    sent_at TEXT,"
+            "    last_error TEXT NOT NULL DEFAULT '',"
+            "    UNIQUE(booking_id, event_type)"
+            ");"
+            "INSERT INTO notification_jobs("
+            "id, booking_id, event_type, recipient_email, subject, body_text, ics_content,"
+            "status, attempts, available_at, created_at, claimed_at, sent_at, last_error"
+            ") SELECT id, booking_id, event_type, recipient_email, subject, body_text, ics_content,"
+            "status, attempts, available_at, created_at, claimed_at, sent_at, last_error "
+            "FROM notification_jobs_v5;"
+            "DROP TABLE notification_jobs_v5;"
+            "CREATE INDEX idx_notification_jobs_delivery "
+            "ON notification_jobs(status, available_at, id);";
+
+    if (notification_jobs_need_v6_migration(&needed) != 0) return -1;
+    return needed ? execute_sql(sql) : 0;
+}
+
 static int migrate_schema(void)
 {
     if (execute_sql("BEGIN IMMEDIATE;") != 0) {
@@ -549,9 +658,10 @@ static int migrate_schema(void)
 
     if (create_calendar_tables() != 0 ||
         migrate_booking_columns() != 0 ||
+        migrate_notification_jobs_v6() != 0 ||
         seed_calendar_defaults() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 5;") != 0 ||
+        execute_sql("PRAGMA user_version = 6;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;

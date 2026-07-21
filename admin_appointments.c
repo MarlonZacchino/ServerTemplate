@@ -409,7 +409,7 @@ string *admin_appointments_build_page(
             "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
             "<a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a>"
             "<a href=\"/admin/appointments\" aria-current=\"page\">Termine</a>"
-            "<a href=\"/admin/calendar\">Einstellungen</a></nav></div></header>"
+            "<a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header>"
             "<main class=\"page admin-appointments-page\"><section class=\"card admin-appointments-intro\">"
             "<p class=\"eyebrow\">Salonbetrieb</p><h1>Terminkalender</h1>"
             "<p>Offene Anfragen, bestätigte Termine und Sperrzeiten in einer gemeinsamen Ansicht.</p>"

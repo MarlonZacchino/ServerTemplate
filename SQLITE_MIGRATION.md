@@ -80,27 +80,41 @@ systemctl start styles4dogs
 Vor dem Produktivbetrieb wird daraus noch ein automatisierter Backup- und
 Restore-Test erstellt.
 
-## Kalenderschema Version 5
+## Kalenderschema Version 6
 
-Phase 5 erweitert die Datenbank idempotent auf:
+Phase 6 erweitert die Datenbank idempotent auf:
 
 ```text
-PRAGMA user_version = 5
+PRAGMA user_version = 6
 ```
 
-Zusätzlich zu den bisherigen Kalender- und Kontaktdaten werden die
-E-Mail-/Erinnerungseinstellungen sowie `notification_jobs` angelegt. Vorhandene
-Buchungen und Phase-4-Einstellungen bleiben erhalten. Der Worker und der
-HTTP-Server verwenden dieselbe SQLite-Datei, aber getrennte Verbindungen mit
-Busy-Timeout und kurzen Transaktionen.
+Neu angelegt wird:
 
-Vor jeder Aktualisierung einer produktiven Installation muss ein geprüftes
-SQLite-Backup erstellt werden. Nach der Installation:
+```text
+notification_templates
+```
+
+Die Tabelle enthält die individualisierbaren Betreff- und Textvorlagen für
+Eingangsbestätigung, Terminbestätigung, Absage, Erinnerung und interne
+Admin-Benachrichtigung.
+
+`notification_jobs.booking_id` darf ab Version 6 für eine reine SMTP-Testmail
+`NULL` sein. Zusätzlich werden die Ereignisse `admin_new_booking` und
+`smtp_test` unterstützt. Eine bestehende Version-5-Tabelle wird innerhalb der
+Schema-Transaktion umgebaut; vorhandene Jobs, Buchungen und Kalenderdaten
+bleiben erhalten.
+
+Vor jeder produktiven Aktualisierung muss ein geprüftes SQLite-Backup erstellt
+werden. Nach der Installation:
 
 ```bash
 sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
-sqlite3 /var/lib/styles4dogs/styles4dogs.db   "SELECT name FROM sqlite_master WHERE type='table' AND name='notification_jobs';"
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('notification_jobs','notification_templates') ORDER BY name;"
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT event_type FROM notification_templates ORDER BY event_type;"
 ```
 
-Erwartet werden `5` und `notification_jobs`. Details stehen in
-`CALENDAR_PHASE1.md` bis `CALENDAR_PHASE5.md`.
+Erwartet werden Version `6`, beide Tabellen und fünf Nachrichtenvorlagen.
+SMTP-Zugangsdaten liegen nicht in SQLite. Details stehen in
+`CALENDAR_PHASE6.md` und `NOTIFICATIONS.md`.

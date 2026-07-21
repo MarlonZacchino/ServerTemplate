@@ -83,7 +83,7 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 5, Legacy-Migration, sichere geschlossene Defaults,
+Er prüft Schema-Version 6, Legacy-Migration, sichere geschlossene Defaults,
 Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
 Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
 ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
@@ -150,7 +150,7 @@ Zusätzlich werden geprüft:
 - Speicherung historischer Leistungssnapshots
 - scrollbare einspaltige Uhrzeitauswahl im Frontend
 
-Der vollständige Lauf enthält nun 35 Beams und 12 Stateful-Tests.
+Der vollständige Lauf enthält 35 Beams. Die Stateful-Prüfungen werden zusammen mit den Kalender-, SMTP- und Worker-Tests ausgeführt.
 
 
 ## Kalender Phase 5
@@ -166,3 +166,24 @@ Der HTTP- und Worker-Test prüft zusätzlich:
 - ICS-Inhalte mit `VCALENDAR`, `VEVENT`, `DTSTART` und `DTEND`,
 - Worker-Dry-Run ohne externen SMTP-Zugriff,
 - Schema-Migration auf Version 5.
+
+
+## Kalender Phase 6
+
+Der Regressionstest prüft zusätzlich:
+
+- geschützten Zugriff auf `/admin/notifications`,
+- CSRF-Schutz für alle E-Mail-Adminaktionen,
+- verschlüsselte Speicherung der SMTP-Verbindung ohne Klartextpasswort,
+- Dateimodi `0600` für `notification.smtp` und `notification.key`,
+- Beibehaltung des Passworts bei leerem Bearbeitungsfeld,
+- Deaktivieren der Verbindung ohne Fallback auf alte Zugangsdaten,
+- Testmails mit `booking_id = NULL`,
+- Admin-Benachrichtigungen bei neuen Terminanfragen,
+- Speichern, Rendern und Zurücksetzen aller Nachrichtenvorlagen,
+- Ablehnung unbekannter oder unvollständiger Platzhalter,
+- erneute Freigabe fehlgeschlagener Jobs,
+- Schema-Migration auf Version 6.
+
+Die Testumgebung verwendet ein eigenes temporäres Secrets-Verzeichnis. Echte
+SMTP-Zugangsdaten oder produktive Dateien werden dabei nicht gelesen.

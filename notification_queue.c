@@ -1,7 +1,12 @@
 #include "notification_queue.h"
 
 #include "calendar_time.h"
+#include "contact_validation.h"
+#include "notification_settings.h"
+#include "notification_templates.h"
 #include "server_config.h"
+
+#include <sodium.h>
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -128,7 +133,7 @@ static int copy_column(
     return written >= 0 && (size_t)written < destination_size ? 0 : -1;
 }
 
-static bool event_type_is_valid(const char *event_type)
+static bool booking_event_type_is_valid(const char *event_type)
 {
     return event_type != NULL &&
            (strcmp(event_type, "booking_received") == 0 ||
@@ -137,22 +142,24 @@ static bool event_type_is_valid(const char *event_type)
             strcmp(event_type, "appointment_reminder") == 0);
 }
 
-static bool event_matches_booking(
-        const char *event_type,
-        const char *decision_status
-)
+static bool internal_event_type_is_valid(const char *event_type)
 {
-    if (strcmp(event_type, "booking_received") == 0) {
-        return strcmp(decision_status, "pending") == 0;
-    }
-    if (strcmp(event_type, "booking_confirmed") == 0 ||
-        strcmp(event_type, "appointment_reminder") == 0) {
-        return strcmp(decision_status, "confirmed") == 0;
-    }
-    if (strcmp(event_type, "booking_rejected") == 0) {
-        return strcmp(decision_status, "rejected") == 0;
-    }
+    return booking_event_type_is_valid(event_type) ||
+           (event_type != NULL && strcmp(event_type, "admin_new_booking") == 0);
+}
 
+static bool event_matches_booking(const char *event_type, const char *decision_status)
+{
+    if (strcmp(event_type, "booking_received") == 0)
+        return strcmp(decision_status, "pending") == 0;
+    if (strcmp(event_type, "booking_confirmed") == 0 ||
+        strcmp(event_type, "appointment_reminder") == 0)
+        return strcmp(decision_status, "confirmed") == 0;
+    if (strcmp(event_type, "booking_rejected") == 0)
+        return strcmp(decision_status, "rejected") == 0;
+    if (strcmp(event_type, "admin_new_booking") == 0)
+        return strcmp(decision_status, "pending") == 0 ||
+               strcmp(decision_status, "confirmed") == 0;
     return false;
 }
 
@@ -448,139 +455,82 @@ static int build_payload(
         char ics[NOTIFICATION_ICS_SIZE]
 )
 {
+    notification_template template_value;
+    notification_template_context context;
     char start[6];
     char end[6];
-    size_t position = 0;
-    const char *salon_name = server_config_salon_name();
+    char booking_id[32];
+    char rejection_reason[640];
 
-    if (data == NULL || !event_type_is_valid(event_type) ||
+    if (data == NULL || !internal_event_type_is_valid(event_type) ||
         calendar_time_format_hhmm(data->start_minute, start) != 0 ||
-        calendar_time_format_hhmm(data->end_minute, end) != 0) {
+        calendar_time_format_hhmm(data->end_minute, end) != 0 ||
+        notification_template_get(event_type, &template_value) != 0) {
         return -1;
     }
 
-    body[0] = '\0';
-    ics[0] = '\0';
-
-    if (strcmp(event_type, "booking_received") == 0) {
-        snprintf(subject, NOTIFICATION_SUBJECT_SIZE, "Terminanfrage erhalten – %s", salon_name);
-        if (append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Hallo %s,\n\nwir haben deine Terminanfrage erhalten. "
-                "Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\n",
-                data->customer_name) != 0) {
-            return -1;
-        }
-    } else if (strcmp(event_type, "booking_confirmed") == 0) {
-        snprintf(subject, NOTIFICATION_SUBJECT_SIZE, "Termin bestätigt – %s", salon_name);
-        if (append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Hallo %s,\n\ndein Termin ist verbindlich bestätigt.\n\n",
-                data->customer_name) != 0 ||
-            build_ics(data, now_utc, ics, NOTIFICATION_ICS_SIZE) != 0) {
-            return -1;
-        }
-    } else if (strcmp(event_type, "booking_rejected") == 0) {
-        snprintf(subject, NOTIFICATION_SUBJECT_SIZE, "Terminanfrage abgelehnt – %s", salon_name);
-        if (append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Hallo %s,\n\nleider können wir deine Terminanfrage nicht bestätigen.\n",
-                data->customer_name) != 0) {
-            return -1;
-        }
-        if (data->rejection_reason[0] != '\0' &&
-            append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                    "Grund: %s\n", data->rejection_reason) != 0) {
-            return -1;
-        }
-        if (append_text(body, NOTIFICATION_BODY_SIZE, &position, "\n") != 0) {
-            return -1;
-        }
+    snprintf(booking_id, sizeof(booking_id), "%lld", (long long)data->id);
+    if (data->rejection_reason[0] == '\0') {
+        snprintf(rejection_reason, sizeof(rejection_reason),
+                 "%s", "Es wurde kein weiterer Grund angegeben.");
     } else {
-        snprintf(subject, NOTIFICATION_SUBJECT_SIZE, "Erinnerung an deinen Termin – %s", salon_name);
-        if (append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Hallo %s,\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\n",
-                data->customer_name) != 0 ||
-            build_ics(data, now_utc, ics, NOTIFICATION_ICS_SIZE) != 0) {
-            return -1;
-        }
+        snprintf(rejection_reason, sizeof(rejection_reason),
+                 "Grund: %s", data->rejection_reason);
     }
 
-    if (append_format(body, NOTIFICATION_BODY_SIZE, &position,
-            "Datum: %s\nUhrzeit: %s–%s Uhr\nLeistung: %s\nHund: %s\n\n",
-            data->appointment_date,
-            start,
-            end,
-            data->service_name[0] == '\0' ? "Nicht angegeben" : data->service_name,
-            data->dog_name[0] == '\0' ? "Nicht angegeben" : data->dog_name) != 0 ||
-        append_format(body, NOTIFICATION_BODY_SIZE, &position,
-            "Viele Grüße\n%s\n", salon_name) != 0) {
-        return -1;
-    }
+    context.customer_name = data->customer_name;
+    context.booking_id = booking_id;
+    context.appointment_date = data->appointment_date;
+    context.start_time = start;
+    context.end_time = end;
+    context.service_name = data->service_name[0] == '\0'
+                           ? "Nicht angegeben" : data->service_name;
+    context.dog_name = data->dog_name[0] == '\0'
+                       ? "Nicht angegeben" : data->dog_name;
+    context.rejection_reason = rejection_reason;
+    context.salon_name = server_config_salon_name();
+    context.salon_address = server_config_salon_address();
+    context.salon_phone = server_config_salon_phone();
+    context.website_url = server_config_public_base_url();
 
-    if (server_config_salon_address()[0] != '\0' &&
-        append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "%s\n", server_config_salon_address()) != 0) {
+    if (notification_template_render(&template_value, &context, subject, body) != 0)
         return -1;
-    }
-    if (server_config_salon_phone()[0] != '\0' &&
-        append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Telefon: %s\n", server_config_salon_phone()) != 0) {
-        return -1;
-    }
-    if (server_config_public_base_url()[0] != '\0' &&
-        append_format(body, NOTIFICATION_BODY_SIZE, &position,
-                "Website: %s\n", server_config_public_base_url()) != 0) {
-        return -1;
-    }
 
+    ics[0] = '\0';
+    if ((strcmp(event_type, "booking_confirmed") == 0 ||
+         strcmp(event_type, "appointment_reminder") == 0) &&
+        build_ics(data, now_utc, ics, NOTIFICATION_ICS_SIZE) != 0) {
+        return -1;
+    }
     return 0;
 }
 
-static int enqueue_event_with_database(
+static int insert_job(
         sqlite3 *database,
-        int64_t booking_id,
+        const int64_t *booking_id,
         const char *event_type,
+        const char *recipient,
+        const char *subject,
+        const char *body,
+        const char *ics,
         const char *now_utc
 )
 {
-    notification_booking_data data;
     sqlite3_stmt *statement = NULL;
-    char subject[NOTIFICATION_SUBJECT_SIZE];
-    char body[NOTIFICATION_BODY_SIZE];
-    char ics[NOTIFICATION_ICS_SIZE];
-    int load_result;
     int result = -1;
-
-    if (!event_type_is_valid(event_type) || !calendar_utc_timestamp_is_valid(now_utc)) {
-        set_error("Ungültiger Benachrichtigungstyp oder Zeitpunkt");
-        return -1;
-    }
-
-    load_result = load_booking(database, booking_id, &data);
-    if (load_result != 0) {
-        return load_result < 0 ? -1 : 0;
-    }
-
-    if (!data.email_notifications_enabled || data.email[0] == '\0' ||
-        !event_matches_booking(event_type, data.decision_status)) {
-        return 0;
-    }
-
-    if (build_payload(&data, event_type, now_utc, subject, body, ics) != 0) {
-        set_error("Benachrichtigungsinhalt ist zu lang oder ungültig");
-        return -1;
-    }
 
     if (sqlite3_prepare_v2(
             database,
             "INSERT OR IGNORE INTO notification_jobs("
-            "    booking_id, event_type, recipient_email, subject, body_text, ics_content, "
-            "    status, attempts, available_at, created_at, last_error"
+            "booking_id, event_type, recipient_email, subject, body_text, ics_content, "
+            "status, attempts, available_at, created_at, last_error"
             ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?7, '');",
-            -1,
-            &statement,
-            NULL) != SQLITE_OK ||
-        sqlite3_bind_int64(statement, 1, booking_id) != SQLITE_OK ||
+            -1, &statement, NULL) != SQLITE_OK ||
+        (booking_id == NULL
+         ? sqlite3_bind_null(statement, 1)
+         : sqlite3_bind_int64(statement, 1, *booking_id)) != SQLITE_OK ||
         sqlite3_bind_text(statement, 2, event_type, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 3, data.email, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 3, recipient, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 4, subject, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 5, body, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 6, ics, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
@@ -593,12 +543,67 @@ static int enqueue_event_with_database(
         set_sqlite_error(database, "Benachrichtigung konnte nicht eingereiht werden");
         goto cleanup;
     }
-
     result = 0;
 
 cleanup:
     sqlite3_finalize(statement);
     return result;
+}
+
+static int enqueue_event_with_database(
+        sqlite3 *database,
+        int64_t booking_id,
+        const char *event_type,
+        const char *now_utc
+)
+{
+    notification_booking_data data;
+    char subject[NOTIFICATION_SUBJECT_SIZE];
+    char body[NOTIFICATION_BODY_SIZE];
+    char ics[NOTIFICATION_ICS_SIZE];
+    int load_result;
+
+    if (!internal_event_type_is_valid(event_type) ||
+        !calendar_utc_timestamp_is_valid(now_utc)) {
+        set_error("Ungültiger Benachrichtigungstyp oder Zeitpunkt");
+        return -1;
+    }
+
+    load_result = load_booking(database, booking_id, &data);
+    if (load_result != 0) return load_result < 0 ? -1 : 0;
+    if (!event_matches_booking(event_type, data.decision_status)) return 0;
+
+    if (strcmp(event_type, "admin_new_booking") == 0) {
+        notification_smtp_settings smtp;
+        int result;
+
+        if (notification_settings_load(&smtp) != 0) {
+            set_error(notification_settings_last_error());
+            return -1;
+        }
+        if (!smtp.enabled || !smtp.notify_admin_on_new_booking ||
+            smtp.admin_email[0] == '\0') {
+            sodium_memzero(&smtp, sizeof(smtp));
+            return 0;
+        }
+        if (build_payload(&data, event_type, now_utc, subject, body, ics) != 0) {
+            sodium_memzero(&smtp, sizeof(smtp));
+            set_error(notification_templates_last_error());
+            return -1;
+        }
+        result = insert_job(database, &booking_id, event_type, smtp.admin_email,
+                            subject, body, ics, now_utc);
+        sodium_memzero(&smtp, sizeof(smtp));
+        return result;
+    }
+
+    if (!data.email_notifications_enabled || data.email[0] == '\0') return 0;
+    if (build_payload(&data, event_type, now_utc, subject, body, ics) != 0) {
+        set_error(notification_templates_last_error());
+        return -1;
+    }
+    return insert_job(database, &booking_id, event_type, data.email,
+                      subject, body, ics, now_utc);
 }
 
 static int current_clock(sqlite3 *database, calendar_clock_snapshot *snapshot)
@@ -639,7 +644,7 @@ int notification_queue_enqueue_booking_event(
     int result;
 
     queue_error[0] = '\0';
-    if (booking_id <= 0 || !event_type_is_valid(event_type) ||
+    if (booking_id <= 0 || !booking_event_type_is_valid(event_type) ||
         open_database(&database) != 0) {
         return -1;
     }
@@ -650,6 +655,12 @@ int notification_queue_enqueue_booking_event(
     }
 
     result = enqueue_event_with_database(database, booking_id, event_type, snapshot.now_utc);
+    if (result == 0 &&
+        (strcmp(event_type, "booking_received") == 0 ||
+         strcmp(event_type, "booking_confirmed") == 0)) {
+        result = enqueue_event_with_database(
+                database, booking_id, "admin_new_booking", snapshot.now_utc);
+    }
     sqlite3_close_v2(database);
     return result;
 }
@@ -1013,6 +1024,88 @@ int notification_queue_mark_failed(int64_t job_id, const char *error_message)
         goto cleanup;
     }
 
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    sqlite3_close_v2(database);
+    return result;
+}
+
+int notification_queue_enqueue_test_email(const char *recipient_email)
+{
+    sqlite3 *database = NULL;
+    calendar_clock_snapshot snapshot;
+    notification_smtp_settings smtp;
+    char subject[NOTIFICATION_SUBJECT_SIZE];
+    char body[NOTIFICATION_BODY_SIZE];
+    const char *recipient;
+    int result;
+
+    queue_error[0] = '\0';
+    if (notification_settings_load(&smtp) != 0) {
+        set_error(notification_settings_last_error());
+        return -1;
+    }
+    if (!smtp.enabled) {
+        sodium_memzero(&smtp, sizeof(smtp));
+        set_error("Es ist noch kein aktives E-Mail-Konto verbunden");
+        return -1;
+    }
+
+    recipient = recipient_email != NULL && recipient_email[0] != '\0'
+                ? recipient_email : smtp.admin_email;
+    if (!contact_email_is_valid(recipient)) {
+        sodium_memzero(&smtp, sizeof(smtp));
+        set_error("Empfängeradresse der Testmail ist ungültig");
+        return -1;
+    }
+
+    if (snprintf(subject, sizeof(subject), "Testmail – %s",
+                 server_config_salon_name()) < 0 ||
+        snprintf(body, sizeof(body),
+                 "Diese Testmail bestätigt, dass die E-Mail-Verbindung für %s eingerichtet wurde.\n\n"
+                 "Wenn diese Nachricht angekommen ist, können automatische Terminbestätigungen, "
+                 "Absagen und Erinnerungen verschickt werden.\n",
+                 server_config_salon_name()) < 0 ||
+        open_database(&database) != 0 ||
+        current_clock(database, &snapshot) != 0) {
+        sodium_memzero(&smtp, sizeof(smtp));
+        sqlite3_close_v2(database);
+        return -1;
+    }
+
+    result = insert_job(database, NULL, "smtp_test", recipient,
+                        subject, body, "", snapshot.now_utc);
+    sqlite3_close_v2(database);
+    sodium_memzero(&smtp, sizeof(smtp));
+    return result;
+}
+
+int notification_queue_retry_failed(void)
+{
+    sqlite3 *database = NULL;
+    sqlite3_stmt *statement = NULL;
+    calendar_clock_snapshot snapshot;
+    int result = -1;
+
+    queue_error[0] = '\0';
+    if (open_database(&database) != 0 ||
+        current_clock(database, &snapshot) != 0) {
+        sqlite3_close_v2(database);
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            database,
+            "UPDATE notification_jobs SET status='pending', attempts=0, "
+            "available_at=?1, claimed_at=NULL, last_error='' WHERE status='failed';",
+            -1, &statement, NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, snapshot.now_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_step(statement) != SQLITE_DONE) {
+        set_sqlite_error(database, "Fehlgeschlagene Nachrichten konnten nicht zurückgestellt werden");
+        goto cleanup;
+    }
     result = 0;
 
 cleanup:

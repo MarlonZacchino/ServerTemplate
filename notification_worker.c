@@ -2,7 +2,10 @@
 #include "calendar_database.h"
 #include "contact_validation.h"
 #include "notification_queue.h"
+#include "notification_settings.h"
 #include "server_config.h"
+
+#include <sodium.h>
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -19,30 +22,7 @@
 #define SMTP_ERROR_SIZE 512
 #define WORKER_MAX_JOBS 20
 
-typedef struct smtp_config {
-    char url[SMTP_VALUE_SIZE];
-    char username[SMTP_VALUE_SIZE];
-    char password[SMTP_VALUE_SIZE];
-    char from_address[SMTP_VALUE_SIZE];
-    char from_name[SMTP_VALUE_SIZE];
-} smtp_config;
-
-static bool value_is_single_line(const char *value)
-{
-    if (value == NULL) {
-        return false;
-    }
-
-    for (size_t index = 0; value[index] != '\0'; index++) {
-        unsigned char character = (unsigned char)value[index];
-
-        if (character < 32 || character == 127) {
-            return false;
-        }
-    }
-
-    return true;
-}
+typedef notification_smtp_settings smtp_config;
 
 static int format_checked(char *destination, size_t destination_size, const char *format, ...)
 {
@@ -58,99 +38,6 @@ static int format_checked(char *destination, size_t destination_size, const char
     va_end(arguments);
 
     return written >= 0 && (size_t)written < destination_size ? 0 : -1;
-}
-
-static bool copy_environment(
-        const char *name,
-        char *destination,
-        size_t destination_size,
-        bool required,
-        char error[SMTP_ERROR_SIZE]
-)
-{
-    const char *value = getenv(name);
-    size_t length;
-
-    if (value == NULL) {
-        value = "";
-    }
-
-    length = strlen(value);
-    if ((required && length == 0) || length >= destination_size ||
-        !value_is_single_line(value)) {
-        snprintf(
-                error,
-                SMTP_ERROR_SIZE,
-                "%s ist %s",
-                name,
-                length == 0 ? "nicht konfiguriert" :
-                (length >= destination_size ? "zu lang" : "nicht einzeilig"));
-        return false;
-    }
-
-    memcpy(destination, value, length + 1);
-    return true;
-}
-
-static bool load_smtp_config(smtp_config *config, char error[SMTP_ERROR_SIZE])
-{
-    if (config == NULL) {
-        snprintf(error, SMTP_ERROR_SIZE, "SMTP-Konfigurationsausgabe fehlt");
-        return false;
-    }
-
-    memset(config, 0, sizeof(*config));
-    if (!copy_environment("STYLES4DOGS_SMTP_URL", config->url, sizeof(config->url), true, error) ||
-        !copy_environment(
-                "STYLES4DOGS_SMTP_FROM_ADDRESS",
-                config->from_address,
-                sizeof(config->from_address),
-                true,
-                error) ||
-        !copy_environment(
-                "STYLES4DOGS_SMTP_USERNAME",
-                config->username,
-                sizeof(config->username),
-                false,
-                error) ||
-        !copy_environment(
-                "STYLES4DOGS_SMTP_PASSWORD",
-                config->password,
-                sizeof(config->password),
-                false,
-                error) ||
-        !copy_environment(
-                "STYLES4DOGS_SMTP_FROM_NAME",
-                config->from_name,
-                sizeof(config->from_name),
-                false,
-                error)) {
-        return false;
-    }
-
-    if (config->from_name[0] == '\0') {
-        snprintf(config->from_name, sizeof(config->from_name), "%s", server_config_salon_name());
-    }
-
-    if ((strncmp(config->url, "smtp://", strlen("smtp://")) != 0 &&
-         strncmp(config->url, "smtps://", strlen("smtps://")) != 0) ||
-        !contact_email_is_valid(config->from_address)) {
-        snprintf(
-                error,
-                SMTP_ERROR_SIZE,
-                "SMTP-URL oder Absenderadresse ist ungültig");
-        return false;
-    }
-
-    if ((config->username[0] == '\0') != (config->password[0] == '\0')) {
-        snprintf(
-                error,
-                SMTP_ERROR_SIZE,
-                "STYLES4DOGS_SMTP_USERNAME und STYLES4DOGS_SMTP_PASSWORD müssen gemeinsam gesetzt sein");
-        return false;
-    }
-
-    return true;
 }
 
 static int base64_encode(
@@ -468,10 +355,25 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    if (dry_run_directory == NULL && !load_smtp_config(&smtp, error)) {
-        calendar_database_shutdown();
-        booking_database_shutdown();
-        return EXIT_SUCCESS;
+    if (dry_run_directory == NULL) {
+        if (notification_settings_load(&smtp) != 0) {
+            fprintf(stderr, "ERROR loading SMTP configuration: %s\n",
+                    notification_settings_last_error());
+            calendar_database_shutdown();
+            booking_database_shutdown();
+            return EXIT_FAILURE;
+        }
+        if (!smtp.enabled) {
+            fprintf(stderr, "Notification worker skipped: no active E-mail account\n");
+            sodium_memzero(&smtp, sizeof(smtp));
+            calendar_database_shutdown();
+            booking_database_shutdown();
+            return EXIT_SUCCESS;
+        }
+        if (smtp.from_name[0] == '\0') {
+            snprintf(smtp.from_name, sizeof(smtp.from_name), "%s",
+                    server_config_salon_name());
+        }
     }
 
     if (dry_run_directory == NULL && curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
@@ -528,6 +430,7 @@ int main(int argc, char **argv)
 
     if (dry_run_directory == NULL) {
         curl_global_cleanup();
+        sodium_memzero(&smtp, sizeof(smtp));
     }
     calendar_database_shutdown();
     booking_database_shutdown();

@@ -12,14 +12,17 @@ HTTPS-Verkehr wird über Caddy weitergeleitet.
 /opt/styles4dogs/bin/styles4dogs-*      Betriebswerkzeuge
 /var/www/styles4dogs/                   schreibgeschützte Website
 /etc/styles4dogs/server.env             root-verwaltete Serverkonfiguration
-/etc/styles4dogs/notification.env       geschützte SMTP-Konfiguration
+/etc/styles4dogs/notification.env       optionaler SMTP-Migrations-Fallback
 /etc/styles4dogs/secrets/admin.auth     vom Server erzeugtes Admin-Secret
+/etc/styles4dogs/secrets/notification.* verschlüsselte SMTP-Verbindung
 /var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank
 /var/backups/styles4dogs/               geprüfte Online-Backups
 ```
 
-`server.env` und `admin.auth` liegen absichtlich nicht im selben schreibbaren
-Verzeichnis. Der Server darf nur `secrets/` und `/var/lib/styles4dogs` ändern.
+`server.env` liegt absichtlich außerhalb des schreibbaren Secret-Verzeichnisses.
+Der Server darf nur `secrets/` und `/var/lib/styles4dogs` ändern. Dort erzeugt
+er `admin.auth` sowie die verschlüsselte, im Adminbereich verwaltete
+SMTP-Konfiguration.
 
 ## Voraussetzungen auf Arch Linux
 
@@ -180,11 +183,16 @@ Der geschützte Tages-/Wochenkalender ist erreichbar unter:
 /admin/appointments
 ```
 
-SMTP wird in `/etc/styles4dogs/notification.env` eingerichtet. Der Worker läuft
-als eigener gehärteter Oneshoot-Dienst und erhält – anders als der Webserver –
-ausgehenden Netzwerkzugriff. Der Webserver bleibt weiterhin auf localhost und
-ohne ausgehende Verbindungen beschränkt. Vollständige Hinweise stehen in
-`NOTIFICATIONS.md`.
+Das Salon-Postfach wird bevorzugt unter `/admin/notifications` verbunden. Dort
+stehen außerdem Testmail, Queue-Status, Wiederholungen und individualisierbare
+Bestätigungs-, Absage- und Erinnerungstexte zur Verfügung. Die Zugangsdaten
+liegen verschlüsselt in `/etc/styles4dogs/secrets/notification.*`.
+
+Der Worker läuft als eigener gehärteter Oneshoot-Dienst und erhält – anders als
+der Webserver – ausgehenden Netzwerkzugriff. Der Webserver bleibt weiterhin
+auf localhost beschränkt. `/etc/styles4dogs/notification.env` wird nur noch als
+Migrations-Fallback unterstützt. Vollständige Hinweise stehen in
+`NOTIFICATIONS.md` und `CALENDAR_PHASE6.md`.
 
 Nach Änderungen:
 

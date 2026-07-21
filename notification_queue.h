@@ -46,6 +46,8 @@ int notification_queue_claim_next(notification_job *job);
 
 int notification_queue_mark_sent(int64_t job_id);
 int notification_queue_mark_failed(int64_t job_id, const char *error_message);
+int notification_queue_enqueue_test_email(const char *recipient_email);
+int notification_queue_retry_failed(void);
 int notification_queue_get_counts(notification_queue_counts *counts);
 
 const char *notification_queue_last_error(void);
