@@ -51,6 +51,11 @@ typedef int (*calendar_service_callback)(
         void *context
 );
 
+typedef int (*calendar_closure_callback)(
+        const calendar_closure *closure,
+        void *context
+);
+
 typedef struct calendar_pending_booking {
     const char *created_at_utc;
     const char *hold_expires_at_utc;
@@ -79,12 +84,17 @@ int calendar_database_get_service(
         calendar_service *service
 );
 int calendar_database_update_service(const calendar_service *service);
+int calendar_database_for_each_service(
+        calendar_service_callback callback,
+        void *context
+);
 int calendar_database_for_each_active_service(
         calendar_service_callback callback,
         void *context
 );
 
 int calendar_database_clear_opening_hours(void);
+int calendar_database_clear_opening_hours_for_weekday(int weekday);
 int calendar_database_add_opening_period(
         int weekday,
         int start_minute,
@@ -103,6 +113,10 @@ int calendar_database_add_closure(
         int64_t *out_id
 );
 int calendar_database_delete_closure(int64_t closure_id);
+int calendar_database_for_each_closure(
+        calendar_closure_callback callback,
+        void *context
+);
 int calendar_database_get_closures_for_date(
         const char *date,
         calendar_time_range *ranges,

@@ -2,6 +2,7 @@
 // Created by Marlon on 11.07.26.
 //
 
+#include "admin_calendar.h"
 #include "auth.h"
 #include "process.h"
 #include "booking.h"
@@ -1399,6 +1400,179 @@ static string *handle_admin_booking_status_post(string *request)
     return handle_internal_error(true);
 }
 
+
+static string *handle_admin_calendar_page(
+        bool send_body,
+        const char *query,
+        size_t query_length
+)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    char notice_code[32] = {0};
+    string *body;
+    string *response;
+
+    if (query != NULL && query_length > 0) {
+        form_value_result notice_result = form_urlencoded_get_from_data(
+                query,
+                query_length,
+                "saved",
+                notice_code,
+                sizeof(notice_code));
+
+        if (notice_result != FORM_VALUE_OK &&
+            notice_result != FORM_VALUE_NOT_FOUND) {
+            return handle_bad_request(send_body);
+        }
+    }
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+
+    body = admin_calendar_build_page(
+            csrf_token,
+            notice_code[0] == '\0' ? NULL : notice_code);
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+
+    if (body == NULL) {
+        fprintf(stderr, "Admin-Kalender konnte nicht erzeugt werden: %s\n",
+                admin_calendar_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static bool request_has_valid_admin_csrf(string *request)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
+    form_value_result result = form_urlencoded_get(
+            request,
+            "csrf_token",
+            csrf_token,
+            sizeof(csrf_token));
+    bool valid = result == FORM_VALUE_OK && form_csrf_token_matches(csrf_token);
+
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    return valid;
+}
+
+static string *handle_admin_calendar_bad_request(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>400 Bad Request</title></head><body>"
+            "<h1>Ungültige Kalenderangabe</h1>"
+            "<p>Die Änderung wurde nicht gespeichert. Bitte prüfe die Eingaben.</p>"
+            "<p><a href=\"/admin/calendar\">Zurück zum Kalender</a></p>"
+            "</body></html>";
+
+    return build_response_text(
+            "400 Bad Request",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            body,
+            true);
+}
+
+static string *handle_admin_calendar_not_found(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>404 Nicht gefunden</title></head><body>"
+            "<h1>Eintrag nicht gefunden</h1>"
+            "<p>Der Kalender-Eintrag existiert nicht mehr.</p>"
+            "<p><a href=\"/admin/calendar\">Zurück zum Kalender</a></p>"
+            "</body></html>";
+
+    return build_response_text(
+            "404 Not Found",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            body,
+            true);
+}
+
+static string *handle_admin_calendar_redirect(const char *saved_code)
+{
+    char headers[512];
+    char body[512];
+    int headers_written;
+    int body_written;
+
+    if (saved_code == NULL || saved_code[0] == '\0') {
+        return handle_internal_error(true);
+    }
+
+    headers_written = snprintf(
+            headers,
+            sizeof(headers),
+            "Location: /admin/calendar?saved=%s\r\n%s",
+            saved_code,
+            admin_security_headers());
+    body_written = snprintf(
+            body,
+            sizeof(body),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<title>Kalender gespeichert</title></head><body>"
+            "<p>Die Kalenderänderung wurde gespeichert.</p>"
+            "<p><a href=\"/admin/calendar\">Zurück zum Kalender</a></p>"
+            "</body></html>");
+
+    if (headers_written < 0 || (size_t)headers_written >= sizeof(headers) ||
+        body_written < 0 || (size_t)body_written >= sizeof(body)) {
+        return handle_internal_error(true);
+    }
+
+    return build_response_text(
+            "303 See Other",
+            "text/html; charset=utf-8",
+            headers,
+            body,
+            true);
+}
+
+typedef admin_calendar_result (*admin_calendar_action)(const string *request);
+
+static string *handle_admin_calendar_post(
+        string *request,
+        admin_calendar_action action,
+        const char *saved_code
+)
+{
+    admin_calendar_result result;
+
+    if (!request_has_valid_admin_csrf(request)) {
+        return handle_admin_action_forbidden();
+    }
+
+    result = action(request);
+    if (result == ADMIN_CALENDAR_OK) {
+        return handle_admin_calendar_redirect(saved_code);
+    }
+    if (result == ADMIN_CALENDAR_BAD_REQUEST) {
+        return handle_admin_calendar_bad_request();
+    }
+    if (result == ADMIN_CALENDAR_NOT_FOUND) {
+        return handle_admin_calendar_not_found();
+    }
+
+    fprintf(stderr, "Admin-Kalenderänderung fehlgeschlagen: %s\n",
+            admin_calendar_last_error());
+    return handle_internal_error(true);
+}
+
 string *process(string *request)
 {
     char method[MAX_METHOD_LENGTH + 1];
@@ -1436,6 +1610,43 @@ string *process(string *request)
             return handle_admin_booking_status_post(request);
         }
 
+        if (strncmp(path, "/admin/calendar/", strlen("/admin/calendar/")) == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+
+            if (strcmp(path, "/admin/calendar/settings") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_update_settings,
+                        "settings");
+            }
+            if (strcmp(path, "/admin/calendar/hours") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_update_opening_hours,
+                        "hours");
+            }
+            if (strcmp(path, "/admin/calendar/service") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_update_service,
+                        "service");
+            }
+            if (strcmp(path, "/admin/calendar/closure/add") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_add_closure,
+                        "closure-added");
+            }
+            if (strcmp(path, "/admin/calendar/closure/delete") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_delete_closure,
+                        "closure-deleted");
+            }
+        }
+
         return handle_not_found(true);
     }
 
@@ -1453,6 +1664,14 @@ string *process(string *request)
      */
     if (strcmp(path, "/setup/admin") == 0) {
         return handle_admin_setup_page(send_body);
+    }
+
+    if (strcmp(path, "/admin/calendar") == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+
+        return handle_admin_calendar_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/bookings") == 0) {

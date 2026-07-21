@@ -89,3 +89,8 @@ Nach Phase 1 enthält eine neue Datenbank keine Öffnungszeiten. Der öffentlich
 Kalender zeigt deshalb zunächst keine freien Termine. Phase 3 ergänzt die
 Admin-Oberfläche zum Konfigurieren von Öffnungszeiten, Urlaub, Leistungen und
 Buchungsregeln.
+
+
+## Fortsetzung
+
+Die in diesem Dokument angekündigte Admin-Konfiguration wurde in `CALENDAR_PHASE3.md` umgesetzt.

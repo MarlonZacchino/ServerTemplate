@@ -802,7 +802,7 @@ string *build_booking_admin_page(
             "    <header class=\"site-header\">\n"
             "        <div class=\"container nav-wrap\">\n"
             "            <a class=\"brand\" href=\"/\"><span class=\"brand-mark\">S4D</span><span>Styles 4 Dogs</span></a>\n"
-            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a></nav>\n"
+            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a><a href=\"/admin/calendar\">Kalender</a></nav>\n"
             "        </div>\n"
             "    </header>\n"
             "    <main class=\"page admin-page\">\n"

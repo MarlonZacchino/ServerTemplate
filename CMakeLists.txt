@@ -80,6 +80,7 @@ add_executable(Server
         calendar_database.c
         availability.c
         calendar_public.c
+        admin_calendar.c
 )
 
 add_executable(create_admin_user

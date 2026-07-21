@@ -826,7 +826,9 @@ cleanup:
     return result;
 }
 
-int calendar_database_for_each_active_service(
+static int for_each_service_query(
+        const char *sql,
+        const char *error_context,
         calendar_service_callback callback,
         void *context
 )
@@ -834,19 +836,18 @@ int calendar_database_for_each_active_service(
     sqlite3_stmt *statement = NULL;
     int step_result;
 
-    if (calendar_database == NULL || callback == NULL) {
+    if (calendar_database == NULL || callback == NULL || sql == NULL) {
         set_error("Kalender-Datenbank oder Service-Callback fehlt");
         return -1;
     }
 
     if (sqlite3_prepare_v2(
             calendar_database,
-            "SELECT id, code, name, duration_minutes, buffer_minutes, active, sort_order "
-            "FROM services WHERE active = 1 ORDER BY sort_order, name, id;",
+            sql,
             -1,
             &statement,
             NULL) != SQLITE_OK) {
-        set_sqlite_error("Aktive Leistungen konnten nicht vorbereitet werden");
+        set_sqlite_error(error_context);
         return -1;
     }
 
@@ -871,13 +872,39 @@ int calendar_database_for_each_active_service(
     }
 
     if (step_result != SQLITE_DONE) {
-        set_sqlite_error("Aktive Leistungen konnten nicht vollständig gelesen werden");
+        set_sqlite_error(error_context);
         sqlite3_finalize(statement);
         return -1;
     }
 
     sqlite3_finalize(statement);
     return 0;
+}
+
+int calendar_database_for_each_service(
+        calendar_service_callback callback,
+        void *context
+)
+{
+    return for_each_service_query(
+            "SELECT id, code, name, duration_minutes, buffer_minutes, active, sort_order "
+            "FROM services ORDER BY sort_order, name, id;",
+            "Leistungen konnten nicht gelesen werden",
+            callback,
+            context);
+}
+
+int calendar_database_for_each_active_service(
+        calendar_service_callback callback,
+        void *context
+)
+{
+    return for_each_service_query(
+            "SELECT id, code, name, duration_minutes, buffer_minutes, active, sort_order "
+            "FROM services WHERE active = 1 ORDER BY sort_order, name, id;",
+            "Aktive Leistungen konnten nicht gelesen werden",
+            callback,
+            context);
 }
 
 int calendar_database_clear_opening_hours(void)
@@ -888,6 +915,43 @@ int calendar_database_clear_opening_hours(void)
     }
 
     return execute_sql("DELETE FROM weekly_opening_hours;");
+}
+
+int calendar_database_clear_opening_hours_for_weekday(int weekday)
+{
+    sqlite3_stmt *statement = NULL;
+    int result = -1;
+
+    if (calendar_database == NULL || weekday < 1 || weekday > 7) {
+        set_error("Ungültiger Wochentag für Öffnungszeiten");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "DELETE FROM weekly_opening_hours WHERE weekday = ?1;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Öffnungszeiten konnten nicht zum Ersetzen vorbereitet werden");
+        return -1;
+    }
+
+    if (sqlite3_bind_int(statement, 1, weekday) != SQLITE_OK) {
+        set_sqlite_error("Wochentag konnte nicht gebunden werden");
+        goto cleanup;
+    }
+
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+        set_sqlite_error("Öffnungszeiten konnten nicht ersetzt werden");
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
 }
 
 int calendar_database_add_opening_period(
@@ -1129,6 +1193,73 @@ int calendar_database_delete_closure(int64_t closure_id)
 cleanup:
     sqlite3_finalize(statement);
     return result;
+}
+
+int calendar_database_for_each_closure(
+        calendar_closure_callback callback,
+        void *context
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (calendar_database == NULL || callback == NULL) {
+        set_error("Kalender-Datenbank oder Sperrzeiten-Callback fehlt");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT id, start_date, end_date, start_minute, end_minute, label "
+            "FROM calendar_closures "
+            "ORDER BY start_date, start_minute, end_date, end_minute, id;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Sperrzeiten konnten nicht vorbereitet werden");
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        calendar_closure closure;
+        const unsigned char *start_date = sqlite3_column_text(statement, 1);
+        const unsigned char *end_date = sqlite3_column_text(statement, 2);
+        const unsigned char *label = sqlite3_column_text(statement, 5);
+
+        memset(&closure, 0, sizeof(closure));
+        closure.id = sqlite3_column_int64(statement, 0);
+        snprintf(
+                closure.start_date,
+                sizeof(closure.start_date),
+                "%s",
+                start_date == NULL ? "" : (const char *)start_date);
+        snprintf(
+                closure.end_date,
+                sizeof(closure.end_date),
+                "%s",
+                end_date == NULL ? "" : (const char *)end_date);
+        closure.start_minute = sqlite3_column_int(statement, 3);
+        closure.end_minute = sqlite3_column_int(statement, 4);
+        snprintf(
+                closure.label,
+                sizeof(closure.label),
+                "%s",
+                label == NULL ? "" : (const char *)label);
+
+        if (callback(&closure, context) != 0) {
+            sqlite3_finalize(statement);
+            return 1;
+        }
+    }
+
+    if (step_result != SQLITE_DONE) {
+        set_sqlite_error("Sperrzeiten konnten nicht vollständig gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
 }
 
 int calendar_database_get_closures_for_date(

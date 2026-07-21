@@ -1217,3 +1217,263 @@ select:focus {
         gap: 0.25rem;
     }
 }
+
+/* Admin-Kalenderverwaltung */
+.admin-calendar-page {
+    display: grid;
+    gap: 24px;
+}
+
+.admin-calendar-intro,
+.admin-calendar-section {
+    width: min(100%, 1180px);
+    margin-inline: auto;
+}
+
+.admin-calendar-jumpnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.admin-calendar-jumpnav a {
+    padding: 9px 13px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.admin-success,
+.admin-warning {
+    padding: 13px 15px;
+    border-radius: 12px;
+    font-weight: 700;
+}
+
+.admin-success {
+    border: 1px solid #8ab394;
+    background: #edf7ef;
+}
+
+.admin-warning {
+    border: 1px solid #d1a35f;
+    background: #fff7e7;
+}
+
+.admin-calendar-section {
+    scroll-margin-top: 100px;
+}
+
+.admin-calendar-section > h2 {
+    margin-bottom: 8px;
+}
+
+.admin-calendar-form,
+.opening-day-form,
+.service-admin-form {
+    display: grid;
+    gap: 18px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 250, 245, 0.72);
+}
+
+.admin-calendar-fields {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.admin-calendar-fields label,
+.opening-period label {
+    display: grid;
+    gap: 7px;
+    font-weight: 700;
+}
+
+.admin-calendar-fields input,
+.admin-calendar-fields select,
+.opening-period input,
+.service-admin-form input {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: white;
+    color: var(--text);
+}
+
+.admin-calendar-wide {
+    grid-column: span 2;
+}
+
+.admin-calendar-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.admin-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 700;
+}
+
+.admin-checkbox input {
+    width: 20px;
+    height: 20px;
+    min-height: 0;
+}
+
+.opening-days,
+.service-admin-list,
+.closure-list {
+    display: grid;
+    gap: 16px;
+    margin-top: 22px;
+}
+
+.opening-day-form {
+    grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1.65fr) auto;
+    align-items: center;
+}
+
+.opening-day-form h3 {
+    margin: 0;
+}
+
+.opening-period-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.opening-period {
+    display: grid;
+    grid-template-columns: auto minmax(110px, 1fr) minmax(110px, 1fr);
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: white;
+}
+
+.opening-period > span {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.opening-day-form .admin-calendar-hint,
+.opening-day-form .admin-warning {
+    grid-column: 2;
+}
+
+.service-admin-form {
+    gap: 16px;
+}
+
+.service-admin-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.service-admin-heading h3 {
+    margin: 0;
+}
+
+.service-admin-heading code {
+    color: var(--muted);
+}
+
+.service-admin-fields {
+    grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(160px, 0.7fr));
+}
+
+.closure-add-form {
+    margin-top: 20px;
+}
+
+.closure-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 250, 245, 0.72);
+}
+
+.closure-card h3,
+.closure-card p {
+    margin: 0;
+}
+
+.closure-card p {
+    color: var(--muted);
+}
+
+.button-danger {
+    border-color: #a94b4b;
+    background: #8b3030;
+    color: white;
+}
+
+.button-danger:hover,
+.button-danger:focus-visible {
+    background: #6f2424;
+}
+
+@media (max-width: 980px) {
+    .admin-calendar-fields,
+    .service-admin-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .opening-day-form {
+        grid-template-columns: 1fr;
+    }
+
+    .opening-day-form .admin-calendar-hint,
+    .opening-day-form .admin-warning {
+        grid-column: 1;
+    }
+}
+
+@media (max-width: 700px) {
+    .admin-calendar-fields,
+    .service-admin-fields,
+    .opening-period-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-calendar-wide {
+        grid-column: auto;
+    }
+
+    .opening-period {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .service-admin-heading,
+    .closure-card {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .closure-card form,
+    .closure-card .button {
+        width: 100%;
+    }
+}
