@@ -184,6 +184,29 @@ int main(void)
 
     expect_int(booking_database_insert(&old_request), 0, "Bestehende Anfrage wird vor Migration gespeichert");
 
+    /*
+     * Simuliert eine echte Phase-3-Datenbank. Die Tabelle existiert bereits,
+     * besitzt aber die in Phase 4 ergänzte Spalte auto_confirm_bookings noch
+     * nicht. Die Migration muss die Spalte vor dem Phase-4-Seed hinzufügen.
+     */
+    expect_int(execute_direct_sql(
+            "CREATE TABLE calendar_settings ("
+            "    id INTEGER PRIMARY KEY CHECK(id = 1),"
+            "    timezone TEXT NOT NULL,"
+            "    min_notice_minutes INTEGER NOT NULL,"
+            "    booking_horizon_days INTEGER NOT NULL,"
+            "    slot_interval_minutes INTEGER NOT NULL,"
+            "    pending_hold_minutes INTEGER NOT NULL,"
+            "    capacity INTEGER NOT NULL DEFAULT 1"
+            ");"
+            "INSERT INTO calendar_settings("
+            "    id, timezone, min_notice_minutes, booking_horizon_days,"
+            "    slot_interval_minutes, pending_hold_minutes, capacity"
+            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1);"
+            "PRAGMA user_version = 3;"),
+            0,
+            "Phase-3-Kalendereinstellungen werden für Migration vorbereitet");
+
     if (calendar_database_initialize() != 0) {
         fprintf(stderr, "Kalenderdatenbankfehler: %s\n", calendar_database_last_error());
         booking_database_shutdown();

@@ -506,8 +506,8 @@ static int migrate_schema(void)
     }
 
     if (create_calendar_tables() != 0 ||
-        seed_calendar_defaults() != 0 ||
         migrate_booking_columns() != 0 ||
+        seed_calendar_defaults() != 0 ||
         create_booking_calendar_guards() != 0 ||
         execute_sql("PRAGMA user_version = 4;") != 0 ||
         execute_sql("COMMIT;") != 0) {
