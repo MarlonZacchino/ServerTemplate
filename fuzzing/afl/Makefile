@@ -7,6 +7,7 @@ ASAN_BUILD_DIR := $(PROJECT_ROOT)/cmake-build-afl-asan
 AFL_INSTANCES ?= 4
 
 .PHONY: help check all build asan run fresh run-asan parallel parallel-asan \
+        calendar-build calendar-run calendar-fresh calendar-crashes calendar-hangs \
         status crashes hangs replay clean clean-build clean-all
 
 help:
@@ -20,6 +21,11 @@ help:
 		'make run-asan                   ASan/UBSan-AFL-Build starten' \
 		'make parallel AFL_INSTANCES=4   Mehrere AFL-Instanzen starten' \
 		'make parallel-asan              Mehrere ASan/UBSan-Instanzen starten' \
+		'make calendar-build             Kalender-Verfügbarkeitsziel bauen' \
+		'make calendar-run               Kalender-Verfügbarkeitsziel fuzzing' \
+		'make calendar-fresh             Neuen Kalender-Fuzzing-Lauf starten' \
+		'make calendar-crashes           Kalender-Crashes auflisten' \
+		'make calendar-hangs             Kalender-Hänger auflisten' \
 		'make status                     AFL-Status anzeigen' \
 		'make crashes                    Gefundene Crashes auflisten' \
 		'make hangs                      Gefundene Hänger auflisten' \
@@ -60,6 +66,21 @@ parallel: build
 
 parallel-asan: asan
 	AFL_BUILD_DIR="$(ASAN_BUILD_DIR)" AFL_INSTANCES="$(AFL_INSTANCES)" ./run_parallel.sh
+
+calendar-build: check
+	./build_calendar.sh
+
+calendar-run: calendar-build
+	./run_calendar.sh
+
+calendar-fresh: clean calendar-build
+	./run_calendar.sh
+
+calendar-crashes:
+	@find calendar_out -path '*/crashes/*' -type f ! -name README.txt 2>/dev/null || true
+
+calendar-hangs:
+	@find calendar_out -path '*/hangs/*' -type f ! -name README.txt 2>/dev/null || true
 
 status:
 	./status.sh

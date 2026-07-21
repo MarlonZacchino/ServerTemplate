@@ -1,0 +1,1 @@
+service=wash_dry&date=2026-08-03&current_date=2026-08-01&current_minute=600&now_utc=2026-08-01T10%3A00%3A00Z

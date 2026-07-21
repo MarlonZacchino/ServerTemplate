@@ -68,7 +68,21 @@ chmod 600 "$LEGACY_BOOKING_FILE"
 cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug
 
-cmake --build "$BUILD_DIR" --target Server
+cmake --build "$BUILD_DIR" --target Server calendar_engine_tests
+
+CALENDAR_TEST_RUNTIME="$BUILD_DIR/calendar-engine-runtime"
+rm -rf -- "$CALENDAR_TEST_RUNTIME"
+mkdir -p -- "$CALENDAR_TEST_RUNTIME/secrets" "$CALENDAR_TEST_RUNTIME/data"
+
+env \
+    "STYLES4DOGS_BIND_ADDRESS=$TEST_HOST" \
+    "STYLES4DOGS_PORT=$TEST_PORT" \
+    "STYLES4DOGS_DOCUMENT_ROOT=$PROJECT_ROOT/public" \
+    "STYLES4DOGS_SECRETS_DIR=$CALENDAR_TEST_RUNTIME/secrets" \
+    "STYLES4DOGS_DATA_DIR=$CALENDAR_TEST_RUNTIME/data" \
+    "STYLES4DOGS_DATABASE_FILE=$CALENDAR_TEST_RUNTIME/data/calendar-engine.db" \
+    "STYLES4DOGS_LEGACY_BOOKING_FILE=$CALENDAR_TEST_RUNTIME/data/no-legacy-file.txt" \
+    "$BUILD_DIR/calendar_engine_tests"
 
 : > "$SERVER_LOG"
 env "${SERVER_ENV[@]}" \

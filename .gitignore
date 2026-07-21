@@ -16,3 +16,6 @@ fuzzing/afl/sync/
 fuzzing/afl/logs/
 __pycache__/
 *.pyc
+
+# AFL++ calendar engine results
+fuzzing/afl/calendar_out/

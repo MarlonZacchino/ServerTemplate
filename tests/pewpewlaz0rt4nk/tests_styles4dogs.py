@@ -129,12 +129,33 @@ def run_stateful_tests() -> int:
         database_file = Path(database_file_value)
 
         with sqlite3.connect(database_file) as connection:
+            schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if schema_version != 3:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 3, erhalten {schema_version}")
+
+            required_tables = {
+                "services",
+                "calendar_settings",
+                "weekly_opening_hours",
+                "calendar_closures",
+            }
+            existing_tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if not required_tables.issubset(existing_tables):
+                missing = sorted(required_tables - existing_tables)
+                raise AssertionError(f"Kalendertabellen fehlen: {missing}")
+
             before_count = connection.execute(
                 "SELECT COUNT(*) FROM bookings"
             ).fetchone()[0]
 
             legacy_row = connection.execute(
-                "SELECT status, customer_name, contact, dog_name, message, legacy "
+                "SELECT status, customer_name, contact, dog_name, message, legacy, "
+                "       decision_status, appointment_date "
                 "FROM bookings WHERE customer_name = ?",
                 ("Legacy Test",),
             ).fetchone()
@@ -146,16 +167,27 @@ def run_stateful_tests() -> int:
                 "Waldi",
                 "Frühere Anfrage",
                 1,
+                "legacy",
+                None,
             ):
                 raise AssertionError("Das frühere fünfspaltige TSV-Format wurde nicht korrekt importiert")
 
             imported_v2 = connection.execute(
-                "SELECT status, dog_size, service, preferred_date, legacy "
+                "SELECT status, dog_size, service, preferred_date, legacy, "
+                "       decision_status, appointment_date "
                 "FROM bookings WHERE customer_name = ?",
                 ("TSV V2 Test",),
             ).fetchone()
 
-            if imported_v2 != ("neu", "small", "wash_dry", "2026-08-12", 0):
+            if imported_v2 != (
+                "neu",
+                "small",
+                "wash_dry",
+                "2026-08-12",
+                0,
+                "legacy",
+                None,
+            ):
                 raise AssertionError("Das TSV-v2-Format wurde nicht korrekt importiert")
 
             migration_marker = connection.execute(
@@ -199,7 +231,8 @@ def run_stateful_tests() -> int:
 
             row = connection.execute(
                 "SELECT status, customer_name, contact, dog_name, dog_size, service, "
-                "preferred_date, message, legacy "
+                "preferred_date, message, legacy, decision_status, appointment_date, "
+                "service_id IS NOT NULL "
                 "FROM bookings ORDER BY id DESC LIMIT 1"
             ).fetchone()
 
@@ -213,6 +246,9 @@ def run_stateful_tests() -> int:
             "2026-08-20",
             "Zeile 1\nZeile 2",
             0,
+            "legacy",
+            None,
+            1,
         )
 
         if row != expected:

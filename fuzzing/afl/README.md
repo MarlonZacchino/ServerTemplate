@@ -93,3 +93,25 @@ gültigen proxied Buchungsrequest, damit Header-Parsing und Client-IP-Auflösung
 im instrumentierten Code erreichbar sind. Da jede AFL-Ausführung im
 `stdin`-Modus genau einen Prozesslauf verarbeitet, wird der zustandsbehaftete
 Limiter selbst durch PewPewLaz0rTank regressionsgetestet.
+
+## Eigenes Kalender-Fuzzing-Ziel
+
+Die Verfügbarkeitsengine ist noch nicht öffentlich geroutet. Damit ihre
+Datums-, Service- und Slotlogik trotzdem direkt durch AFL++ erreichbar ist,
+gibt es das separate Ziel `calendar_fuzz_target`.
+
+```bash
+cd fuzzing/afl
+make calendar-build
+make calendar-run
+```
+
+Für einen neuen Lauf:
+
+```bash
+make calendar-fresh
+```
+
+Das Eingabeformat ist ein kleiner URL-encoded Datensatz mit `service`, `date`,
+`current_date`, `current_minute` und `now_utc`. Die Datenbank liegt weiterhin
+nur im Arbeitsspeicher. Funde werden getrennt unter `calendar_out/` abgelegt.

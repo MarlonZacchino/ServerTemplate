@@ -17,9 +17,10 @@ Der Ablauf:
 
 1. konfiguriert `cmake-build-pewpew/`,
 2. setzt isolierte `secrets/`- und `data/`-Ordner über die Runtime-Konfiguration,
-3. startet den Server auf `127.0.0.1:31338`,
-4. führt die HTTP-Regressions- und Zustandsprüfungen aus,
-5. beendet den Testserver automatisch.
+3. führt den isolierten C-Test der Kalender- und Verfügbarkeitsengine aus,
+4. startet den Server auf `127.0.0.1:31338`,
+5. führt die HTTP-Regressions- und Zustandsprüfungen aus,
+6. beendet den Testserver automatisch.
 
 Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 
@@ -45,7 +46,11 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 - Statusfilter und Suche nach Kundenname, Kontakt oder Hund,
 - Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
 - Runtime-Overrides für Port und Pfade,
-- kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root.
+- kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root,
+- Kalenderschema Version 3 und Migration bestehender Buchungen zu `legacy`,
+- Leistungen mit Dauer und Puffer, Wochenöffnungszeiten und Sperrzeiten,
+- Mindestvorlauf, Buchungshorizont und deaktivierbare Leistungen,
+- ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.

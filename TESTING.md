@@ -71,3 +71,32 @@ folgendem Befehl geprüft:
 ```bash
 sudo ./deploy/scripts/verify-caddy.sh
 ```
+
+## Kalender-Engine
+
+Der normale PewPew-Runner baut und startet vor den HTTP-Tests zusätzlich den
+isolierten C-Test `calendar_engine_tests`:
+
+```bash
+./tests/pewpewlaz0rt4nk/run.sh
+```
+
+Er prüft Schema-Version 3, Legacy-Migration, sichere geschlossene Defaults,
+Leistungsdauer und Puffer, Wochenöffnungszeiten, Sperrzeiten,
+Buchungshorizont, Mindestvorlauf, ablaufende Pending-Reservierungen und den
+transaktionssicheren Doppelbuchungsschutz.
+
+Die Verfügbarkeitsengine besitzt außerdem ein eigenes AFL-Ziel:
+
+```bash
+cd fuzzing/afl
+make calendar-build
+make calendar-fresh
+```
+
+Auswertung:
+
+```bash
+make calendar-crashes
+make calendar-hangs
+```
