@@ -185,6 +185,8 @@ calendar_public_result calendar_public_build_services_json(string **out_json)
     append_json_string(json, snapshot.local_date);
     str_cat_cstr(json, ",\"booking_horizon_days\":");
     append_json_int(json, settings.booking_horizon_days);
+    str_cat_cstr(json, ",\"automatic_confirmation\":");
+    str_cat_cstr(json, settings.auto_confirm_bookings ? "true" : "false");
     str_cat_cstr(json, ",\"services\":[");
     context = (services_json_context){.json = json, .first = true};
 
@@ -454,7 +456,13 @@ calendar_public_result calendar_public_reserve_booking(
         return CALENDAR_PUBLIC_ERROR;
     }
 
-    if (calendar_clock_now(settings.timezone, &snapshot) != 0 ||
+    if (calendar_clock_now(settings.timezone, &snapshot) != 0) {
+        set_error("Reservierungszeit konnte nicht bestimmt werden");
+        return CALENDAR_PUBLIC_ERROR;
+    }
+
+    hold_expires_at[0] = '\0';
+    if (!settings.auto_confirm_bookings &&
         calendar_utc_add_minutes(
                 snapshot.now_utc,
                 settings.pending_hold_minutes,
@@ -476,15 +484,23 @@ calendar_public_result calendar_public_reserve_booking(
             .hold_expires_at_utc = hold_expires_at,
             .customer_name = booking->name,
             .contact = booking->contact,
+            .contact_channel = booking->contact_channel,
+            .email = booking->email,
+            .phone_number = booking->phone_number,
+            .phone_kind = booking->phone_kind,
+            .contact_preference = booking->contact_preference,
             .dog_name = booking->dog_name,
             .dog_size = booking->dog_size,
-            .message = booking->message
+            .message = booking->message,
+            .auto_confirm = settings.auto_confirm_bookings
     };
 
     result = availability_reserve_pending(&reservation, out_booking_id);
 
     if (result == AVAILABILITY_RESERVATION_OK) {
-        return CALENDAR_PUBLIC_OK;
+        return settings.auto_confirm_bookings
+                ? CALENDAR_PUBLIC_CONFIRMED
+                : CALENDAR_PUBLIC_OK;
     }
     if (result == AVAILABILITY_RESERVATION_UNAVAILABLE) {
         return CALENDAR_PUBLIC_UNAVAILABLE;

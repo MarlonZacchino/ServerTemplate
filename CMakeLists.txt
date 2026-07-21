@@ -71,6 +71,7 @@ add_executable(Server
         http_lib.c
         process.c
         booking.c
+        contact_validation.c
         booking_database.c
         auth.c
         form_urlencoded.c
@@ -93,6 +94,7 @@ add_executable(calendar_engine_tests EXCLUDE_FROM_ALL
         calendar_time.c
         calendar_database.c
         availability.c
+        contact_validation.c
         server_config.c
 )
 
@@ -106,6 +108,7 @@ add_executable(calendar_fuzz_target EXCLUDE_FROM_ALL
         calendar_time.c
         calendar_database.c
         availability.c
+        contact_validation.c
         server_config.c
         form_urlencoded.c
         http_lib.c

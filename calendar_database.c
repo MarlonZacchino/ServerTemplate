@@ -1,5 +1,6 @@
 #include "calendar_database.h"
 #include "calendar_time.h"
+#include "contact_validation.h"
 #include "server_config.h"
 
 #include <errno.h>
@@ -12,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 3
+#define CALENDAR_SCHEMA_VERSION 4
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -203,6 +204,37 @@ static int ensure_booking_column(
     return execute_sql(sql);
 }
 
+static int ensure_table_column(
+        const char *table_name,
+        const char *column_name,
+        const char *column_definition
+)
+{
+    bool exists;
+    char sql[768];
+    int written;
+
+    if (table_has_column(table_name, column_name, &exists) != 0) {
+        return -1;
+    }
+    if (exists) {
+        return 0;
+    }
+
+    written = snprintf(
+            sql,
+            sizeof(sql),
+            "ALTER TABLE %s ADD COLUMN %s;",
+            table_name,
+            column_definition);
+    if (written < 0 || (size_t)written >= sizeof(sql)) {
+        set_error("Kalender-Migrationsanweisung ist zu lang");
+        return -1;
+    }
+
+    return execute_sql(sql);
+}
+
 static int create_calendar_tables(void)
 {
     static const char *sql =
@@ -228,7 +260,9 @@ static int create_calendar_tables(void)
             "        CHECK(slot_interval_minutes IN (5, 10, 15, 20, 30, 60)),"
             "    pending_hold_minutes INTEGER NOT NULL "
             "        CHECK(pending_hold_minutes BETWEEN 5 AND 10080),"
-            "    capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity = 1)"
+            "    capacity INTEGER NOT NULL DEFAULT 1 CHECK(capacity = 1),"
+            "    auto_confirm_bookings INTEGER NOT NULL DEFAULT 0 "
+            "        CHECK(auto_confirm_bookings IN (0, 1))"
             ");"
             "CREATE TABLE IF NOT EXISTS weekly_opening_hours ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -263,8 +297,8 @@ static int seed_calendar_defaults(void)
     static const char *sql =
             "INSERT OR IGNORE INTO calendar_settings("
             "    id, timezone, min_notice_minutes, booking_horizon_days,"
-            "    slot_interval_minutes, pending_hold_minutes, capacity"
-            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1);"
+            "    slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings"
+            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1, 0);"
             "INSERT OR IGNORE INTO services("
             "    code, name, duration_minutes, buffer_minutes, active, sort_order"
             ") VALUES"
@@ -305,7 +339,35 @@ static int migrate_booking_columns(void)
             "decision_at TEXT") != 0 ||
         ensure_booking_column(
             "rejection_reason",
-            "rejection_reason TEXT NOT NULL DEFAULT ''") != 0) {
+            "rejection_reason TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "contact_channel",
+            "contact_channel TEXT NOT NULL DEFAULT 'legacy'") != 0 ||
+        ensure_booking_column(
+            "email",
+            "email TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "phone_number",
+            "phone_number TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "phone_kind",
+            "phone_kind TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "contact_preference",
+            "contact_preference TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "service_name_snapshot",
+            "service_name_snapshot TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "service_duration_minutes_snapshot",
+            "service_duration_minutes_snapshot INTEGER") != 0 ||
+        ensure_booking_column(
+            "service_buffer_minutes_snapshot",
+            "service_buffer_minutes_snapshot INTEGER") != 0 ||
+        ensure_table_column(
+            "calendar_settings",
+            "auto_confirm_bookings",
+            "auto_confirm_bookings INTEGER NOT NULL DEFAULT 0 CHECK(auto_confirm_bookings IN (0, 1))") != 0) {
         return -1;
     }
 
@@ -419,7 +481,14 @@ static int create_booking_calendar_guards(void)
             "SET service_id = ("
             "    SELECT services.id FROM services WHERE services.code = bookings.service"
             ") "
-            "WHERE service_id IS NULL AND service <> '';";
+            "WHERE service_id IS NULL AND service <> '';"
+            "UPDATE bookings "
+            "SET service_name_snapshot = COALESCE((SELECT name FROM services WHERE id = bookings.service_id), service) "
+            "WHERE service_name_snapshot = '';"
+            "UPDATE bookings "
+            "SET service_duration_minutes_snapshot = (SELECT duration_minutes FROM services WHERE id = bookings.service_id), "
+            "    service_buffer_minutes_snapshot = (SELECT buffer_minutes FROM services WHERE id = bookings.service_id) "
+            "WHERE service_id IS NOT NULL AND service_duration_minutes_snapshot IS NULL;";
 
     if (execute_sql(status_and_appointment_sql) != 0 ||
         execute_sql(schedule_and_overlap_sql) != 0 ||
@@ -440,7 +509,7 @@ static int migrate_schema(void)
         seed_calendar_defaults() != 0 ||
         migrate_booking_columns() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 3;") != 0 ||
+        execute_sql("PRAGMA user_version = 4;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -592,7 +661,7 @@ int calendar_database_get_settings(calendar_settings *settings)
     if (sqlite3_prepare_v2(
             calendar_database,
             "SELECT timezone, min_notice_minutes, booking_horizon_days, "
-            "       slot_interval_minutes, pending_hold_minutes, capacity "
+            "       slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings "
             "FROM calendar_settings WHERE id = 1;",
             -1,
             &statement,
@@ -619,6 +688,7 @@ int calendar_database_get_settings(calendar_settings *settings)
     settings->slot_interval_minutes = sqlite3_column_int(statement, 3);
     settings->pending_hold_minutes = sqlite3_column_int(statement, 4);
     settings->capacity = sqlite3_column_int(statement, 5);
+    settings->auto_confirm_bookings = sqlite3_column_int(statement, 6) != 0;
 
     sqlite3_finalize(statement);
     return 0;
@@ -638,7 +708,8 @@ int calendar_database_update_settings(const calendar_settings *settings)
             calendar_database,
             "UPDATE calendar_settings "
             "SET timezone = ?1, min_notice_minutes = ?2, booking_horizon_days = ?3, "
-            "    slot_interval_minutes = ?4, pending_hold_minutes = ?5, capacity = ?6 "
+            "    slot_interval_minutes = ?4, pending_hold_minutes = ?5, capacity = ?6, "
+            "    auto_confirm_bookings = ?7 "
             "WHERE id = 1;",
             -1,
             &statement,
@@ -652,7 +723,8 @@ int calendar_database_update_settings(const calendar_settings *settings)
         sqlite3_bind_int(statement, 3, settings->booking_horizon_days) != SQLITE_OK ||
         sqlite3_bind_int(statement, 4, settings->slot_interval_minutes) != SQLITE_OK ||
         sqlite3_bind_int(statement, 5, settings->pending_hold_minutes) != SQLITE_OK ||
-        sqlite3_bind_int(statement, 6, settings->capacity) != SQLITE_OK) {
+        sqlite3_bind_int(statement, 6, settings->capacity) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 7, settings->auto_confirm_bookings ? 1 : 0) != SQLITE_OK) {
         set_sqlite_error("Kalendereinstellungen konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -820,6 +892,137 @@ int calendar_database_update_service(const calendar_service *service)
     }
 
     result = sqlite3_changes(calendar_database) == 1 ? 0 : 1;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
+}
+
+
+int calendar_database_add_service(const calendar_service *service)
+{
+    sqlite3_stmt *statement = NULL;
+    int result = -1;
+
+    if (calendar_database == NULL || !service_is_valid(service)) {
+        set_error("Ungültige neue Leistung");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "INSERT INTO services(code, name, duration_minutes, buffer_minutes, active, sort_order) "
+            "VALUES(?1, ?2, ?3, ?4, ?5, "
+            "       COALESCE((SELECT MAX(sort_order) + 10 FROM services), 10));",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Neue Leistung konnte nicht vorbereitet werden");
+        return -1;
+    }
+
+    if (sqlite3_bind_text(statement, 1, service->code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, service->name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 3, service->duration_minutes) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 4, service->buffer_minutes) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 5, service->active ? 1 : 0) != SQLITE_OK) {
+        set_sqlite_error("Neue Leistungswerte konnten nicht gebunden werden");
+        goto cleanup;
+    }
+
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+        if (sqlite3_extended_errcode(calendar_database) == SQLITE_CONSTRAINT_UNIQUE) {
+            set_error("Dieser Leistungsschlüssel ist bereits vergeben");
+            result = 1;
+        } else {
+            set_sqlite_error("Neue Leistung konnte nicht gespeichert werden");
+        }
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
+}
+
+calendar_service_delete_result calendar_database_delete_service(const char *code)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+    int64_t service_id;
+    int64_t usage_count;
+    calendar_service_delete_result result = CALENDAR_SERVICE_DELETE_ERROR;
+
+    if (calendar_database == NULL || !service_code_is_valid(code)) {
+        set_error("Ungültiger Leistungsschlüssel");
+        return CALENDAR_SERVICE_DELETE_ERROR;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT services.id, COUNT(bookings.id) "
+            "FROM services LEFT JOIN bookings ON bookings.service_id = services.id "
+            "WHERE services.code = ?1 GROUP BY services.id;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Leistungsnutzung konnte nicht geprüft werden");
+        sqlite3_finalize(statement);
+        return CALENDAR_SERVICE_DELETE_ERROR;
+    }
+
+    step_result = sqlite3_step(statement);
+    if (step_result == SQLITE_DONE) {
+        sqlite3_finalize(statement);
+        return CALENDAR_SERVICE_DELETE_NOT_FOUND;
+    }
+    if (step_result != SQLITE_ROW) {
+        set_sqlite_error("Leistungsnutzung konnte nicht gelesen werden");
+        sqlite3_finalize(statement);
+        return CALENDAR_SERVICE_DELETE_ERROR;
+    }
+
+    service_id = sqlite3_column_int64(statement, 0);
+    usage_count = sqlite3_column_int64(statement, 1);
+    sqlite3_finalize(statement);
+    statement = NULL;
+
+    if (usage_count > 0) {
+        if (sqlite3_prepare_v2(
+                calendar_database,
+                "UPDATE services SET active = 0 WHERE id = ?1;",
+                -1,
+                &statement,
+                NULL) != SQLITE_OK ||
+            sqlite3_bind_int64(statement, 1, service_id) != SQLITE_OK) {
+            set_sqlite_error("Verwendete Leistung konnte nicht archiviert werden");
+            goto cleanup;
+        }
+        if (sqlite3_step(statement) != SQLITE_DONE || sqlite3_changes(calendar_database) != 1) {
+            set_sqlite_error("Verwendete Leistung konnte nicht archiviert werden");
+            goto cleanup;
+        }
+        result = CALENDAR_SERVICE_DELETE_ARCHIVED;
+    } else {
+        if (sqlite3_prepare_v2(
+                calendar_database,
+                "DELETE FROM services WHERE id = ?1;",
+                -1,
+                &statement,
+                NULL) != SQLITE_OK ||
+            sqlite3_bind_int64(statement, 1, service_id) != SQLITE_OK) {
+            set_sqlite_error("Leistung konnte nicht gelöscht werden");
+            goto cleanup;
+        }
+        if (sqlite3_step(statement) != SQLITE_DONE || sqlite3_changes(calendar_database) != 1) {
+            set_sqlite_error("Leistung konnte nicht gelöscht werden");
+            goto cleanup;
+        }
+        result = CALENDAR_SERVICE_DELETE_OK;
+    }
 
 cleanup:
     sqlite3_finalize(statement);
@@ -1464,9 +1667,22 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
 {
     if (booking == NULL ||
         !calendar_utc_timestamp_is_valid(booking->created_at_utc) ||
-        !calendar_utc_timestamp_is_valid(booking->hold_expires_at_utc) ||
+        (!booking->auto_confirm &&
+         (!calendar_utc_timestamp_is_valid(booking->hold_expires_at_utc) ||
+          strcmp(booking->created_at_utc, booking->hold_expires_at_utc) >= 0)) ||
         booking->customer_name == NULL || booking->customer_name[0] == '\0' ||
         booking->contact == NULL || booking->contact[0] == '\0' ||
+        !contact_fields_are_valid(
+                booking->contact_channel,
+                booking->email,
+                booking->phone_number,
+                booking->phone_kind,
+                booking->contact_preference) ||
+        !contact_aggregate_matches_fields(
+                booking->contact,
+                booking->contact_channel,
+                booking->email,
+                booking->phone_number) ||
         !service_code_is_valid(booking->service_code) ||
         !calendar_date_is_valid(booking->appointment_date) ||
         booking->start_minute < 0 || booking->start_minute > 1439 ||
@@ -1477,7 +1693,7 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
         return false;
     }
 
-    return strcmp(booking->created_at_utc, booking->hold_expires_at_utc) < 0;
+    return true;
 }
 
 int calendar_database_insert_pending(
@@ -1489,7 +1705,7 @@ int calendar_database_insert_pending(
     int result = -1;
 
     if (calendar_database == NULL || !pending_booking_is_valid(booking)) {
-        set_error("Ungültige vorläufige Terminreservierung");
+        set_error("Ungültige Terminreservierung");
         return -1;
     }
 
@@ -1499,16 +1715,23 @@ int calendar_database_insert_pending(
             "    created_at, status, customer_name, contact, dog_name, dog_size,"
             "    service, preferred_date, message, legacy, service_id,"
             "    appointment_date, start_minute, end_minute, blocked_until_minute,"
-            "    decision_status, hold_expires_at, rejection_reason"
+            "    decision_status, hold_expires_at, decision_at, rejection_reason,"
+            "    contact_channel, email, phone_number, phone_kind, contact_preference,"
+            "    service_name_snapshot, service_duration_minutes_snapshot,"
+            "    service_buffer_minutes_snapshot"
             ") "
             "SELECT ?1, 'neu', ?2, ?3, ?4, ?5, services.code, ?6, ?7, 0, services.id,"
-            "       ?6, ?8, ?9, ?10, 'pending', ?11, '' "
+            "       ?6, ?8, ?9, ?10, CASE WHEN ?11 = 1 THEN 'confirmed' ELSE 'pending' END,"
+            "       CASE WHEN ?11 = 1 THEN NULL ELSE ?12 END,"
+            "       CASE WHEN ?11 = 1 THEN ?1 ELSE NULL END, '',"
+            "       ?13, ?14, ?15, ?16, ?17, services.name, services.duration_minutes,"
+            "       services.buffer_minutes "
             "FROM services "
-            "WHERE services.code = ?12 AND services.active = 1;",
+            "WHERE services.code = ?18 AND services.active = 1;",
             -1,
             &statement,
             NULL) != SQLITE_OK) {
-        set_sqlite_error("Vorläufige Reservierung konnte nicht vorbereitet werden");
+        set_sqlite_error("Terminreservierung konnte nicht vorbereitet werden");
         return -1;
     }
 
@@ -1522,14 +1745,22 @@ int calendar_database_insert_pending(
         sqlite3_bind_int(statement, 8, booking->start_minute) != SQLITE_OK ||
         sqlite3_bind_int(statement, 9, booking->end_minute) != SQLITE_OK ||
         sqlite3_bind_int(statement, 10, booking->blocked_until_minute) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 11, booking->hold_expires_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 12, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
-        set_sqlite_error("Vorläufige Reservierungswerte konnten nicht gebunden werden");
+        sqlite3_bind_int(statement, 11, booking->auto_confirm ? 1 : 0) != SQLITE_OK ||
+        (booking->auto_confirm
+         ? sqlite3_bind_null(statement, 12)
+         : sqlite3_bind_text(statement, 12, booking->hold_expires_at_utc, -1, SQLITE_TRANSIENT)) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 13, booking->contact_channel, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 14, booking->email, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 15, booking->phone_number, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 16, booking->phone_kind, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 17, booking->contact_preference, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 18, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Terminreservierungswerte konnten nicht gebunden werden");
         goto cleanup;
     }
 
     if (sqlite3_step(statement) != SQLITE_DONE) {
-        set_sqlite_error("Vorläufige Reservierung konnte nicht gespeichert werden");
+        set_sqlite_error("Terminreservierung konnte nicht gespeichert werden");
         goto cleanup;
     }
 
@@ -1545,5 +1776,111 @@ int calendar_database_insert_pending(
 
 cleanup:
     sqlite3_finalize(statement);
+    return result;
+}
+
+calendar_booking_decision_result calendar_database_decide_booking(
+        int64_t booking_id,
+        bool accept,
+        const char *decision_at_utc,
+        const char *rejection_reason
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+    const char *current_status;
+    const char *hold_expires_at;
+    calendar_booking_decision_result result = CALENDAR_BOOKING_DECISION_ERROR;
+
+    if (calendar_database == NULL || booking_id <= 0 ||
+        !calendar_utc_timestamp_is_valid(decision_at_utc) ||
+        rejection_reason == NULL) {
+        set_error("Ungültige Terminentscheidung");
+        return CALENDAR_BOOKING_DECISION_ERROR;
+    }
+
+    if (calendar_database_begin_immediate() != 0) {
+        return CALENDAR_BOOKING_DECISION_ERROR;
+    }
+
+    if (calendar_database_expire_pending(decision_at_utc) != 0) {
+        calendar_database_rollback();
+        return CALENDAR_BOOKING_DECISION_ERROR;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT decision_status, COALESCE(hold_expires_at, '') "
+            "FROM bookings WHERE id = ?1;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 1, booking_id) != SQLITE_OK) {
+        set_sqlite_error("Terminanfrage konnte nicht zur Entscheidung geladen werden");
+        goto rollback;
+    }
+
+    step_result = sqlite3_step(statement);
+    if (step_result == SQLITE_DONE) {
+        result = CALENDAR_BOOKING_DECISION_NOT_FOUND;
+        goto rollback;
+    }
+    if (step_result != SQLITE_ROW) {
+        set_sqlite_error("Terminanfrage konnte nicht gelesen werden");
+        goto rollback;
+    }
+
+    current_status = (const char *)sqlite3_column_text(statement, 0);
+    hold_expires_at = (const char *)sqlite3_column_text(statement, 1);
+
+    if (current_status == NULL || strcmp(current_status, "expired") == 0 ||
+        (hold_expires_at != NULL && hold_expires_at[0] != '\0' &&
+         strcmp(hold_expires_at, decision_at_utc) <= 0)) {
+        result = CALENDAR_BOOKING_DECISION_EXPIRED;
+        goto rollback;
+    }
+    if (strcmp(current_status, "pending") != 0) {
+        result = CALENDAR_BOOKING_DECISION_NOT_PENDING;
+        goto rollback;
+    }
+
+    sqlite3_finalize(statement);
+    statement = NULL;
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            accept
+                ? "UPDATE bookings SET decision_status = 'confirmed', decision_at = ?1, "
+                  "hold_expires_at = NULL, rejection_reason = '' WHERE id = ?2 AND decision_status = 'pending';"
+                : "UPDATE bookings SET decision_status = 'rejected', decision_at = ?1, "
+                  "hold_expires_at = NULL, rejection_reason = ?3 WHERE id = ?2 AND decision_status = 'pending';",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, decision_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 2, booking_id) != SQLITE_OK ||
+        (!accept && sqlite3_bind_text(statement, 3, rejection_reason, -1, SQLITE_TRANSIENT) != SQLITE_OK)) {
+        set_sqlite_error("Terminentscheidung konnte nicht vorbereitet werden");
+        goto rollback;
+    }
+
+    if (sqlite3_step(statement) != SQLITE_DONE || sqlite3_changes(calendar_database) != 1) {
+        set_sqlite_error("Terminentscheidung konnte nicht gespeichert werden");
+        goto rollback;
+    }
+
+    sqlite3_finalize(statement);
+    statement = NULL;
+
+    if (calendar_database_commit() != 0) {
+        calendar_database_rollback();
+        return CALENDAR_BOOKING_DECISION_ERROR;
+    }
+
+    return CALENDAR_BOOKING_DECISION_OK;
+
+rollback:
+    sqlite3_finalize(statement);
+    calendar_database_rollback();
     return result;
 }

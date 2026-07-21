@@ -20,6 +20,7 @@ typedef struct calendar_settings {
     int slot_interval_minutes;
     int pending_hold_minutes;
     int capacity;
+    bool auto_confirm_bookings;
 } calendar_settings;
 
 typedef struct calendar_service {
@@ -61,6 +62,11 @@ typedef struct calendar_pending_booking {
     const char *hold_expires_at_utc;
     const char *customer_name;
     const char *contact;
+    const char *contact_channel;
+    const char *email;
+    const char *phone_number;
+    const char *phone_kind;
+    const char *contact_preference;
     const char *dog_name;
     const char *dog_size;
     const char *service_code;
@@ -69,6 +75,7 @@ typedef struct calendar_pending_booking {
     int end_minute;
     int blocked_until_minute;
     const char *message;
+    bool auto_confirm;
 } calendar_pending_booking;
 
 int calendar_database_initialize(void);
@@ -84,6 +91,16 @@ int calendar_database_get_service(
         calendar_service *service
 );
 int calendar_database_update_service(const calendar_service *service);
+int calendar_database_add_service(const calendar_service *service);
+
+typedef enum calendar_service_delete_result {
+    CALENDAR_SERVICE_DELETE_ERROR = -1,
+    CALENDAR_SERVICE_DELETE_OK = 0,
+    CALENDAR_SERVICE_DELETE_ARCHIVED = 1,
+    CALENDAR_SERVICE_DELETE_NOT_FOUND = 2
+} calendar_service_delete_result;
+
+calendar_service_delete_result calendar_database_delete_service(const char *code);
 int calendar_database_for_each_service(
         calendar_service_callback callback,
         void *context
@@ -139,6 +156,21 @@ int calendar_database_expire_pending(const char *now_utc);
 int calendar_database_insert_pending(
         const calendar_pending_booking *booking,
         int64_t *out_booking_id
+);
+
+typedef enum calendar_booking_decision_result {
+    CALENDAR_BOOKING_DECISION_ERROR = -1,
+    CALENDAR_BOOKING_DECISION_OK = 0,
+    CALENDAR_BOOKING_DECISION_NOT_FOUND = 1,
+    CALENDAR_BOOKING_DECISION_NOT_PENDING = 2,
+    CALENDAR_BOOKING_DECISION_EXPIRED = 3
+} calendar_booking_decision_result;
+
+calendar_booking_decision_result calendar_database_decide_booking(
+        int64_t booking_id,
+        bool accept,
+        const char *decision_at_utc,
+        const char *rejection_reason
 );
 
 #endif

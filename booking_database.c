@@ -903,11 +903,16 @@ int booking_database_for_each_filtered(
             database,
             "SELECT id, created_at, status, customer_name, contact, dog_name, "
             "       dog_size, service, preferred_date, message, legacy, "
-            "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at "
+            "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
+            "       contact_channel, email, phone_number, phone_kind, contact_preference, "
+            "       decision_at, rejection_reason, service_name_snapshot, "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
             "FROM bookings "
             "WHERE (?1 = '' OR status = ?1) "
             "  AND (?2 = '%%' OR customer_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR contact LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR email LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR phone_number LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE) "
             "ORDER BY created_at DESC, id DESC;",
             -1,
@@ -953,7 +958,19 @@ int booking_database_for_each_filtered(
                 .end_minute = sqlite3_column_type(statement, 13) == SQLITE_NULL
                         ? -1 : sqlite3_column_int(statement, 13),
                 .decision_status = column_text_or_empty(statement, 14),
-                .hold_expires_at = column_text_or_empty(statement, 15)
+                .hold_expires_at = column_text_or_empty(statement, 15),
+                .contact_channel = column_text_or_empty(statement, 16),
+                .email = column_text_or_empty(statement, 17),
+                .phone_number = column_text_or_empty(statement, 18),
+                .phone_kind = column_text_or_empty(statement, 19),
+                .contact_preference = column_text_or_empty(statement, 20),
+                .decision_at = column_text_or_empty(statement, 21),
+                .rejection_reason = column_text_or_empty(statement, 22),
+                .service_name_snapshot = column_text_or_empty(statement, 23),
+                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 24) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 24),
+                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 25) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 25)
         };
 
         callback(&record, context);

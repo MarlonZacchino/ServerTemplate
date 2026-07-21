@@ -34,9 +34,15 @@ typedef struct availability_reservation_request {
     const char *hold_expires_at_utc;
     const char *customer_name;
     const char *contact;
+    const char *contact_channel;
+    const char *email;
+    const char *phone_number;
+    const char *phone_kind;
+    const char *contact_preference;
     const char *dog_name;
     const char *dog_size;
     const char *message;
+    bool auto_confirm;
 } availability_reservation_request;
 
 typedef enum availability_reservation_result {

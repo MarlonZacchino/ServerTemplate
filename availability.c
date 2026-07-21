@@ -2,6 +2,7 @@
 
 #include "calendar_database.h"
 #include "calendar_time.h"
+#include "contact_validation.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -338,10 +339,22 @@ static bool reservation_request_is_valid(
     if (request == NULL || !query_is_valid(&request->query) ||
         request->start_minute < 0 || request->start_minute > 1439 ||
         !calendar_utc_timestamp_is_valid(request->created_at_utc) ||
-        !calendar_utc_timestamp_is_valid(request->hold_expires_at_utc) ||
-        strcmp(request->created_at_utc, request->hold_expires_at_utc) >= 0 ||
+        (!request->auto_confirm &&
+         (!calendar_utc_timestamp_is_valid(request->hold_expires_at_utc) ||
+          strcmp(request->created_at_utc, request->hold_expires_at_utc) >= 0)) ||
         request->customer_name == NULL || request->customer_name[0] == '\0' ||
-        request->contact == NULL || request->contact[0] == '\0') {
+        request->contact == NULL || request->contact[0] == '\0' ||
+        !contact_fields_are_valid(
+                request->contact_channel,
+                request->email,
+                request->phone_number,
+                request->phone_kind,
+                request->contact_preference) ||
+        !contact_aggregate_matches_fields(
+                request->contact,
+                request->contact_channel,
+                request->email,
+                request->phone_number)) {
         return false;
     }
 
@@ -396,6 +409,11 @@ availability_reservation_result availability_reserve_pending(
             .hold_expires_at_utc = request->hold_expires_at_utc,
             .customer_name = request->customer_name,
             .contact = request->contact,
+            .contact_channel = request->contact_channel,
+            .email = request->email,
+            .phone_number = request->phone_number,
+            .phone_kind = request->phone_kind,
+            .contact_preference = request->contact_preference,
             .dog_name = request->dog_name,
             .dog_size = request->dog_size,
             .service_code = request->query.service_code,
@@ -403,7 +421,8 @@ availability_reservation_result availability_reserve_pending(
             .start_minute = selected_slot->start_minute,
             .end_minute = selected_slot->end_minute,
             .blocked_until_minute = selected_slot->blocked_until_minute,
-            .message = request->message
+            .message = request->message,
+            .auto_confirm = request->auto_confirm
     };
 
     if (calendar_database_insert_pending(&pending_booking, out_booking_id) != 0) {

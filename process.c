@@ -8,6 +8,8 @@
 #include "booking.h"
 #include "booking_database.h"
 #include "calendar_public.h"
+#include "calendar_database.h"
+#include "calendar_time.h"
 #include "form_urlencoded.h"
 #include "server_config.h"
 
@@ -1070,56 +1072,36 @@ static string *handle_calendar_availability(
     return response;
 }
 
-static string *handle_booking_created(void)
+static string *handle_booking_created(bool confirmed)
 {
-    const char *body =
+    const char *body_pending =
             "<!doctype html>\n"
             "<html lang=\"de\">\n"
-            "<head>\n"
-            "    <meta charset=\"utf-8\">\n"
-            "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-            "    <title>Terminanfrage gesendet | Styles 4 Dogs</title>\n"
-            "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
-            "</head>\n"
-            "<body>\n"
-            "    <header class=\"site-header\">\n"
-            "        <div class=\"container nav-wrap\">\n"
-            "            <a class=\"brand\" href=\"/\">"
-            "<span class=\"brand-mark\">S4D</span>"
-            "<span>Styles 4 Dogs</span></a>\n"
-            "            <nav class=\"site-nav\" aria-label=\"Hauptnavigation\">"
-            "<a href=\"/\">Start</a>"
-            "<a href=\"/leistungen\">Leistungen</a>"
-            "<a href=\"/preise\">Preise</a>"
-            "<a href=\"/kontakt\">Kontakt</a>"
-            "</nav>\n"
-            "        </div>\n"
-            "    </header>\n"
-            "    <main class=\"page\">\n"
-            "        <section class=\"card\">\n"
-            "            <p class=\"eyebrow\">Termin vorläufig reserviert</p>\n"
-            "            <h1>Vielen Dank!</h1>\n"
-            "            <p>Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum "
-            "vorläufig reserviert. Der Termin wird erst verbindlich, wenn der Salon ihn "
-            "persönlich bestätigt.</p>\n"
-            "            <p><a class=\"button\" href=\"/\">"
-            "Zurück zur Startseite</a></p>\n"
-            "        </section>\n"
-            "    </main>\n"
-            "    <footer class=\"site-footer\">"
-            "<div class=\"container footer-bottom\">"
-            "<small>&copy; 2026 Styles 4 Dogs.</small>"
-            "</div></footer>\n"
-            "</body>\n"
-            "</html>\n";
+            "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<title>Terminanfrage gesendet | Styles 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
+            "<body><main class=\"page\"><section class=\"card\">"
+            "<p class=\"eyebrow\">Termin vorläufig reserviert</p><h1>Vielen Dank!</h1>"
+            "<p>Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum vorläufig reserviert. "
+            "Der Termin wird verbindlich, sobald der Salon ihn annimmt.</p>"
+            "<p><a class=\"button\" href=\"/\">Zurück zur Startseite</a></p>"
+            "</section></main></body></html>";
+    const char *body_confirmed =
+            "<!doctype html>\n"
+            "<html lang=\"de\">\n"
+            "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<title>Termin bestätigt | Styles 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
+            "<body><main class=\"page\"><section class=\"card\">"
+            "<p class=\"eyebrow\">Termin automatisch bestätigt</p><h1>Dein Termin ist eingetragen.</h1>"
+            "<p>Der ausgewählte Zeitraum wurde verbindlich reserviert. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg.</p>"
+            "<p><a class=\"button\" href=\"/\">Zurück zur Startseite</a></p>"
+            "</section></main></body></html>";
 
     return build_response_text(
             "201 Created",
             "text/html; charset=utf-8",
             "Cache-Control: no-store\r\n",
-            body,
-            true
-    );
+            confirmed ? body_confirmed : body_pending,
+            true);
 }
 
 static string *handle_booking_unavailable(void)
@@ -1159,7 +1141,10 @@ static string *handle_booking(string *request)
     clear_request_body(request);
 
     if (result == CALENDAR_PUBLIC_OK) {
-        return handle_booking_created();
+        return handle_booking_created(false);
+    }
+    if (result == CALENDAR_PUBLIC_CONFIRMED) {
+        return handle_booking_created(true);
     }
     if (result == CALENDAR_PUBLIC_UNAVAILABLE) {
         return handle_booking_unavailable();
@@ -1191,8 +1176,18 @@ static string *handle_admin_bookings(
 )
 {
     char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    calendar_settings settings;
+    calendar_clock_snapshot snapshot;
     string *body;
     string *response;
+
+    if (calendar_database_get_settings(&settings) != 0 ||
+        calendar_clock_now(settings.timezone, &snapshot) != 0 ||
+        calendar_database_expire_pending(snapshot.now_utc) != 0) {
+        fprintf(stderr, "Abgelaufene Terminanfragen konnten nicht aktualisiert werden: %s\n",
+                calendar_database_last_error());
+        return handle_internal_error(send_body);
+    }
 
     if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
         return handle_internal_error(send_body);
@@ -1466,6 +1461,110 @@ static bool request_has_valid_admin_csrf(string *request)
     return valid;
 }
 
+static string *handle_admin_booking_decision_redirect(void)
+{
+    return build_response_text(
+            "303 See Other",
+            "text/html; charset=utf-8",
+            "Location: /admin/bookings\r\n"
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Security-Policy: default-src 'self'; "
+            "style-src 'self'; form-action 'self'; base-uri 'none'; "
+            "frame-ancestors 'none'\r\n"
+            "Referrer-Policy: no-referrer\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n",
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<title>Terminentscheidung gespeichert</title></head><body>"
+            "<p>Die Terminentscheidung wurde gespeichert.</p>"
+            "<p><a href=\"/admin/bookings\">Zurück zu den Buchungen</a></p>"
+            "</body></html>",
+            true);
+}
+
+static string *handle_admin_booking_decision_conflict(void)
+{
+    return build_response_text(
+            "409 Conflict",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<title>Terminanfrage nicht mehr offen</title></head><body>"
+            "<h1>Diese Terminanfrage ist nicht mehr offen.</h1>"
+            "<p>Sie wurde bereits entschieden oder die vorläufige Reservierung ist abgelaufen.</p>"
+            "<p><a href=\"/admin/bookings\">Zurück zu den Buchungen</a></p>"
+            "</body></html>",
+            true);
+}
+
+static string *handle_admin_booking_decision_post(
+        string *request,
+        bool accept
+)
+{
+    char booking_id_text[32] = {0};
+    char rejection_reason[512] = {0};
+    calendar_settings settings;
+    calendar_clock_snapshot snapshot;
+    calendar_booking_decision_result result;
+    int64_t booking_id;
+
+    if (!request_has_valid_admin_csrf(request)) {
+        return handle_admin_action_forbidden();
+    }
+
+    if (form_urlencoded_get(
+            request,
+            "booking_id",
+            booking_id_text,
+            sizeof(booking_id_text)) != FORM_VALUE_OK ||
+        !parse_positive_booking_id(booking_id_text, &booking_id)) {
+        return handle_admin_status_bad_request();
+    }
+
+    if (!accept) {
+        form_value_result reason_result = form_urlencoded_get(
+                request,
+                "rejection_reason",
+                rejection_reason,
+                sizeof(rejection_reason));
+
+        if (reason_result != FORM_VALUE_OK &&
+            reason_result != FORM_VALUE_NOT_FOUND) {
+            return handle_admin_status_bad_request();
+        }
+    }
+
+    if (calendar_database_get_settings(&settings) != 0 ||
+        calendar_clock_now(settings.timezone, &snapshot) != 0) {
+        fprintf(stderr, "Zeit für Terminentscheidung konnte nicht bestimmt werden: %s\n",
+                calendar_database_last_error());
+        return handle_internal_error(true);
+    }
+
+    result = calendar_database_decide_booking(
+            booking_id,
+            accept,
+            snapshot.now_utc,
+            rejection_reason);
+
+    if (result == CALENDAR_BOOKING_DECISION_OK) {
+        return handle_admin_booking_decision_redirect();
+    }
+    if (result == CALENDAR_BOOKING_DECISION_NOT_FOUND) {
+        return handle_admin_status_not_found();
+    }
+    if (result == CALENDAR_BOOKING_DECISION_NOT_PENDING ||
+        result == CALENDAR_BOOKING_DECISION_EXPIRED) {
+        return handle_admin_booking_decision_conflict();
+    }
+
+    fprintf(stderr, "Terminentscheidung konnte nicht gespeichert werden: %s\n",
+            calendar_database_last_error());
+    return handle_internal_error(true);
+}
+
 static string *handle_admin_calendar_bad_request(void)
 {
     const char *body =
@@ -1610,6 +1709,17 @@ string *process(string *request)
             return handle_admin_booking_status_post(request);
         }
 
+        if (strcmp(path, "/admin/bookings/accept") == 0 ||
+            strcmp(path, "/admin/bookings/reject") == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+
+            return handle_admin_booking_decision_post(
+                    request,
+                    strcmp(path, "/admin/bookings/accept") == 0);
+        }
+
         if (strncmp(path, "/admin/calendar/", strlen("/admin/calendar/")) == 0) {
             if (!request_has_valid_admin_auth(request)) {
                 return handle_unauthorized(true);
@@ -1632,6 +1742,18 @@ string *process(string *request)
                         request,
                         admin_calendar_update_service,
                         "service");
+            }
+            if (strcmp(path, "/admin/calendar/service/add") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_add_service,
+                        "service-added");
+            }
+            if (strcmp(path, "/admin/calendar/service/delete") == 0) {
+                return handle_admin_calendar_post(
+                        request,
+                        admin_calendar_delete_service,
+                        "service-deleted");
             }
             if (strcmp(path, "/admin/calendar/closure/add") == 0) {
                 return handle_admin_calendar_post(

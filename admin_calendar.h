@@ -18,6 +18,8 @@ string *admin_calendar_build_page(
 admin_calendar_result admin_calendar_update_settings(const string *request);
 admin_calendar_result admin_calendar_update_opening_hours(const string *request);
 admin_calendar_result admin_calendar_update_service(const string *request);
+admin_calendar_result admin_calendar_add_service(const string *request);
+admin_calendar_result admin_calendar_delete_service(const string *request);
 admin_calendar_result admin_calendar_add_closure(const string *request);
 admin_calendar_result admin_calendar_delete_closure(const string *request);
 

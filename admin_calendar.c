@@ -270,6 +270,12 @@ static const char *notice_text(const char *notice_code)
     if (strcmp(notice_code, "service") == 0) {
         return "Die Leistung wurde gespeichert.";
     }
+    if (strcmp(notice_code, "service-added") == 0) {
+        return "Die neue Leistung wurde hinzugefügt.";
+    }
+    if (strcmp(notice_code, "service-deleted") == 0) {
+        return "Die Leistung wurde gelöscht oder – falls sie bereits verwendet wurde – archiviert.";
+    }
     if (strcmp(notice_code, "closure-added") == 0) {
         return "Die Sperrzeit wurde eingetragen.";
     }
@@ -336,7 +342,14 @@ static void append_settings_form(
     str_cat_cstr(page,
             "\"></label>\n"
             "                </div>\n"
-            "                <p class=\"admin-calendar-hint\">Zeitzone: <strong>");
+            "                <label class=\"admin-checkbox admin-confirmation-setting\">"
+            "<input type=\"checkbox\" name=\"auto_confirm_bookings\" value=\"1\"");
+    if (settings->auto_confirm_bookings) {
+        str_cat_cstr(page, " checked");
+    }
+    str_cat_cstr(page,
+            "> Neue freie Termine automatisch verbindlich bestätigen</label>\n"
+            "                <p class=\"admin-calendar-hint\">Bei deaktivierter Automatik bleibt ein Termin bis zur Annahme im Status „angefragt“. Zeitzone: <strong>");
     append_html_text(page, settings->timezone);
     str_cat_cstr(page,
             "</strong>. Die Kapazität bleibt vorerst auf einen Hund gleichzeitig begrenzt.</p>\n"
@@ -469,6 +482,7 @@ static int append_service_form(
 
     page = context->page;
     str_cat_cstr(page,
+            "                <article class=\"service-admin-card\">\n"
             "                <form class=\"service-admin-form\" method=\"post\" action=\"/admin/calendar/service\">\n"
             "                    <input type=\"hidden\" name=\"csrf_token\" value=\"");
     append_html_text(page, context->csrf_token);
@@ -502,7 +516,17 @@ static int append_service_form(
             "\"></label>\n"
             "                    </div>\n"
             "                    <button class=\"button button-small\" type=\"submit\">Leistung speichern</button>\n"
-            "                </form>\n");
+            "                </form>\n"
+            "                <form class=\"service-delete-form\" method=\"post\" action=\"/admin/calendar/service/delete\">\n"
+            "                    <input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_text(page, context->csrf_token);
+    str_cat_cstr(page, "\"><input type=\"hidden\" name=\"code\" value=\"");
+    append_html_text(page, service->code);
+    str_cat_cstr(page,
+            "\"><button class=\"button button-small button-danger\" type=\"submit\">Leistung löschen</button>\n"
+            "                    <p class=\"admin-calendar-hint\">Bereits verwendete Leistungen werden nur archiviert und bleiben in alten Buchungen erhalten.</p>\n"
+            "                </form>\n"
+            "                </article>\n");
 
     context->count++;
     return 0;
@@ -521,7 +545,22 @@ static bool append_services_section(string *page, const char *csrf_token)
             "        <section class=\"card admin-calendar-section\" id=\"leistungen\">\n"
             "            <p class=\"eyebrow\">Terminarten</p>\n"
             "            <h2>Leistungen und Dauer</h2>\n"
-            "            <p>Die Dauer plus Puffer blockiert den Kalender. Bereits gespeicherte Termine behalten ihre ursprüngliche Zeit.</p>\n"
+            "            <p>Die Dauer plus Puffer blockiert den Kalender. Bereits gespeicherte Termine behalten ihren damaligen Leistungsnamen und ihre ursprüngliche Zeit.</p>\n"
+            "            <form class=\"admin-calendar-form service-add-form\" method=\"post\" action=\"/admin/calendar/service/add\">\n"
+            "                <input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_text(page, csrf_token);
+    str_cat_cstr(page,
+            "\">\n"
+            "                <h3>Neue Leistung hinzufügen</h3>\n"
+            "                <div class=\"admin-calendar-fields\">\n"
+            "                    <label>Technischer Schlüssel<input name=\"code\" maxlength=\"63\" pattern=\"[a-z0-9_]+\" placeholder=\"zum_beispiel_welpenpflege\" required></label>\n"
+            "                    <label>Anzeigename<input name=\"name\" maxlength=\"127\" required></label>\n"
+            "                    <label>Dauer in Minuten<input name=\"duration_minutes\" type=\"number\" min=\"15\" max=\"720\" step=\"5\" value=\"60\" required></label>\n"
+            "                    <label>Puffer danach<input name=\"buffer_minutes\" type=\"number\" min=\"0\" max=\"240\" step=\"5\" value=\"15\" required></label>\n"
+            "                </div>\n"
+            "                <label class=\"admin-checkbox\"><input type=\"checkbox\" name=\"active\" value=\"1\" checked> Sofort online buchbar</label>\n"
+            "                <button class=\"button\" type=\"submit\">Leistung hinzufügen</button>\n"
+            "            </form>\n"
             "            <div class=\"service-admin-list\">\n");
 
     result = calendar_database_for_each_service(append_service_form, &context);
@@ -759,6 +798,7 @@ admin_calendar_result admin_calendar_update_settings(const string *request)
     settings.slot_interval_minutes = slot_interval_minutes;
     settings.pending_hold_minutes = hold_hours * 60;
     settings.capacity = 1;
+    settings.auto_confirm_bookings = checkbox_is_checked(request, "auto_confirm_bookings");
 
     if (calendar_database_update_settings(&settings) != 0) {
         set_database_error("Buchungsregeln konnten nicht gespeichert werden");
@@ -921,6 +961,64 @@ admin_calendar_result admin_calendar_update_service(const string *request)
     }
     if (update_result != 0) {
         set_database_error("Leistung konnte nicht gespeichert werden");
+        return ADMIN_CALENDAR_ERROR;
+    }
+
+    return ADMIN_CALENDAR_OK;
+}
+
+admin_calendar_result admin_calendar_add_service(const string *request)
+{
+    calendar_service service;
+    char duration_text[32];
+    char buffer_text[32];
+    int result;
+
+    memset(&service, 0, sizeof(service));
+
+    if (request == NULL ||
+        !get_required_field(request, "code", service.code, sizeof(service.code)) ||
+        !get_required_field(request, "name", service.name, sizeof(service.name)) ||
+        !get_required_field(request, "duration_minutes", duration_text, sizeof(duration_text)) ||
+        !get_required_field(request, "buffer_minutes", buffer_text, sizeof(buffer_text)) ||
+        !parse_integer_text(duration_text, 15, 720, &service.duration_minutes) ||
+        !parse_integer_text(buffer_text, 0, 240, &service.buffer_minutes)) {
+        set_error("Ungültige neue Leistung");
+        return ADMIN_CALENDAR_BAD_REQUEST;
+    }
+
+    service.active = checkbox_is_checked(request, "active");
+    result = calendar_database_add_service(&service);
+    if (result == 1) {
+        set_error("Der technische Leistungsschlüssel ist bereits vergeben");
+        return ADMIN_CALENDAR_BAD_REQUEST;
+    }
+    if (result != 0) {
+        set_database_error("Neue Leistung konnte nicht gespeichert werden");
+        return ADMIN_CALENDAR_ERROR;
+    }
+
+    return ADMIN_CALENDAR_OK;
+}
+
+admin_calendar_result admin_calendar_delete_service(const string *request)
+{
+    char code[CALENDAR_SERVICE_CODE_SIZE];
+    calendar_service_delete_result result;
+
+    if (request == NULL ||
+        !get_required_field(request, "code", code, sizeof(code))) {
+        set_error("Ungültiger Leistungsschlüssel");
+        return ADMIN_CALENDAR_BAD_REQUEST;
+    }
+
+    result = calendar_database_delete_service(code);
+    if (result == CALENDAR_SERVICE_DELETE_NOT_FOUND) {
+        set_error("Leistung wurde nicht gefunden");
+        return ADMIN_CALENDAR_NOT_FOUND;
+    }
+    if (result == CALENDAR_SERVICE_DELETE_ERROR) {
+        set_database_error("Leistung konnte nicht gelöscht oder archiviert werden");
         return ADMIN_CALENDAR_ERROR;
     }
 

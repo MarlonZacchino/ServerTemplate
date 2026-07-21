@@ -4,6 +4,8 @@
 
 #include "booking.h"
 
+#include "contact_validation.h"
+
 #include "booking_database.h"
 #include "calendar_time.h"
 #include "form_urlencoded.h"
@@ -147,6 +149,56 @@ static bool get_optional_message(
     return true;
 }
 
+
+static bool parse_contact_fields(const string *request, booking_request *booking)
+{
+    if (!get_required_field(
+            request,
+            "contact_channel",
+            booking->contact_channel,
+            sizeof(booking->contact_channel)) ||
+        !get_optional_single_line_field(
+            request,
+            "email",
+            booking->email,
+            sizeof(booking->email)) ||
+        !get_optional_single_line_field(
+            request,
+            "phone_number",
+            booking->phone_number,
+            sizeof(booking->phone_number)) ||
+        !get_optional_single_line_field(
+            request,
+            "phone_kind",
+            booking->phone_kind,
+            sizeof(booking->phone_kind)) ||
+        !get_optional_single_line_field(
+            request,
+            "contact_preference",
+            booking->contact_preference,
+            sizeof(booking->contact_preference))) {
+        return false;
+    }
+
+    if (!contact_fields_are_valid(
+            booking->contact_channel,
+            booking->email,
+            booking->phone_number,
+            booking->phone_kind,
+            booking->contact_preference)) {
+        return false;
+    }
+
+    snprintf(
+            booking->contact,
+            sizeof(booking->contact),
+            "%s",
+            strcmp(booking->contact_channel, "email") == 0
+                    ? booking->email
+                    : booking->phone_number);
+    return true;
+}
+
 static bool equals_one_of(
         const char *value,
         const char *const allowed_values[],
@@ -189,11 +241,7 @@ bool parse_booking_request(const string *request, booking_request *booking)
             "name",
             booking->name,
             sizeof(booking->name)) ||
-        !get_required_field(
-            request,
-            "contact",
-            booking->contact,
-            sizeof(booking->contact)) ||
+        !parse_contact_fields(request, booking) ||
         !get_optional_single_line_field(
             request,
             "dog_name",
@@ -672,6 +720,102 @@ static const char *decision_status_label(const char *status)
     return status;
 }
 
+static const char *phone_kind_label(const char *value)
+{
+    if (value != NULL && strcmp(value, "mobile") == 0) {
+        return "Mobilfunknummer";
+    }
+    if (value != NULL && strcmp(value, "landline") == 0) {
+        return "Festnetznummer";
+    }
+    return "Telefonnummer";
+}
+
+static const char *contact_preference_label(const char *value)
+{
+    if (value != NULL && strcmp(value, "whatsapp") == 0) {
+        return "WhatsApp-Nachricht";
+    }
+    if (value != NULL && strcmp(value, "call") == 0) {
+        return "Anruf";
+    }
+    return "Nicht angegeben";
+}
+
+static void append_contact_details(string *page, const booking_record *record)
+{
+    if (record->contact_channel != NULL &&
+        strcmp(record->contact_channel, "email") == 0) {
+        append_booking_detail(page, "Kontaktweg", "E-Mail", "E-Mail");
+        append_booking_detail(page, "E-Mail", record->email, "Nicht angegeben");
+        return;
+    }
+
+    if (record->contact_channel != NULL &&
+        strcmp(record->contact_channel, "phone") == 0) {
+        append_booking_detail(page, "Kontaktweg", "Telefon", "Telefon");
+        append_booking_detail(
+                page,
+                phone_kind_label(record->phone_kind),
+                record->phone_number,
+                "Nicht angegeben");
+        append_booking_detail(
+                page,
+                "Gewünschte Rückmeldung",
+                contact_preference_label(record->contact_preference),
+                "Nicht angegeben");
+        return;
+    }
+
+    append_booking_detail(page, "Kontakt", record->contact, "Nicht angegeben");
+}
+
+static void append_decision_form(
+        string *page,
+        const booking_record *record,
+        const char *csrf_token
+)
+{
+    char id_text[32];
+    int written;
+
+    if (record == NULL || csrf_token == NULL ||
+        record->decision_status == NULL ||
+        strcmp(record->decision_status, "pending") != 0) {
+        return;
+    }
+
+    written = snprintf(id_text, sizeof(id_text), "%" PRId64, record->id);
+    if (written <= 0 || (size_t)written >= sizeof(id_text)) {
+        return;
+    }
+
+    str_cat_cstr(page,
+            "                <section class=\"booking-decision-panel\" aria-label=\"Terminanfrage entscheiden\">\n"
+            "                    <h3>Terminanfrage entscheiden</h3>\n"
+            "                    <div class=\"booking-decision-actions\">\n"
+            "                        <form method=\"post\" action=\"/admin/bookings/accept\">\n"
+            "                            <input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_text(page, csrf_token);
+    str_cat_cstr(page, "\"><input type=\"hidden\" name=\"booking_id\" value=\"");
+    append_html_text(page, id_text);
+    str_cat_cstr(page,
+            "\"><button class=\"button button-small\" type=\"submit\">Termin annehmen</button>\n"
+            "                        </form>\n"
+            "                        <form class=\"booking-reject-form\" method=\"post\" action=\"/admin/bookings/reject\">\n"
+            "                            <input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_text(page, csrf_token);
+    str_cat_cstr(page, "\"><input type=\"hidden\" name=\"booking_id\" value=\"");
+    append_html_text(page, id_text);
+    str_cat_cstr(page,
+            "\">\n"
+            "                            <label>Ablehnungsgrund (optional)<input name=\"rejection_reason\" maxlength=\"500\" placeholder=\"Zum Beispiel Termin leider nicht möglich\"></label>\n"
+            "                            <button class=\"button button-small button-danger\" type=\"submit\">Termin ablehnen</button>\n"
+            "                        </form>\n"
+            "                    </div>\n"
+            "                </section>\n");
+}
+
 static void append_appointment_detail(
         string *page,
         const booking_record *record
@@ -744,10 +888,16 @@ static void append_booking_card(
             "</h2>\n"
             "                <div class=\"booking-details\">\n");
 
-    append_booking_detail(page, "Kontakt", record->contact, "Nicht angegeben");
+    append_contact_details(page, record);
     append_booking_detail(page, "Hund", record->dog_name, "Nicht angegeben");
     append_booking_detail(page, "Größe", dog_size_label(record->dog_size), "Nicht angegeben");
-    append_booking_detail(page, "Leistung", service_label(record->service), "Nicht angegeben");
+    append_booking_detail(
+            page,
+            "Leistung",
+            record->service_name_snapshot != NULL && record->service_name_snapshot[0] != '\0'
+                    ? record->service_name_snapshot
+                    : service_label(record->service),
+            "Nicht angegeben");
     append_appointment_detail(page, record);
 
     if (record->legacy) {
@@ -762,6 +912,10 @@ static void append_booking_card(
             record->message,
             "Keine Nachricht angegeben.");
     str_cat_cstr(page, "</div>\n");
+    if (record->rejection_reason != NULL && record->rejection_reason[0] != '\0') {
+        append_booking_detail(page, "Ablehnungsgrund", record->rejection_reason, "Nicht angegeben");
+    }
+    append_decision_form(page, record, context->csrf_token);
     append_status_form(page, record, context->csrf_token);
     str_cat_cstr(page, "            </article>\n");
 

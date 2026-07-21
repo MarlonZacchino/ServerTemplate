@@ -13,6 +13,11 @@ typedef struct booking_record {
     const char *status;
     const char *name;
     const char *contact;
+    const char *contact_channel;
+    const char *email;
+    const char *phone_number;
+    const char *phone_kind;
+    const char *contact_preference;
     const char *dog_name;
     const char *dog_size;
     const char *service;
@@ -23,6 +28,11 @@ typedef struct booking_record {
     int end_minute;
     const char *decision_status;
     const char *hold_expires_at;
+    const char *decision_at;
+    const char *rejection_reason;
+    const char *service_name_snapshot;
+    int service_duration_minutes_snapshot;
+    int service_buffer_minutes_snapshot;
     bool legacy;
 } booking_record;
 
