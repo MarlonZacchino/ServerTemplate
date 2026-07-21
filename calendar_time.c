@@ -3,7 +3,10 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static bool is_digit(char character)
 {
@@ -98,6 +101,39 @@ static int64_t days_from_civil(int year, unsigned int month, unsigned int day)
     return (int64_t)era * 146097 + (int64_t)day_of_era - 719468;
 }
 
+static void civil_from_days(
+        int64_t epoch_days,
+        int *out_year,
+        unsigned int *out_month,
+        unsigned int *out_day
+)
+{
+    int64_t adjusted = epoch_days + 719468;
+    int64_t era = (adjusted >= 0 ? adjusted : adjusted - 146096) / 146097;
+    unsigned int day_of_era = (unsigned int)(adjusted - era * 146097);
+    unsigned int year_of_era =
+            (day_of_era - day_of_era / 1460U + day_of_era / 36524U -
+             day_of_era / 146096U) / 365U;
+    int year = (int)year_of_era + (int)era * 400;
+    unsigned int day_of_year =
+            day_of_era - (365U * year_of_era + year_of_era / 4U - year_of_era / 100U);
+    unsigned int month_prime = (5U * day_of_year + 2U) / 153U;
+    unsigned int day = day_of_year - (153U * month_prime + 2U) / 5U + 1U;
+    int month = (int)month_prime + (month_prime < 10U ? 3 : -9);
+
+    year += month <= 2 ? 1 : 0;
+
+    if (out_year != NULL) {
+        *out_year = year;
+    }
+    if (out_month != NULL) {
+        *out_month = (unsigned int)month;
+    }
+    if (out_day != NULL) {
+        *out_day = day;
+    }
+}
+
 bool calendar_date_is_valid(const char *date)
 {
     return parse_date(date, NULL, NULL, NULL);
@@ -138,6 +174,44 @@ int calendar_date_days_between(
 
     *out_days = (int)difference;
     return 0;
+}
+
+int calendar_date_add_days(
+        const char *date,
+        int days,
+        char out_date[11]
+)
+{
+    int year;
+    int month;
+    int day;
+    int result_year;
+    unsigned int result_month;
+    unsigned int result_day;
+    int64_t epoch_days;
+    int written;
+
+    if (out_date == NULL || days < -366000 || days > 366000 ||
+        !parse_date(date, &year, &month, &day)) {
+        return -1;
+    }
+
+    epoch_days = days_from_civil(year, (unsigned int)month, (unsigned int)day);
+    civil_from_days(epoch_days + days, &result_year, &result_month, &result_day);
+
+    if (result_year < 1970 || result_year > 9999) {
+        return -1;
+    }
+
+    written = snprintf(
+            out_date,
+            11,
+            "%04d-%02u-%02u",
+            result_year,
+            result_month,
+            result_day);
+
+    return written == 10 ? 0 : -1;
 }
 
 int calendar_date_iso_weekday(const char *date, int *out_weekday)
@@ -202,4 +276,173 @@ bool calendar_utc_timestamp_is_valid(const char *timestamp)
     return hour >= 0 && hour <= 23 &&
            minute >= 0 && minute <= 59 &&
            second >= 0 && second <= 59;
+}
+
+int calendar_utc_add_minutes(
+        const char *timestamp,
+        int minutes,
+        char out_timestamp[21]
+)
+{
+    char date[11];
+    int year;
+    int month;
+    int day;
+    int hour;
+    int minute;
+    int second;
+    int64_t epoch_seconds;
+    int64_t result_seconds;
+    int64_t result_days;
+    int64_t seconds_of_day;
+    int result_year;
+    unsigned int result_month;
+    unsigned int result_day;
+    int written;
+
+    if (out_timestamp == NULL || !calendar_utc_timestamp_is_valid(timestamp) ||
+        minutes < -5256000 || minutes > 5256000) {
+        return -1;
+    }
+
+    memcpy(date, timestamp, 10);
+    date[10] = '\0';
+
+    if (!parse_date(date, &year, &month, &day)) {
+        return -1;
+    }
+
+    hour = (timestamp[11] - '0') * 10 + (timestamp[12] - '0');
+    minute = (timestamp[14] - '0') * 10 + (timestamp[15] - '0');
+    second = (timestamp[17] - '0') * 10 + (timestamp[18] - '0');
+
+    epoch_seconds = days_from_civil(year, (unsigned int)month, (unsigned int)day) * 86400 +
+                    hour * 3600 + minute * 60 + second;
+    result_seconds = epoch_seconds + (int64_t)minutes * 60;
+    result_days = result_seconds / 86400;
+    seconds_of_day = result_seconds % 86400;
+
+    if (seconds_of_day < 0) {
+        seconds_of_day += 86400;
+        result_days--;
+    }
+
+    civil_from_days(result_days, &result_year, &result_month, &result_day);
+
+    written = snprintf(
+            out_timestamp,
+            21,
+            "%04d-%02u-%02uT%02lld:%02lld:%02lldZ",
+            result_year,
+            result_month,
+            result_day,
+            (long long)(seconds_of_day / 3600),
+            (long long)((seconds_of_day % 3600) / 60),
+            (long long)(seconds_of_day % 60));
+
+    return written == 20 ? 0 : -1;
+}
+
+static bool timezone_is_valid(const char *timezone)
+{
+    size_t length;
+
+    if (timezone == NULL) {
+        return false;
+    }
+
+    length = strlen(timezone);
+    if (length == 0 || length >= 64 || strstr(timezone, "..") != NULL) {
+        return false;
+    }
+
+    for (size_t index = 0; index < length; index++) {
+        char character = timezone[index];
+
+        if (!((character >= 'A' && character <= 'Z') ||
+              (character >= 'a' && character <= 'z') ||
+              (character >= '0' && character <= '9') ||
+              character == '/' || character == '_' ||
+              character == '-' || character == '+')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int calendar_clock_now(
+        const char *timezone,
+        calendar_clock_snapshot *snapshot
+)
+{
+    time_t now;
+    struct tm local_time;
+    struct tm utc_time;
+
+    if (snapshot == NULL || !timezone_is_valid(timezone)) {
+        return -1;
+    }
+
+    now = time(NULL);
+    if (now == (time_t)-1) {
+        return -1;
+    }
+
+    if (setenv("TZ", timezone, 1) != 0) {
+        return -1;
+    }
+    tzset();
+
+    if (localtime_r(&now, &local_time) == NULL ||
+        gmtime_r(&now, &utc_time) == NULL) {
+        return -1;
+    }
+
+    if (strftime(snapshot->local_date, sizeof(snapshot->local_date), "%Y-%m-%d", &local_time) != 10 ||
+        strftime(snapshot->now_utc, sizeof(snapshot->now_utc), "%Y-%m-%dT%H:%M:%SZ", &utc_time) != 20) {
+        return -1;
+    }
+
+    snapshot->local_minute = local_time.tm_hour * 60 + local_time.tm_min;
+    return 0;
+}
+
+int calendar_time_parse_hhmm(const char *text, int *out_minute)
+{
+    int hour;
+    int minute;
+
+    if (text == NULL || out_minute == NULL || strlen(text) != 5 ||
+        text[2] != ':' || !is_digit(text[0]) || !is_digit(text[1]) ||
+        !is_digit(text[3]) || !is_digit(text[4])) {
+        return -1;
+    }
+
+    hour = (text[0] - '0') * 10 + (text[1] - '0');
+    minute = (text[3] - '0') * 10 + (text[4] - '0');
+
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return -1;
+    }
+
+    *out_minute = hour * 60 + minute;
+    return 0;
+}
+
+int calendar_time_format_hhmm(int minute, char out_text[6])
+{
+    int written;
+
+    if (out_text == NULL || minute < 0 || minute > 1440) {
+        return -1;
+    }
+
+    if (minute == 1440) {
+        memcpy(out_text, "24:00", 6);
+        return 0;
+    }
+
+    written = snprintf(out_text, 6, "%02d:%02d", minute / 60, minute % 60);
+    return written == 5 ? 0 : -1;
 }

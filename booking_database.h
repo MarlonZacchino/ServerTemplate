@@ -18,6 +18,11 @@ typedef struct booking_record {
     const char *service;
     const char *preferred_date;
     const char *message;
+    const char *appointment_date;
+    int start_minute;
+    int end_minute;
+    const char *decision_status;
+    const char *hold_expires_at;
     bool legacy;
 } booking_record;
 

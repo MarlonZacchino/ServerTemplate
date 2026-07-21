@@ -3,6 +3,12 @@
 
 #include <stdbool.h>
 
+typedef struct calendar_clock_snapshot {
+    char local_date[11];
+    int local_minute;
+    char now_utc[21];
+} calendar_clock_snapshot;
+
 /* Validiert ein kalendarisch korrektes Datum im Format YYYY-MM-DD. */
 bool calendar_date_is_valid(const char *date);
 
@@ -16,10 +22,36 @@ int calendar_date_days_between(
         int *out_days
 );
 
+/* Addiert eine begrenzte Anzahl Tage und schreibt YYYY-MM-DD. */
+int calendar_date_add_days(
+        const char *date,
+        int days,
+        char out_date[11]
+);
+
 /* ISO-Wochentag: Montag = 1, Sonntag = 7. */
 int calendar_date_iso_weekday(const char *date, int *out_weekday);
 
 /* Validiert UTC-Zeitstempel im festen Format YYYY-MM-DDTHH:MM:SSZ. */
 bool calendar_utc_timestamp_is_valid(const char *timestamp);
+
+/* Addiert Minuten zu einem validen UTC-Zeitstempel. */
+int calendar_utc_add_minutes(
+        const char *timestamp,
+        int minutes,
+        char out_timestamp[21]
+);
+
+/* Liest die aktuelle Salonzeit und die aktuelle UTC-Zeit. */
+int calendar_clock_now(
+        const char *timezone,
+        calendar_clock_snapshot *snapshot
+);
+
+/* Konvertiert HH:MM in Minuten seit Mitternacht. */
+int calendar_time_parse_hhmm(const char *text, int *out_minute);
+
+/* Formatiert Minuten seit Mitternacht als HH:MM. */
+int calendar_time_format_hhmm(int minute, char out_text[6]);
 
 #endif

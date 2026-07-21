@@ -902,7 +902,8 @@ int booking_database_for_each_filtered(
     if (sqlite3_prepare_v2(
             database,
             "SELECT id, created_at, status, customer_name, contact, dog_name, "
-            "       dog_size, service, preferred_date, message, legacy "
+            "       dog_size, service, preferred_date, message, legacy, "
+            "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at "
             "FROM bookings "
             "WHERE (?1 = '' OR status = ?1) "
             "  AND (?2 = '%%' OR customer_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
@@ -945,7 +946,14 @@ int booking_database_for_each_filtered(
                 .service = column_text_or_empty(statement, 7),
                 .preferred_date = column_text_or_empty(statement, 8),
                 .message = column_text_or_empty(statement, 9),
-                .legacy = sqlite3_column_int(statement, 10) != 0
+                .legacy = sqlite3_column_int(statement, 10) != 0,
+                .appointment_date = column_text_or_empty(statement, 11),
+                .start_minute = sqlite3_column_type(statement, 12) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 12),
+                .end_minute = sqlite3_column_type(statement, 13) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 13),
+                .decision_status = column_text_or_empty(statement, 14),
+                .hold_expires_at = column_text_or_empty(statement, 15)
         };
 
         callback(&record, context);

@@ -79,6 +79,7 @@ add_executable(Server
         calendar_time.c
         calendar_database.c
         availability.c
+        calendar_public.c
 )
 
 add_executable(create_admin_user

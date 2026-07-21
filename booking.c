@@ -5,6 +5,7 @@
 #include "booking.h"
 
 #include "booking_database.h"
+#include "calendar_time.h"
 #include "form_urlencoded.h"
 
 #include <inttypes.h>
@@ -165,60 +166,6 @@ static bool equals_one_of(
     return false;
 }
 
-static bool is_leap_year(int year)
-{
-    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-}
-
-static bool is_valid_iso_date(const char *date)
-{
-    int year;
-    int month;
-    int day;
-    int max_day;
-    static const int days_per_month[] = {
-            31, 28, 31, 30, 31, 30,
-            31, 31, 30, 31, 30, 31
-    };
-
-    if (date == NULL || date[0] == '\0') {
-        return true;
-    }
-
-    if (strlen(date) != 10 || date[4] != '-' || date[7] != '-') {
-        return false;
-    }
-
-    for (size_t index = 0; index < 10; index++) {
-        if (index == 4 || index == 7) {
-            continue;
-        }
-
-        if (date[index] < '0' || date[index] > '9') {
-            return false;
-        }
-    }
-
-    year = (date[0] - '0') * 1000 +
-           (date[1] - '0') * 100 +
-           (date[2] - '0') * 10 +
-           (date[3] - '0');
-    month = (date[5] - '0') * 10 + (date[6] - '0');
-    day = (date[8] - '0') * 10 + (date[9] - '0');
-
-    if (year < 2000 || year > 9999 || month < 1 || month > 12) {
-        return false;
-    }
-
-    max_day = days_per_month[month - 1];
-
-    if (month == 2 && is_leap_year(year)) {
-        max_day = 29;
-    }
-
-    return day >= 1 && day <= max_day;
-}
-
 bool parse_booking_request(const string *request, booking_request *booking)
 {
     static const char *const allowed_dog_sizes[] = {
@@ -227,14 +174,8 @@ bool parse_booking_request(const string *request, booking_request *booking)
             "large",
             "very_large"
     };
-    static const char *const allowed_services[] = {
-            "consultation",
-            "wash_dry",
-            "full_groom",
-            "claw_care",
-            "other"
-    };
     char privacy_consent[32];
+    int appointment_start_minute;
 
     if (request == NULL || booking == NULL) {
         return false;
@@ -268,11 +209,16 @@ bool parse_booking_request(const string *request, booking_request *booking)
             "service",
             booking->service,
             sizeof(booking->service)) ||
-        !get_optional_single_line_field(
+        !get_required_field(
             request,
-            "preferred_date",
-            booking->preferred_date,
-            sizeof(booking->preferred_date)) ||
+            "appointment_date",
+            booking->appointment_date,
+            sizeof(booking->appointment_date)) ||
+        !get_required_field(
+            request,
+            "appointment_start",
+            booking->appointment_start,
+            sizeof(booking->appointment_start)) ||
         !get_optional_message(
             request,
             booking->message,
@@ -289,21 +235,23 @@ bool parse_booking_request(const string *request, booking_request *booking)
             booking->dog_size,
             allowed_dog_sizes,
             sizeof(allowed_dog_sizes) / sizeof(allowed_dog_sizes[0])) ||
-        !equals_one_of(
-            booking->service,
-            allowed_services,
-            sizeof(allowed_services) / sizeof(allowed_services[0])) ||
-        !is_valid_iso_date(booking->preferred_date) ||
+        !calendar_date_is_valid(booking->appointment_date) ||
+        calendar_time_parse_hhmm(booking->appointment_start, &appointment_start_minute) != 0 ||
         strcmp(privacy_consent, PRIVACY_CONSENT_VALUE) != 0) {
         return false;
     }
 
-    return true;
-}
+    for (size_t index = 0; booking->service[index] != '\0'; index++) {
+        char character = booking->service[index];
 
-int save_booking_request(const booking_request *booking)
-{
-    return booking_database_insert(booking);
+        if (!((character >= 'a' && character <= 'z') ||
+              (character >= '0' && character <= '9') ||
+              character == '_')) {
+            return false;
+        }
+    }
+
+    return booking->service[0] != '\0';
 }
 
 static bool is_valid_admin_filter_status(const char *status)
@@ -700,6 +648,61 @@ static void append_booking_detail(
     str_cat_cstr(page, "</strong></p>\n");
 }
 
+static const char *decision_status_label(const char *status)
+{
+    if (status == NULL || status[0] == '\0' || strcmp(status, "legacy") == 0) {
+        return "Frühere Anfrage";
+    }
+    if (strcmp(status, "pending") == 0) {
+        return "Angefragt – vorläufig reserviert";
+    }
+    if (strcmp(status, "confirmed") == 0) {
+        return "Bestätigt";
+    }
+    if (strcmp(status, "rejected") == 0) {
+        return "Abgelehnt";
+    }
+    if (strcmp(status, "cancelled") == 0) {
+        return "Abgesagt";
+    }
+    if (strcmp(status, "expired") == 0) {
+        return "Reservierung abgelaufen";
+    }
+
+    return status;
+}
+
+static void append_appointment_detail(
+        string *page,
+        const booking_record *record
+)
+{
+    char time_text[32];
+    char start_text[6];
+    char end_text[6];
+
+    if (record->appointment_date == NULL || record->appointment_date[0] == '\0' ||
+        record->start_minute < 0 || record->end_minute < 0 ||
+        calendar_time_format_hhmm(record->start_minute, start_text) != 0 ||
+        calendar_time_format_hhmm(record->end_minute, end_text) != 0) {
+        append_booking_detail(page, "Termin", record->preferred_date, "Noch ohne festen Termin");
+        return;
+    }
+
+    if (snprintf(time_text, sizeof(time_text), "%s–%s Uhr", start_text, end_text) <= 0) {
+        append_booking_detail(page, "Termin", record->appointment_date, "Nicht angegeben");
+        return;
+    }
+
+    append_booking_detail(page, "Termindatum", record->appointment_date, "Nicht angegeben");
+    append_booking_detail(page, "Uhrzeit", time_text, "Nicht angegeben");
+    append_booking_detail(
+            page,
+            "Terminstatus",
+            decision_status_label(record->decision_status),
+            "Nicht angegeben");
+}
+
 static void append_booking_card(
         const booking_record *record,
         void *context_value
@@ -745,7 +748,7 @@ static void append_booking_card(
     append_booking_detail(page, "Hund", record->dog_name, "Nicht angegeben");
     append_booking_detail(page, "Größe", dog_size_label(record->dog_size), "Nicht angegeben");
     append_booking_detail(page, "Leistung", service_label(record->service), "Nicht angegeben");
-    append_booking_detail(page, "Wunschdatum", record->preferred_date, "Flexibel");
+    append_appointment_detail(page, record);
 
     if (record->legacy) {
         append_booking_detail(page, "Format", "Frühere Anfrage", "Frühere Anfrage");

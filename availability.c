@@ -199,6 +199,123 @@ int availability_collect(
     return 0;
 }
 
+
+int availability_collect_public(
+        const availability_query *query,
+        availability_public_slot *slots,
+        size_t slots_capacity,
+        size_t *out_count
+)
+{
+    calendar_settings settings;
+    calendar_service service;
+    calendar_time_range opening_periods[CALENDAR_MAX_DAY_PERIODS];
+    calendar_time_range closures[CALENDAR_MAX_DAY_CLOSURES];
+    calendar_time_range bookings[CALENDAR_MAX_DAY_BOOKINGS];
+    size_t opening_count = 0;
+    size_t closure_count = 0;
+    size_t booking_count = 0;
+    size_t slot_count = 0;
+    int days_until_target;
+    int weekday;
+    int service_result;
+    int total_block_minutes;
+
+    availability_error[0] = '\0';
+
+    if (!query_is_valid(query) || slots == NULL ||
+        slots_capacity == 0 || out_count == NULL) {
+        set_error("Ungültige öffentliche Verfügbarkeitsabfrage");
+        return -1;
+    }
+
+    *out_count = 0;
+
+    if (calendar_database_get_settings(&settings) != 0) {
+        set_database_error("Kalendereinstellungen konnten nicht geladen werden");
+        return -1;
+    }
+
+    service_result = calendar_database_get_service(query->service_code, &service);
+    if (service_result < 0) {
+        set_database_error("Leistung konnte nicht geladen werden");
+        return -1;
+    }
+    if (service_result > 0 || !service.active) {
+        return 0;
+    }
+
+    if (calendar_date_days_between(
+            query->current_date,
+            query->date,
+            &days_until_target) != 0) {
+        set_error("Datumsabstand konnte nicht berechnet werden");
+        return -1;
+    }
+
+    if (days_until_target < 0 || days_until_target > settings.booking_horizon_days) {
+        return 0;
+    }
+
+    if (calendar_date_iso_weekday(query->date, &weekday) != 0) {
+        set_error("Wochentag konnte nicht berechnet werden");
+        return -1;
+    }
+
+    if (calendar_database_get_opening_periods(
+            weekday,
+            opening_periods,
+            sizeof(opening_periods) / sizeof(opening_periods[0]),
+            &opening_count) != 0 ||
+        calendar_database_get_closures_for_date(
+            query->date,
+            closures,
+            sizeof(closures) / sizeof(closures[0]),
+            &closure_count) != 0 ||
+        calendar_database_get_blocking_bookings(
+            query->date,
+            query->now_utc,
+            bookings,
+            sizeof(bookings) / sizeof(bookings[0]),
+            &booking_count) != 0) {
+        set_database_error("Kalenderzeiträume konnten nicht geladen werden");
+        return -1;
+    }
+
+    total_block_minutes = service.duration_minutes + service.buffer_minutes;
+
+    for (size_t period_index = 0; period_index < opening_count; period_index++) {
+        int period_start = opening_periods[period_index].start_minute;
+        int period_end = opening_periods[period_index].end_minute;
+
+        for (int start_minute = period_start;
+             start_minute + total_block_minutes <= period_end;
+             start_minute += settings.slot_interval_minutes) {
+            int minutes_until_slot =
+                    days_until_target * 1440 + start_minute - query->current_minute;
+            int end_minute = start_minute + service.duration_minutes;
+            int blocked_until_minute = end_minute + service.buffer_minutes;
+            bool available =
+                    minutes_until_slot >= settings.min_notice_minutes &&
+                    !overlaps_any(start_minute, blocked_until_minute, closures, closure_count) &&
+                    !overlaps_any(start_minute, blocked_until_minute, bookings, booking_count);
+
+            if (slot_count >= slots_capacity) {
+                set_error("Ausgabepuffer für öffentliche Termine ist zu klein");
+                return -1;
+            }
+
+            slots[slot_count].start_minute = start_minute;
+            slots[slot_count].end_minute = end_minute;
+            slots[slot_count].available = available;
+            slot_count++;
+        }
+    }
+
+    *out_count = slot_count;
+    return 0;
+}
+
 static const availability_slot *find_requested_slot(
         const availability_slot *slots,
         size_t slot_count,

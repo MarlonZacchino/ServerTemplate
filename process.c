@@ -6,6 +6,7 @@
 #include "process.h"
 #include "booking.h"
 #include "booking_database.h"
+#include "calendar_public.h"
 #include "form_urlencoded.h"
 #include "server_config.h"
 
@@ -968,6 +969,106 @@ cleanup:
     return response;
 }
 
+static const char *calendar_api_headers(void)
+{
+    return
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "Referrer-Policy: no-referrer\r\n";
+}
+
+static string *handle_calendar_api_error(
+        const char *status,
+        const char *code,
+        bool send_body
+)
+{
+    string *body = _new_string();
+    string *response;
+
+    if (body == NULL) {
+        return handle_internal_error(send_body);
+    }
+
+    str_cat_cstr(body, "{\"error\":\"");
+    str_cat_cstr(body, code == NULL ? "calendar_error" : code);
+    str_cat_cstr(body, "\"}");
+
+    response = build_response_bytes(
+            status,
+            "application/json; charset=utf-8",
+            calendar_api_headers(),
+            get_const_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_calendar_services(bool send_body)
+{
+    string *json = NULL;
+    calendar_public_result result = calendar_public_build_services_json(&json);
+    string *response;
+
+    if (result != CALENDAR_PUBLIC_OK || json == NULL) {
+        fprintf(stderr, "Leistungs-API fehlgeschlagen: %s\n", calendar_public_last_error());
+        return handle_calendar_api_error(
+                "500 Internal Server Error",
+                "calendar_unavailable",
+                send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "application/json; charset=utf-8",
+            calendar_api_headers(),
+            get_const_char_str(json),
+            get_length(json),
+            send_body);
+    free_str(json);
+    return response;
+}
+
+static string *handle_calendar_availability(
+        const char *query,
+        size_t query_length,
+        bool send_body
+)
+{
+    string *json = NULL;
+    calendar_public_result result = calendar_public_build_availability_json(
+            query,
+            query_length,
+            &json);
+    string *response;
+
+    if (result == CALENDAR_PUBLIC_BAD_REQUEST) {
+        return handle_calendar_api_error("400 Bad Request", "invalid_query", send_body);
+    }
+    if (result == CALENDAR_PUBLIC_NOT_FOUND) {
+        return handle_calendar_api_error("404 Not Found", "service_not_found", send_body);
+    }
+    if (result != CALENDAR_PUBLIC_OK || json == NULL) {
+        fprintf(stderr, "Verfügbarkeits-API fehlgeschlagen: %s\n", calendar_public_last_error());
+        return handle_calendar_api_error(
+                "500 Internal Server Error",
+                "calendar_unavailable",
+                send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "application/json; charset=utf-8",
+            calendar_api_headers(),
+            get_const_char_str(json),
+            get_length(json),
+            send_body);
+    free_str(json);
+    return response;
+}
+
 static string *handle_booking_created(void)
 {
     const char *body =
@@ -976,7 +1077,7 @@ static string *handle_booking_created(void)
             "<head>\n"
             "    <meta charset=\"utf-8\">\n"
             "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-            "    <title>Anfrage gesendet | Styles 4 Dogs</title>\n"
+            "    <title>Terminanfrage gesendet | Styles 4 Dogs</title>\n"
             "    <link rel=\"stylesheet\" href=\"/style.css\">\n"
             "</head>\n"
             "<body>\n"
@@ -995,11 +1096,11 @@ static string *handle_booking_created(void)
             "    </header>\n"
             "    <main class=\"page\">\n"
             "        <section class=\"card\">\n"
-            "            <p class=\"eyebrow\">Anfrage eingegangen</p>\n"
+            "            <p class=\"eyebrow\">Termin vorläufig reserviert</p>\n"
             "            <h1>Vielen Dank!</h1>\n"
-            "            <p>Deine Anfrage wurde gespeichert. "
-            "Sie ist noch keine automatische Terminbestätigung. "
-            "Wir melden uns persönlich bei dir.</p>\n"
+            "            <p>Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum "
+            "vorläufig reserviert. Der Termin wird erst verbindlich, wenn der Salon ihn "
+            "persönlich bestätigt.</p>\n"
             "            <p><a class=\"button\" href=\"/\">"
             "Zurück zur Startseite</a></p>\n"
             "        </section>\n"
@@ -1014,25 +1115,60 @@ static string *handle_booking_created(void)
     return build_response_text(
             "201 Created",
             "text/html; charset=utf-8",
-            NULL,
+            "Cache-Control: no-store\r\n",
             body,
             true
     );
 }
 
+static string *handle_booking_unavailable(void)
+{
+    const char *body =
+            "<!doctype html><html lang=\"de\"><head>"
+            "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            "<title>Termin nicht mehr verfügbar | Styles 4 Dogs</title>"
+            "<link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+            "<main class=\"page\"><section class=\"card\">"
+            "<p class=\"eyebrow\">Termin nicht verfügbar</p>"
+            "<h1>Dieser Zeitraum wurde inzwischen vergeben.</h1>"
+            "<p>Bitte kehre zum Kalender zurück und wähle einen anderen freien Termin.</p>"
+            "<p><a class=\"button\" href=\"/kontakt\">Anderen Termin wählen</a></p>"
+            "</section></main></body></html>";
+
+    return build_response_text(
+            "409 Conflict",
+            "text/html; charset=utf-8",
+            "Cache-Control: no-store\r\n",
+            body,
+            true);
+}
+
 static string *handle_booking(string *request)
 {
     booking_request booking;
+    int64_t booking_id = 0;
+    calendar_public_result result;
 
     if (!parse_booking_request(request, &booking)) {
+        clear_request_body(request);
         return handle_bad_request(true);
     }
 
-    if (save_booking_request(&booking) != 0) {
-        return handle_internal_error(true);
+    result = calendar_public_reserve_booking(&booking, &booking_id);
+    clear_request_body(request);
+
+    if (result == CALENDAR_PUBLIC_OK) {
+        return handle_booking_created();
+    }
+    if (result == CALENDAR_PUBLIC_UNAVAILABLE) {
+        return handle_booking_unavailable();
+    }
+    if (result == CALENDAR_PUBLIC_BAD_REQUEST || result == CALENDAR_PUBLIC_NOT_FOUND) {
+        return handle_bad_request(true);
     }
 
-    return handle_booking_created();
+    fprintf(stderr, "Terminanfrage konnte nicht reserviert werden: %s\n", calendar_public_last_error());
+    return handle_internal_error(true);
 }
 
 static const char *admin_security_headers(void)
@@ -1301,6 +1437,14 @@ string *process(string *request)
         }
 
         return handle_not_found(true);
+    }
+
+    if (strcmp(path, "/api/services") == 0) {
+        return handle_calendar_services(send_body);
+    }
+
+    if (strcmp(path, "/api/availability") == 0) {
+        return handle_calendar_availability(query, query_length, send_body);
     }
 
     /*

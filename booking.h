@@ -11,6 +11,8 @@
 #define BOOKING_DOG_NAME_SIZE 256
 #define BOOKING_DOG_SIZE_SIZE 64
 #define BOOKING_SERVICE_SIZE 128
+#define BOOKING_APPOINTMENT_DATE_SIZE 11
+#define BOOKING_APPOINTMENT_START_SIZE 6
 #define BOOKING_PREFERRED_DATE_SIZE 32
 #define BOOKING_MESSAGE_SIZE 1024
 #define BOOKING_ADMIN_STATUS_SIZE 32
@@ -22,6 +24,8 @@ typedef struct booking_request {
     char dog_name[BOOKING_DOG_NAME_SIZE];
     char dog_size[BOOKING_DOG_SIZE_SIZE];
     char service[BOOKING_SERVICE_SIZE];
+    char appointment_date[BOOKING_APPOINTMENT_DATE_SIZE];
+    char appointment_start[BOOKING_APPOINTMENT_START_SIZE];
     char preferred_date[BOOKING_PREFERRED_DATE_SIZE];
     char message[BOOKING_MESSAGE_SIZE];
 } booking_request;
@@ -36,11 +40,6 @@ typedef struct booking_admin_filter {
  * application/x-www-form-urlencoded HTTP-Request.
  */
 bool parse_booking_request(const string *request, booking_request *booking);
-
-/*
- * Speichert eine validierte Buchungsanfrage in der SQLite-Datenbank.
- */
-int save_booking_request(const booking_request *booking);
 
 /* Liest und validiert Status- und Suchfilter aus dem Query-String. */
 bool parse_booking_admin_filter(

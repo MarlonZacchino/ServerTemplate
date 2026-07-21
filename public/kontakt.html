@@ -6,6 +6,7 @@
     <meta name="description" content="Termin bei Styles 4 Dogs anfragen. Teile uns deine Kontaktdaten und Informationen zu deinem Hund mit.">
     <title>Termin anfragen | Styles 4 Dogs</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/calendar.js" defer></script>
 </head>
 <body>
 <header class="site-header">
@@ -30,7 +31,7 @@
     <section class="section section-first">
         <div class="container contact-grid">
             <div class="form-card">
-                <form method="post" action="/booking" class="form">
+                <form method="post" action="/booking" class="form" data-booking-form>
                     <label for="name">Dein Name <span aria-hidden="true">*</span></label>
                     <input id="name" type="text" name="name" autocomplete="name" maxlength="120" required>
 
@@ -54,20 +55,36 @@
 
                         <div class="form-field">
                             <label for="service">Gewünschte Leistung <span aria-hidden="true">*</span></label>
-                            <select id="service" name="service" required>
-                                <option value="">Bitte auswählen</option>
-                                <option value="consultation">Beratung</option>
-                                <option value="wash_dry">Waschen und Föhnen</option>
-                                <option value="full_groom">Komplettpflege</option>
-                                <option value="claw_care">Krallenpflege</option>
-                                <option value="other">Sonstiges</option>
+                            <select id="service" name="service" required disabled>
+                                <option value="">Leistungen werden geladen …</option>
                             </select>
                         </div>
                     </div>
 
-                    <label for="preferred-date">Wunschdatum</label>
-                    <input id="preferred-date" type="date" name="preferred_date">
-                    <p class="field-hint">Das Wunschdatum ist unverbindlich. Den endgültigen Termin bestätigen wir persönlich.</p>
+                    <section class="booking-calendar" data-booking-calendar aria-labelledby="calendar-heading">
+                        <div class="calendar-heading-row">
+                            <div>
+                                <p class="eyebrow">Freie Termine</p>
+                                <h2 id="calendar-heading">Tag und Uhrzeit auswählen</h2>
+                            </div>
+                            <div class="calendar-navigation" aria-label="Kalendermonat wechseln">
+                                <button type="button" class="calendar-nav-button" data-calendar-previous aria-label="Vorheriger Monat">‹</button>
+                                <strong data-calendar-month></strong>
+                                <button type="button" class="calendar-nav-button" data-calendar-next aria-label="Nächster Monat">›</button>
+                            </div>
+                        </div>
+                        <p class="calendar-status" data-calendar-status role="status" aria-live="polite">Bitte eine Leistung auswählen.</p>
+                        <div class="calendar-weekdays" aria-hidden="true"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
+                        <div class="calendar-days" data-calendar-days></div>
+                        <div class="calendar-slots-section">
+                            <h3>Verfügbare Uhrzeiten</h3>
+                            <div class="calendar-slots" data-calendar-slots></div>
+                            <p class="calendar-selection" data-calendar-selection>Noch kein Termin ausgewählt.</p>
+                        </div>
+                        <input id="appointment-date" type="hidden" name="appointment_date" required>
+                        <input id="appointment-start" type="hidden" name="appointment_start" required>
+                        <noscript><p class="calendar-status calendar-status-error">Für die Auswahl eines freien Termins muss JavaScript aktiviert sein.</p></noscript>
+                    </section>
 
                     <label for="message">Worum geht es?</label>
                     <textarea id="message" name="message" rows="7" maxlength="1000" placeholder="Zum Beispiel Rasse, Fellzustand, Besonderheiten und gewünschte Pflege"></textarea>
@@ -77,7 +94,7 @@
                         <span>Ich habe die <a href="/datenschutz">Datenschutzhinweise</a> gelesen und stimme der Verarbeitung meiner Angaben zur Bearbeitung der Anfrage zu. <span aria-hidden="true">*</span></span>
                     </label>
 
-                    <button class="button" type="submit">Anfrage senden</button>
+                    <button class="button" type="submit" data-booking-submit disabled>Terminanfrage senden</button>
                     <p class="required-hint">* Pflichtfelder</p>
                 </form>
             </div>
@@ -86,9 +103,9 @@
                 <ol class="steps-list">
                     <li><span>1</span><div><strong>Anfrage senden</strong><p>Du beschreibst kurz deinen Hund und deinen Wunsch.</p></div></li>
                     <li><span>2</span><div><strong>Rückmeldung erhalten</strong><p>Wir klären Leistung, Preisrahmen und mögliche Termine.</p></div></li>
-                    <li><span>3</span><div><strong>Termin bestätigen</strong><p>Erst nach persönlicher Bestätigung ist der Termin verbindlich.</p></div></li>
+                    <li><span>3</span><div><strong>Termin bestätigen lassen</strong><p>Der Zeitraum wird vorläufig reserviert. Verbindlich ist er erst nach Bestätigung durch den Salon.</p></div></li>
                 </ol>
-                <div class="contact-note"><strong>Bitte beachten</strong><p>Das Formular ist aktuell eine Terminanfrage und noch keine automatische Buchungsbestätigung.</p></div>
+                <div class="contact-note"><strong>Bitte beachten</strong><p>Freie Zeiten können direkt angefragt werden. Bis zur Bestätigung durch den Salon bleibt der Termin vorläufig reserviert.</p></div>
             </aside>
         </div>
     </section>

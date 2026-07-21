@@ -46,6 +46,11 @@ typedef struct calendar_closure {
     char label[CALENDAR_LABEL_SIZE];
 } calendar_closure;
 
+typedef int (*calendar_service_callback)(
+        const calendar_service *service,
+        void *context
+);
+
 typedef struct calendar_pending_booking {
     const char *created_at_utc;
     const char *hold_expires_at_utc;
@@ -74,6 +79,10 @@ int calendar_database_get_service(
         calendar_service *service
 );
 int calendar_database_update_service(const calendar_service *service);
+int calendar_database_for_each_active_service(
+        calendar_service_callback callback,
+        void *context
+);
 
 int calendar_database_clear_opening_hours(void);
 int calendar_database_add_opening_period(

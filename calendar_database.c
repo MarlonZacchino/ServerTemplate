@@ -826,6 +826,60 @@ cleanup:
     return result;
 }
 
+int calendar_database_for_each_active_service(
+        calendar_service_callback callback,
+        void *context
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (calendar_database == NULL || callback == NULL) {
+        set_error("Kalender-Datenbank oder Service-Callback fehlt");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT id, code, name, duration_minutes, buffer_minutes, active, sort_order "
+            "FROM services WHERE active = 1 ORDER BY sort_order, name, id;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Aktive Leistungen konnten nicht vorbereitet werden");
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        calendar_service service;
+        const unsigned char *code = sqlite3_column_text(statement, 1);
+        const unsigned char *name = sqlite3_column_text(statement, 2);
+
+        memset(&service, 0, sizeof(service));
+        service.id = sqlite3_column_int64(statement, 0);
+        snprintf(service.code, sizeof(service.code), "%s", code == NULL ? "" : (const char *)code);
+        snprintf(service.name, sizeof(service.name), "%s", name == NULL ? "" : (const char *)name);
+        service.duration_minutes = sqlite3_column_int(statement, 3);
+        service.buffer_minutes = sqlite3_column_int(statement, 4);
+        service.active = sqlite3_column_int(statement, 5) != 0;
+        service.sort_order = sqlite3_column_int(statement, 6);
+
+        if (callback(&service, context) != 0) {
+            sqlite3_finalize(statement);
+            return 1;
+        }
+    }
+
+    if (step_result != SQLITE_DONE) {
+        set_sqlite_error("Aktive Leistungen konnten nicht vollständig gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
 int calendar_database_clear_opening_hours(void)
 {
     if (calendar_database == NULL) {

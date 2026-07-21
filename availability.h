@@ -1,6 +1,7 @@
 #ifndef STYLES4DOGS_AVAILABILITY_H
 #define STYLES4DOGS_AVAILABILITY_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,6 +20,12 @@ typedef struct availability_slot {
     int end_minute;
     int blocked_until_minute;
 } availability_slot;
+
+typedef struct availability_public_slot {
+    int start_minute;
+    int end_minute;
+    bool available;
+} availability_public_slot;
 
 typedef struct availability_reservation_request {
     availability_query query;
@@ -47,6 +54,18 @@ typedef enum availability_reservation_result {
 int availability_collect(
         const availability_query *query,
         availability_slot *slots,
+        size_t slots_capacity,
+        size_t *out_count
+);
+
+/*
+ * Liefert alle regulären Startzeiten eines Tages und markiert, welche davon
+ * aktuell frei sind. So kann das öffentliche Frontend belegte Zeiten
+ * darstellen, ohne personenbezogene Daten preiszugeben.
+ */
+int availability_collect_public(
+        const availability_query *query,
+        availability_public_slot *slots,
         size_t slots_capacity,
         size_t *out_count
 );
