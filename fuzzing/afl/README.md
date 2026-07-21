@@ -119,7 +119,7 @@ nur im Arbeitsspeicher. Funde werden getrennt unter `calendar_out/` abgelegt.
 
 ## Öffentliche Kalender-Routen
 
-Das HTTP-Korpus enthält Requests für `/api/services`, `/api/availability` und
-das neue Buchungsformular mit `appointment_date` und `appointment_start`. Die
-Kalender-Engine selbst bleibt zusätzlich über das separate `calendar_*`-Ziel
-instrumentiert.
+Das HTTP-Korpus enthält Requests für `/api/services`, `/api/availability`,
+das Buchungsformular mit `appointment_date` und `appointment_start` sowie die
+geschützten Admin-Kalenderrouten mit ungültigen Zugangsdaten. Die Kalender-Engine
+selbst bleibt zusätzlich über das separate `calendar_*`-Ziel instrumentiert.

@@ -115,3 +115,22 @@ Der HTTP-Testlauf prüft zusätzlich:
 - die sofortige Blockierung überlappender Slots,
 - `409 Conflict` bei einem erneuten Buchungsversuch,
 - die statische Auslieferung von `calendar.js`.
+
+
+## Kalender Phase 3
+
+Der Stateful-Test `Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten` prüft:
+
+- geschützten Zugriff auf `/admin/calendar`
+- CSRF-Ablehnung bei Kalenderänderungen
+- Speichern von Mindestvorlauf, Horizont, Zeitraster und Pending-Frist
+- transaktionales Ersetzen eines einzelnen Wochentags
+- Ablehnung überlappender Öffnungszeiten ohne Datenverlust
+- Änderung und Deaktivierung von Leistungen
+- sofortige Auswirkung auf `/api/services` und `/api/availability`
+- Eintragen einer ganztägigen Sperrzeit
+- Blockierung aller Slots am gesperrten Tag
+- Löschen der Sperrzeit und erneute Freigabe der Slots
+- sichere Redirects mit `303 See Other`
+
+Der vollständige Lauf enthält nun 30 Beams und 8 Stateful-Tests.

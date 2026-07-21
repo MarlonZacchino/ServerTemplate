@@ -1,0 +1,7 @@
+POST /admin/calendar/settings HTTP/1.1
+Host: localhost
+Authorization: Basic !!!
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 108
+
+csrf_token=invalid&min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24

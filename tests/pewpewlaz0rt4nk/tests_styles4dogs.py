@@ -657,6 +657,257 @@ def run_stateful_tests() -> int:
         if b'&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;' not in escaped_body:
             raise AssertionError("Suchwert wird nicht sicher im Formular wiedergegeben")
 
+
+    def admin_calendar_workflow() -> None:
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+
+        database_file = Path(database_file_value)
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {
+            **auth_headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        page_response = raw_request(request_text(
+            "GET",
+            "/admin/calendar",
+            auth_headers,
+        ).encode())
+        page_headers, page_body = assert_status(page_response, "200 OK")
+
+        if page_headers.get("cache-control") != "no-store":
+            raise AssertionError("Admin-Kalender setzt Cache-Control: no-store nicht")
+        for expected in (
+            "Kalender verwalten",
+            "Buchungsregeln",
+            "Regelmäßige Öffnungszeiten",
+            "Leistungen und Dauer",
+            "Urlaub und Sperrzeiten",
+        ):
+            if expected.encode("utf-8") not in page_body:
+                raise AssertionError(f"Admin-Kalender enthält {expected!r} nicht")
+
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', page_body)
+        if csrf_match is None:
+            raise AssertionError("CSRF-Token wurde im Admin-Kalender nicht gefunden")
+        csrf_token = csrf_match.group(1).decode("ascii")
+
+        invalid_csrf_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/settings",
+            form_headers,
+            urlencode({
+                "csrf_token": "0" * 64,
+                "min_notice_hours": "0",
+                "booking_horizon_days": "120",
+                "slot_interval_minutes": "30",
+                "pending_hold_hours": "12",
+            }),
+        ).encode())
+        assert_status(invalid_csrf_response, "403 Forbidden")
+
+        settings_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/settings",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "min_notice_hours": "0",
+                "booking_horizon_days": "120",
+                "slot_interval_minutes": "30",
+                "pending_hold_hours": "12",
+            }),
+        ).encode())
+        settings_headers, _ = assert_status(settings_response, "303 See Other")
+        if settings_headers.get("location") != "/admin/calendar?saved=settings":
+            raise AssertionError("Buchungsregeln leiten nicht korrekt zurück")
+
+        target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=14)
+        target_date = target.date().isoformat()
+        target_weekday = target.isoweekday()
+
+        hours_body = {
+            "csrf_token": csrf_token,
+            "weekday": str(target_weekday),
+            "start_1": "09:00",
+            "end_1": "12:00",
+            "start_2": "13:00",
+            "end_2": "17:00",
+            "start_3": "",
+            "end_3": "",
+            "start_4": "",
+            "end_4": "",
+        }
+        hours_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/hours",
+            form_headers,
+            urlencode(hours_body),
+        ).encode())
+        hours_headers, _ = assert_status(hours_response, "303 See Other")
+        if hours_headers.get("location") != "/admin/calendar?saved=hours":
+            raise AssertionError("Öffnungszeiten leiten nicht korrekt zurück")
+
+        overlapping_body = {
+            **hours_body,
+            "start_2": "11:30",
+            "end_2": "14:00",
+        }
+        overlap_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/hours",
+            form_headers,
+            urlencode(overlapping_body),
+        ).encode())
+        assert_status(overlap_response, "400 Bad Request")
+
+        service_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/service",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "code": "full_groom",
+                "name": "Komplettpflege Premium",
+                "duration_minutes": "90",
+                "buffer_minutes": "30",
+                "active": "1",
+            }),
+        ).encode())
+        service_headers, _ = assert_status(service_response, "303 See Other")
+        if service_headers.get("location") != "/admin/calendar?saved=service":
+            raise AssertionError("Leistungsänderung leitet nicht korrekt zurück")
+
+        deactivate_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/service",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "code": "consultation",
+                "name": "Beratung",
+                "duration_minutes": "30",
+                "buffer_minutes": "0",
+            }),
+        ).encode())
+        assert_status(deactivate_response, "303 See Other")
+
+        services_response = raw_request(request_text("GET", "/api/services").encode())
+        _, services_body = assert_status(services_response, "200 OK")
+        services = json.loads(services_body)["services"]
+        service_by_code = {service["code"]: service for service in services}
+        if "consultation" in service_by_code:
+            raise AssertionError("Deaktivierte Beratung wird weiterhin öffentlich angeboten")
+        if service_by_code.get("full_groom", {}).get("name") != "Komplettpflege Premium":
+            raise AssertionError("Geänderter Leistungsname erscheint nicht in der API")
+
+        availability_query = urlencode({
+            "service": "full_groom",
+            "from": target_date,
+            "to": target_date,
+        })
+        before_closure_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{availability_query}",
+        ).encode())
+        _, before_closure_body = assert_status(before_closure_response, "200 OK")
+        before_closure = json.loads(before_closure_body)
+        if not any(slot["available"] for slot in before_closure["days"][0]["slots"]):
+            raise AssertionError("Gespeicherte Öffnungszeiten erzeugen keine freien Termine")
+
+        closure_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/closure/add",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "start_date": target_date,
+                "end_date": target_date,
+                "start_time": "",
+                "end_time": "",
+                "label": "Testurlaub",
+                "all_day": "1",
+            }),
+        ).encode())
+        closure_headers, _ = assert_status(closure_response, "303 See Other")
+        if closure_headers.get("location") != "/admin/calendar?saved=closure-added":
+            raise AssertionError("Sperrzeit leitet nicht korrekt zurück")
+
+        after_closure_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{availability_query}",
+        ).encode())
+        _, after_closure_body = assert_status(after_closure_response, "200 OK")
+        after_closure = json.loads(after_closure_body)
+        if any(slot["available"] for slot in after_closure["days"][0]["slots"]):
+            raise AssertionError("Ganztägige Sperrzeit blockiert nicht alle Termine")
+
+        with sqlite3.connect(database_file) as connection:
+            settings = connection.execute(
+                "SELECT min_notice_minutes, booking_horizon_days, "
+                "slot_interval_minutes, pending_hold_minutes "
+                "FROM calendar_settings WHERE id = 1"
+            ).fetchone()
+            periods = connection.execute(
+                "SELECT start_minute, end_minute FROM weekly_opening_hours "
+                "WHERE weekday = ? ORDER BY start_minute",
+                (target_weekday,),
+            ).fetchall()
+            service = connection.execute(
+                "SELECT name, duration_minutes, buffer_minutes, active "
+                "FROM services WHERE code = 'full_groom'"
+            ).fetchone()
+            closure_row = connection.execute(
+                "SELECT id FROM calendar_closures "
+                "WHERE start_date = ? AND end_date = ? AND label = ?",
+                (target_date, target_date, "Testurlaub"),
+            ).fetchone()
+
+        if settings != (0, 120, 30, 720):
+            raise AssertionError(f"Buchungsregeln wurden falsch gespeichert: {settings!r}")
+        if periods != [(540, 720), (780, 1020)]:
+            raise AssertionError(f"Öffnungszeiten wurden falsch gespeichert: {periods!r}")
+        if service != ("Komplettpflege Premium", 90, 30, 1):
+            raise AssertionError(f"Leistung wurde falsch gespeichert: {service!r}")
+        if closure_row is None:
+            raise AssertionError("Sperrzeit wurde nicht in SQLite gespeichert")
+
+        delete_response = raw_request(request_text(
+            "POST",
+            "/admin/calendar/closure/delete",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "closure_id": str(closure_row[0]),
+            }),
+        ).encode())
+        delete_headers, _ = assert_status(delete_response, "303 See Other")
+        if delete_headers.get("location") != "/admin/calendar?saved=closure-deleted":
+            raise AssertionError("Sperrzeit-Löschung leitet nicht korrekt zurück")
+
+        restored_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{availability_query}",
+        ).encode())
+        _, restored_body = assert_status(restored_response, "200 OK")
+        restored = json.loads(restored_body)
+        if not any(slot["available"] for slot in restored["days"][0]["slots"]):
+            raise AssertionError("Gelöschte Sperrzeit gibt Termine nicht wieder frei")
+
+        notice_response = raw_request(request_text(
+            "GET",
+            "/admin/calendar?saved=settings",
+            auth_headers,
+        ).encode())
+        _, notice_body = assert_status(notice_response, "200 OK")
+        if "Die Buchungsregeln wurden gespeichert.".encode("utf-8") not in notice_body:
+            raise AssertionError("Admin-Kalender zeigt keine Speicherbestätigung")
+
     def rate_limiting() -> None:
         invalid_body = urlencode({"name": "Rate Limit"})
         booking_headers = proxy_headers(
@@ -810,6 +1061,7 @@ def run_stateful_tests() -> int:
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
+    check("Admin verwaltet Öffnungszeiten, Leistungen und Sperrzeiten", admin_calendar_workflow)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 
     return failures
@@ -845,6 +1097,7 @@ def main() -> int:
     add_status(cannon, "Nicht erlaubte Methode", request_text("PUT", "/"), "405 Method Not Allowed")
     add_status(cannon, "POST auf unbekannte Route", request_text("POST", "/unbekannt"), "404 Not Found")
     add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "401 Unauthorized")
+    add_status(cannon, "Admin-Kalender ohne Zugangsdaten", request_text("GET", "/admin/calendar"), "401 Unauthorized")
     add_status(cannon, "Adminbereich mit ungültigem Basic Token", request_text(
         "GET", "/admin/bookings", {"Authorization": "Basic !!!"}
     ), "401 Unauthorized")
@@ -853,6 +1106,12 @@ def main() -> int:
         "/admin/bookings/status",
         {"Content-Type": "application/x-www-form-urlencoded"},
         "booking_id=1&status=kontaktiert&csrf_token=invalid",
+    ), "401 Unauthorized")
+    add_status(cannon, "Kalenderänderung ohne Zugangsdaten", request_text(
+        "POST",
+        "/admin/calendar/settings",
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        "min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24&csrf_token=invalid",
     ), "401 Unauthorized")
     add_status(cannon, "Setup-Seite beim ersten Start", request_text("GET", "/setup/admin"), "200 OK")
 
