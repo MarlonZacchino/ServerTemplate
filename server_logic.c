@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "booking_database.h"
+#include "calendar_database.h"
 #include "http_lib.h"
 #include "process.h"
 #include "rate_limit.h"
@@ -991,6 +992,15 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    if (calendar_database_initialize() != 0) {
+        fprintf(
+                stderr,
+                "ERROR initializing calendar database: %s\n",
+                calendar_database_last_error());
+        booking_database_shutdown();
+        return EXIT_FAILURE;
+    }
+
     if (argc == 2 && strcmp(argv[1], "stdin") == 0) {
         main_loop_stdin();
     } else {
@@ -1002,6 +1012,7 @@ int main(int argc, char *argv[])
         main_loop();
     }
 
+    calendar_database_shutdown();
     booking_database_shutdown();
     return EXIT_SUCCESS;
 }

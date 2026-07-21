@@ -79,3 +79,12 @@ systemctl start styles4dogs
 
 Vor dem Produktivbetrieb wird daraus noch ein automatisierter Backup- und
 Restore-Test erstellt.
+
+## Kalenderschema Version 3
+
+Nach der ursprünglichen TSV-Migration erweitert Phase 1 des Kalenders die
+Datenbank auf `PRAGMA user_version = 3`. Bestehende Buchungszeilen bleiben
+unverändert sichtbar und werden als `decision_status = 'legacy'` markiert.
+Neue Tabellen für Leistungen, Einstellungen, Wochenöffnungszeiten und
+Sperrzeiten werden idempotent angelegt. Details stehen in
+`CALENDAR_PHASE1.md`.

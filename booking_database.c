@@ -58,7 +58,24 @@ static bool is_memory_database_path(const char *path)
     }
 
     return strcmp(path, ":memory:") == 0 ||
-           strncmp(path, "file::memory:", strlen("file::memory:")) == 0;
+           strncmp(path, "file::memory:", strlen("file::memory:")) == 0 ||
+           (strncmp(path, "file:", strlen("file:")) == 0 &&
+            strstr(path, "mode=memory") != NULL);
+}
+
+static const char *database_open_path(void)
+{
+    /*
+     * Zwei Module verwenden getrennte SQLite-Verbindungen. Ein nacktes
+     * :memory: würde deshalb zwei unabhängige Datenbanken erzeugen. Die
+     * benannte Shared-Cache-URI hält beide Verbindungen im selben Prozess
+     * auf derselben flüchtigen Datenbank.
+     */
+    if (strcmp(server_config_database_file(), ":memory:") == 0) {
+        return "file:styles4dogs-runtime?mode=memory&cache=shared";
+    }
+
+    return server_config_database_file();
 }
 
 static int ensure_data_directory(void)
@@ -202,7 +219,6 @@ static int create_schema(void)
             "    key TEXT PRIMARY KEY,"
             "    value TEXT NOT NULL"
             ");"
-            "PRAGMA user_version = 2;"
             "COMMIT;";
 
     return execute_sql(schema_sql);
@@ -661,12 +677,12 @@ int booking_database_initialize(void)
         return -1;
     }
 
-    if (strncmp(server_config_database_file(), "file:", strlen("file:")) == 0) {
+    if (strncmp(database_open_path(), "file:", strlen("file:")) == 0) {
         open_flags |= SQLITE_OPEN_URI;
     }
 
     previous_umask = umask(0077);
-    if (sqlite3_open_v2(server_config_database_file(), &database, open_flags, NULL) != SQLITE_OK) {
+    if (sqlite3_open_v2(database_open_path(), &database, open_flags, NULL) != SQLITE_OK) {
         umask(previous_umask);
         set_sqlite_error("SQLite-Datenbank konnte nicht geöffnet werden");
         booking_database_shutdown();
@@ -709,6 +725,40 @@ void booking_database_shutdown(void)
     database = NULL;
 }
 
+static bool booking_calendar_columns_exist(void)
+{
+    sqlite3_stmt *statement = NULL;
+    bool service_id_found = false;
+    bool decision_status_found = false;
+    int step_result;
+
+    if (sqlite3_prepare_v2(
+            database,
+            "PRAGMA table_info(bookings);",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        return false;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(statement, 1);
+
+        if (name == NULL) {
+            continue;
+        }
+
+        if (strcmp((const char *)name, "service_id") == 0) {
+            service_id_found = true;
+        } else if (strcmp((const char *)name, "decision_status") == 0) {
+            decision_status_found = true;
+        }
+    }
+
+    sqlite3_finalize(statement);
+    return step_result == SQLITE_DONE && service_id_found && decision_status_found;
+}
+
 int booking_database_insert(const booking_request *booking)
 {
     sqlite3_stmt *statement = NULL;
@@ -730,12 +780,22 @@ int booking_database_insert(const booking_request *booking)
         snprintf(created_at, sizeof(created_at), "%ld", (long)now);
     }
 
+    const char *insert_sql = booking_calendar_columns_exist()
+            ? "INSERT INTO bookings("
+              "created_at, status, customer_name, contact, dog_name, dog_size, "
+              "service, preferred_date, message, legacy, service_id, decision_status"
+              ") VALUES("
+              "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, "
+              "(SELECT id FROM services WHERE code = ?7), 'legacy'"
+              ");"
+            : "INSERT INTO bookings("
+              "created_at, status, customer_name, contact, dog_name, dog_size, "
+              "service, preferred_date, message, legacy"
+              ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0);";
+
     if (sqlite3_prepare_v2(
             database,
-            "INSERT INTO bookings("
-            "created_at, status, customer_name, contact, dog_name, dog_size, "
-            "service, preferred_date, message, legacy"
-            ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0);",
+            insert_sql,
             -1,
             &statement,
             NULL) != SQLITE_OK) {

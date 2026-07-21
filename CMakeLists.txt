@@ -76,10 +76,41 @@ add_executable(Server
         form_urlencoded.c
         server_config.c
         rate_limit.c
+        calendar_time.c
+        calendar_database.c
+        availability.c
 )
 
 add_executable(create_admin_user
         tools/create_admin_user.c
+)
+
+add_executable(calendar_engine_tests EXCLUDE_FROM_ALL
+        tests/calendar_engine_tests.c
+        booking_database.c
+        calendar_time.c
+        calendar_database.c
+        availability.c
+        server_config.c
+)
+
+target_include_directories(calendar_engine_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_executable(calendar_fuzz_target EXCLUDE_FROM_ALL
+        fuzzing/afl/calendar_fuzz_target.c
+        booking_database.c
+        calendar_time.c
+        calendar_database.c
+        availability.c
+        server_config.c
+        form_urlencoded.c
+        http_lib.c
+)
+
+target_include_directories(calendar_fuzz_target PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_include_directories(Server PRIVATE
@@ -87,6 +118,32 @@ target_include_directories(Server PRIVATE
 )
 
 target_compile_definitions(Server PRIVATE
+        _POSIX_C_SOURCE=200809L
+        _XOPEN_SOURCE=700
+        SERVER_DEFAULT_BIND_ADDRESS=\"${STYLES4DOGS_BIND_ADDRESS}\"
+        SERVER_DEFAULT_PORT=\"${STYLES4DOGS_PORT}\"
+        SERVER_DEFAULT_DOCUMENT_ROOT=\"${STYLES4DOGS_DOCUMENT_ROOT}\"
+        SERVER_DEFAULT_SECRETS_DIR=\"${STYLES4DOGS_SECRETS_DIR}\"
+        SERVER_DEFAULT_AUTH_FILE=\"${STYLES4DOGS_AUTH_FILE}\"
+        SERVER_DEFAULT_DATA_DIR=\"${STYLES4DOGS_DATA_DIR}\"
+        SERVER_DEFAULT_DATABASE_FILE=\"${STYLES4DOGS_DATABASE_FILE}\"
+        SERVER_DEFAULT_LEGACY_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
+)
+
+target_compile_definitions(calendar_engine_tests PRIVATE
+        _POSIX_C_SOURCE=200809L
+        _XOPEN_SOURCE=700
+        SERVER_DEFAULT_BIND_ADDRESS=\"${STYLES4DOGS_BIND_ADDRESS}\"
+        SERVER_DEFAULT_PORT=\"${STYLES4DOGS_PORT}\"
+        SERVER_DEFAULT_DOCUMENT_ROOT=\"${STYLES4DOGS_DOCUMENT_ROOT}\"
+        SERVER_DEFAULT_SECRETS_DIR=\"${STYLES4DOGS_SECRETS_DIR}\"
+        SERVER_DEFAULT_AUTH_FILE=\"${STYLES4DOGS_AUTH_FILE}\"
+        SERVER_DEFAULT_DATA_DIR=\"${STYLES4DOGS_DATA_DIR}\"
+        SERVER_DEFAULT_DATABASE_FILE=\"${STYLES4DOGS_DATABASE_FILE}\"
+        SERVER_DEFAULT_LEGACY_BOOKING_FILE=\"${STYLES4DOGS_BOOKING_FILE}\"
+)
+
+target_compile_definitions(calendar_fuzz_target PRIVATE
         _POSIX_C_SOURCE=200809L
         _XOPEN_SOURCE=700
         SERVER_DEFAULT_BIND_ADDRESS=\"${STYLES4DOGS_BIND_ADDRESS}\"
@@ -108,6 +165,14 @@ target_link_libraries(create_admin_user PRIVATE
         PkgConfig::SODIUM
 )
 
+target_link_libraries(calendar_engine_tests PRIVATE
+        PkgConfig::SQLITE3
+)
+
+target_link_libraries(calendar_fuzz_target PRIVATE
+        PkgConfig::SQLITE3
+)
+
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(Server PRIVATE
             -Wall
@@ -118,6 +183,22 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 
     target_compile_options(create_admin_user PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wstrict-prototypes
+    )
+
+    target_compile_options(calendar_engine_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wstrict-prototypes
+    )
+
+    target_compile_options(calendar_fuzz_target PRIVATE
             -Wall
             -Wextra
             -Wpedantic
