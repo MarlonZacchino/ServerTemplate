@@ -1348,7 +1348,6 @@ def run_stateful_tests() -> int:
             "/admin-calendar.js",
             "opening-period-grid-three",
             "opening-period-optional",
-            "Vierten Zeitraum hinzufügen",
             "calendar-save-floating",
             "Buchungsschutz",
         ):

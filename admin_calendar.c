@@ -12,7 +12,7 @@
 #include <string.h>
 
 #define ADMIN_CALENDAR_ERROR_SIZE 512
-#define ADMIN_OPENING_PERIODS_PER_DAY 4
+#define ADMIN_OPENING_PERIODS_PER_DAY 3
 #define ADMIN_MAX_SERVICES 128
 
 static char admin_calendar_error[ADMIN_CALENDAR_ERROR_SIZE];
@@ -335,7 +335,7 @@ static void append_settings_section(
 
     str_cat_cstr(page,
             "                    </select><span class=\"admin-field-help\">Abstand zwischen möglichen Buchungszeiten.</span></label>\n"
-            "                    <label>Freihaltezeit für offene Anfragen"
+            "                    <label>Zeit für offene Anfragen"
             "<input name=\"pending_hold_hours\" type=\"number\" min=\"1\" max=\"168\" required value=\"");
     append_integer(page, settings->pending_hold_minutes / 60);
     str_cat_cstr(page,
@@ -367,12 +367,19 @@ static void append_settings_section(
     }
     str_cat_cstr(page,
             "> Automatische E-Mail-Erinnerung vor bestätigten Terminen</label>\n"
-            "                <p class=\"admin-calendar-hint\">Zeitzone: <strong>");
-    append_html_text(page, settings->timezone);
-    str_cat_cstr(page,
-            "</strong>. Die Kapazität bleibt vorerst auf einen Hund gleichzeitig begrenzt.</p>\n"
-            "            </div>\n"
-            "        </section>\n");
+        "            </div>\n"
+        "            <p class=\"admin-calendar-hint admin-calendar-meta\">"
+        "Zeitzone: <strong>");
+        append_html_text(page, settings->timezone);
+
+        str_cat_cstr(
+            page,
+            "</strong></p>\n"
+            "<p class=\"admin-calendar-hint admin-calendar-meta\">"
+            "Die Kapazität bleibt vorerst auf einen Hund gleichzeitig begrenzt."
+            "</p>\n"
+            "        </section>\n"
+        );
 }
 
 static void append_time_input(
@@ -466,10 +473,6 @@ static void append_opening_hours_fields(
     }
 
     str_cat_cstr(page, "                    </div>\n");
-    if (count < ADMIN_OPENING_PERIODS_PER_DAY) {
-        str_cat_cstr(page,
-                "                    <button class=\"button button-small button-secondary opening-period-add\" type=\"button\" data-opening-period-add hidden>Vierten Zeitraum hinzufügen</button>\n");
-    }
     str_cat_cstr(page,
             "                    <p class=\"admin-calendar-hint\">Leere Zeiträume werden ignoriert. Sind alle Felder leer, ist der Tag geschlossen.</p>\n"
             "                </div>\n");
@@ -765,10 +768,14 @@ string *admin_calendar_build_page(
             "    <header class=\"site-header\"><div class=\"container nav-wrap\">\n"
             "        <a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>\n"
             "        <nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
-            "<a href=\"/admin\">Übersicht</a><a href=\"/\">Website öffnen</a>"
+            "<a href=\"/admin\">Übersicht</a>"
+            "<a href=\"/\">Website öffnen</a>"
             "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
+            "<a href=\"/admin/gallery\">Fotos</a>"
             "<a href=\"/admin/appointments\">Termine</a>"
-            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
+            "<a href=\"/admin/notifications\">E-Mail</a>"
+            "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a>"
+            "</nav>\n"
             "    </div></header>\n"
             "    <main class=\"page admin-page admin-calendar-page\">\n"
             "        <section class=\"card admin-card admin-calendar-intro\">\n"

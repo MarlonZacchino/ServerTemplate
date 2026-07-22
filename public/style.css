@@ -1335,16 +1335,40 @@ select:focus {
 }
 
 .admin-checkbox {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+
+    font-size: 1rem;
     font-weight: 700;
+    line-height: 1.4;
 }
 
-.admin-checkbox input {
-    width: 20px;
-    height: 20px;
-    min-height: 0;
+.admin-checkbox input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    margin: 2px 0 0;
+    accent-color: var(--accent);
+}
+
+.admin-checkbox-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.admin-checkbox-copy strong {
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+}
+
+.admin-checkbox-copy small {
+    color: var(--muted);
+    font-size: 0.92rem;
+    font-weight: 500;
+    line-height: 1.45;
 }
 
 .opening-days,
@@ -2877,18 +2901,6 @@ select:focus {
 }
 
 
-/* Phase 11: Admin-Kalender, Monatsansicht und E-Mail-Vorlagen */
-.admin-checkbox-copy {
-    display: grid;
-    gap: 3px;
-}
-
-.admin-checkbox-copy small {
-    color: var(--muted);
-    font-weight: 500;
-    line-height: 1.45;
-}
-
 /* Öffnungszeiten bündig über die volle Kalenderbreite */
 .opening-day-form {
     display: grid;
@@ -2943,8 +2955,7 @@ select:focus {
     box-shadow: 0 8px 24px rgba(45, 30, 20, 0.04);
 }
 
-.opening-period[hidden],
-.opening-period-add[hidden] {
+.opening-period[hidden] {
     display: none;
 }
 
@@ -2961,11 +2972,6 @@ select:focus {
     width: 100%;
     text-align: center;
     font-variant-numeric: tabular-nums;
-}
-
-.opening-period-add {
-    grid-column: 2;
-    justify-self: end;
 }
 
 .opening-day-form .admin-calendar-hint,
@@ -3185,9 +3191,9 @@ select:focus {
 
 .appointment-week-day-summary {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 18px;
-    align-items: center;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    width: 100%;
     padding: 24px;
     cursor: pointer;
     list-style: none;
@@ -3216,16 +3222,37 @@ select:focus {
 }
 
 .appointment-week-day-count {
-    padding: 8px 12px;
-    border-radius: 999px;
-    background: var(--surface-soft);
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 62px;
+    padding: 14px 18px;
+
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    background: rgba(154, 104, 69, 0.14);
+    color: var(--accent-dark);
+
+    font-size: 1rem;
+    font-weight: 800;
+    white-space: normal;
+}
+
+.appointment-week-day-summary:hover .appointment-week-day-count,
+.appointment-week-day-summary:focus-visible .appointment-week-day-count {
+    border-color: var(--accent-dark);
+    background: rgba(154, 104, 69, 0.22);
 }
 
 .appointment-week-day-toggle {
+    justify-self: center;
     color: var(--accent-dark);
     font-size: 0.86rem;
     font-weight: 800;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset:px;
     white-space: nowrap;
 }
 

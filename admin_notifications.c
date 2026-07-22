@@ -169,7 +169,15 @@ string *admin_notifications_build_page(const char *csrf_token, const char *notic
     if (page == NULL) { sodium_memzero(&smtp, sizeof(smtp)); set_error("Speicher für Adminseite fehlt"); return NULL; }
     message = notice(notice_code);
 
-    str_cat_cstr(page, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>E-Mail und Nachrichten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/admin-notifications.js\" defer></script></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/admin\">Übersicht</a><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\" aria-current=\"page\">E-Mail</a></nav></div></header><main class=\"page admin-page admin-notifications-page\"><section class=\"card admin-card\"><p class=\"eyebrow\">Admin</p><h1>E-Mail und Nachrichten</h1><p>Verbinde das Salon-Postfach, teste den Versand und passe automatische Nachrichten an.</p>");
+    str_cat_cstr(page, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>E-Mail und Nachrichten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/admin-notifications.js\" defer></script></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
+                       "<a href=\"/\">Website öffnen</a>"
+                       "<a href=\"/admin\">Übersicht</a>"
+                       "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
+                       "<a href=\"/admin/gallery\">Fotos</a>"
+                       "<a href=\"/admin/appointments\">Termine</a>"
+                       "<a href=\"/admin/notifications\" aria-current=\"page\">E-Mail</a><"
+                       "<a href=\"/admin/calendar\">Einstellungen</a>"
+                       "/nav></div></header><main class=\"page admin-page admin-notifications-page\"><section class=\"card admin-card\"><p class=\"eyebrow\">Admin</p><h1>E-Mail und Nachrichten</h1><p>Verbinde das Salon-Postfach, teste den Versand und passe automatische Nachrichten an.</p>");
     if (message != NULL) { str_cat_cstr(page, "<p class=\"admin-success\" role=\"status\">"); html(page, message); str_cat_cstr(page, "</p>"); }
     str_cat_cstr(page, "<div class=\"notification-status-grid\"><div><span>Verbindung</span><strong>"); str_cat_cstr(page, smtp.enabled ? "Aktiv" : "Nicht verbunden");
     str_cat_cstr(page, "</strong></div><div><span>Ausstehend</span><strong>"); append_size(page, counts.pending);
