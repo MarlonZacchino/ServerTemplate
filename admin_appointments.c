@@ -612,41 +612,74 @@ string *admin_appointments_build_page(
 
         str_cat_cstr(page, "</div></section>");
     } else {
+        const bool collapse_multiple_week_appointments = strcmp(view, "week") == 0;
+
         str_cat_cstr(page, "<section class=\"appointment-days\">");
         for (int index = 0; index < day_count; index++) {
             char date[11];
+            string *entries = _new_string();
             appointment_day_context context = {
-                    .page = page,
+                    .page = entries,
                     .csrf_token = csrf_token,
                     .date = date,
                     .booking_count = 0,
                     .closure_count = 0
             };
 
-            if (calendar_date_add_days(range_start, index, date) != 0) {
+            if (entries == NULL || calendar_date_add_days(range_start, index, date) != 0) {
+                free_str(entries);
                 free_str(page);
                 set_error("Kalendertag konnte nicht berechnet werden");
                 return NULL;
             }
 
-            str_cat_cstr(page, "<section class=\"card appointment-day\"><h2>");
-            append_display_date(page, date);
-            str_cat_cstr(page, "</h2><div class=\"appointment-day-list\">");
-
             if (calendar_database_for_each_closure_in_range(
                     date, date, append_closure_record, &context) < 0 ||
                 booking_database_for_each_appointment(
                     date, date, append_appointment_record, &context) != 0) {
+                free_str(entries);
                 free_str(page);
                 set_error("Termine oder Sperrzeiten konnten nicht geladen werden");
                 return NULL;
             }
 
-            if (context.booking_count == 0 && context.closure_count == 0) {
-                str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine.</p>");
+            if (collapse_multiple_week_appointments && context.booking_count > 1) {
+                str_cat_cstr(page,
+                        "<details class=\"card appointment-day appointment-week-day-collapsible\">"
+                        "<summary class=\"appointment-week-day-summary\"><div><h2>");
+                append_display_date(page, date);
+                str_cat_cstr(page, "</h2>");
+                if (context.closure_count > 0) {
+                    str_cat_cstr(page, "<small class=\"appointment-week-day-closures\">");
+                    append_size_value(page, context.closure_count);
+                    str_cat_cstr(page, context.closure_count == 1 ? " Sperrzeit" : " Sperrzeiten");
+                    str_cat_cstr(page, "</small>");
+                }
+                str_cat_cstr(page, "</div><strong class=\"appointment-week-day-count\">");
+                append_size_value(page, context.booking_count);
+                str_cat_cstr(page,
+                        context.booking_count == 1
+                                ? " Termin vorhanden!"
+                                : " Termine vorhanden!");
+                str_cat_cstr(page,
+                        "</strong><span class=\"appointment-week-day-toggle\">Details anzeigen</span>"
+                        "</summary><div class=\"appointment-week-day-expanded\">"
+                        "<div class=\"appointment-day-list\">");
+                str_cat(page, entries->str, entries->len);
+                str_cat_cstr(page, "</div></div></details>");
+            } else {
+                str_cat_cstr(page, "<section class=\"card appointment-day\"><h2>");
+                append_display_date(page, date);
+                str_cat_cstr(page, "</h2><div class=\"appointment-day-list\">");
+                if (context.booking_count == 0 && context.closure_count == 0) {
+                    str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine.</p>");
+                } else {
+                    str_cat(page, entries->str, entries->len);
+                }
+                str_cat_cstr(page, "</div></section>");
             }
 
-            str_cat_cstr(page, "</div></section>");
+            free_str(entries);
         }
         str_cat_cstr(page, "</section>");
     }

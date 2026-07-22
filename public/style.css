@@ -3176,3 +3176,84 @@ select:focus {
         text-align: left;
     }
 }
+
+/* Phase 12: einklappbare Tage in der Wochenansicht */
+.appointment-week-day-collapsible {
+    padding: 0;
+    overflow: hidden;
+}
+
+.appointment-week-day-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 18px;
+    align-items: center;
+    padding: 24px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.appointment-week-day-summary::-webkit-details-marker {
+    display: none;
+}
+
+.appointment-week-day-summary:hover,
+.appointment-week-day-summary:focus-visible {
+    outline: none;
+    background: rgba(154, 104, 69, 0.06);
+}
+
+.appointment-week-day-summary h2 {
+    margin: 0;
+    font-size: 1.45rem;
+}
+
+.appointment-week-day-closures {
+    display: block;
+    margin-top: 6px;
+    color: #8b3030;
+    font-weight: 800;
+}
+
+.appointment-week-day-count {
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--surface-soft);
+    white-space: nowrap;
+}
+
+.appointment-week-day-toggle {
+    color: var(--accent-dark);
+    font-size: 0.86rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.appointment-week-day-collapsible[open] .appointment-week-day-summary {
+    border-bottom: 1px solid var(--line);
+}
+
+.appointment-week-day-collapsible[open] .appointment-week-day-toggle {
+    font-size: 0;
+}
+
+.appointment-week-day-collapsible[open] .appointment-week-day-toggle::after {
+    content: "Details schließen";
+    font-size: 0.86rem;
+}
+
+.appointment-week-day-expanded {
+    padding: 20px 24px 24px;
+}
+
+@media (max-width: 700px) {
+    .appointment-week-day-summary {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .appointment-week-day-count,
+    .appointment-week-day-toggle {
+        justify-self: start;
+    }
+}

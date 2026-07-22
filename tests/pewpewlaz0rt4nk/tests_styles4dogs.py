@@ -2283,8 +2283,57 @@ def run_stateful_tests() -> int:
             auth_headers,
         ).encode())
         _, week_body = assert_status(week_response, "200 OK")
-        if "Woche" not in week_body.decode("utf-8"):
+        week_page = week_body.decode("utf-8")
+        if "Woche" not in week_page:
             raise AssertionError("Wochenansicht wurde nicht ausgeliefert")
+
+        if "appointment-week-day-collapsible" in page:
+            raise AssertionError("Tagesansicht klappt Termine unerwartet ein")
+
+        with sqlite3.connect(database_file) as connection:
+            multiple_appointments = connection.execute(
+                "SELECT appointment_date, COUNT(*) "
+                "FROM bookings "
+                "WHERE decision_status IN ('pending', 'confirmed') "
+                "GROUP BY appointment_date "
+                "HAVING COUNT(*) > 1 "
+                "ORDER BY COUNT(*) DESC, appointment_date "
+                "LIMIT 1"
+            ).fetchone()
+
+        if multiple_appointments is None:
+            raise AssertionError(
+                "Kein Kalendertag mit mehreren Terminen für den Wochenansichtstest vorhanden"
+            )
+
+        collapsed_week_response = raw_request(request_text(
+            "GET",
+            f"/admin/appointments?view=week&date={multiple_appointments[0]}",
+            auth_headers,
+        ).encode())
+        _, collapsed_week_body = assert_status(
+            collapsed_week_response,
+            "200 OK",
+        )
+        collapsed_week_page = collapsed_week_body.decode("utf-8")
+        expected_count_text = f"{multiple_appointments[1]} Termine vorhanden!"
+
+        for expected in (
+            "appointment-week-day-collapsible",
+            "appointment-week-day-summary",
+            expected_count_text,
+            "Details anzeigen",
+        ):
+            if expected not in collapsed_week_page:
+                raise AssertionError(
+                    f"Eingeklappte Wochenansicht enthält {expected!r} nicht"
+                )
+
+        if re.search(
+            r'<details class="card appointment-day appointment-week-day-collapsible"\s+open',
+            collapsed_week_page,
+        ):
+            raise AssertionError("Mehrfach belegter Wochentag ist bereits geöffnet")
 
         month_response = raw_request(request_text(
             "GET",
