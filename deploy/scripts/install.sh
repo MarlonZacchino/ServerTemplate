@@ -211,6 +211,7 @@ install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE6.md" "$APP_PATH/share/
 install_file 0644 root root "$PROJECT_ROOT/GALLERY_PHASE8.md" "$APP_PATH/share/GALLERY_PHASE8.md"
 install_file 0644 root root "$PROJECT_ROOT/CUSTOMER_PORTAL_PHASE9.md" "$APP_PATH/share/CUSTOMER_PORTAL_PHASE9.md"
 install_file 0644 root root "$PROJECT_ROOT/ADDRESS_PHASE10.md" "$APP_PATH/share/ADDRESS_PHASE10.md"
+install_file 0644 root root "$PROJECT_ROOT/BOOKING_WORKFLOW_PHASE13.md" "$APP_PATH/share/BOOKING_WORKFLOW_PHASE13.md"
 install_file 0644 root root "$PROJECT_ROOT/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
 
 case "$WEB_PATH" in

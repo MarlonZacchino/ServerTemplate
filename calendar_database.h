@@ -74,6 +74,7 @@ typedef struct calendar_pending_booking {
     const char *postal_code;
     const char *city;
     const char *dog_name;
+    const char *dog_breed;
     const char *dog_size;
     const char *service_code;
     const char *appointment_date;
@@ -165,6 +166,10 @@ int calendar_database_begin_immediate(void);
 int calendar_database_commit(void);
 void calendar_database_rollback(void);
 int calendar_database_expire_pending(const char *now_utc);
+int calendar_database_complete_due_bookings(
+        const char *timezone,
+        const char *now_utc
+);
 int calendar_database_count_recent_contact_bookings(
         const char *contact_channel,
         const char *email,

@@ -13,6 +13,7 @@
 
 typedef struct notification_smtp_settings {
     bool enabled;
+    bool delivery_enabled;
     bool managed_by_admin;
     bool notify_admin_on_new_booking;
     char url[NOTIFICATION_SMTP_URL_SIZE];
@@ -26,6 +27,7 @@ typedef struct notification_smtp_settings {
 int notification_settings_load(notification_smtp_settings *settings);
 int notification_settings_save(const notification_smtp_settings *settings);
 int notification_settings_disconnect(void);
+int notification_settings_set_delivery_enabled(bool enabled);
 bool notification_settings_are_valid(const notification_smtp_settings *settings, bool require_enabled);
 const char *notification_settings_last_error(void);
 

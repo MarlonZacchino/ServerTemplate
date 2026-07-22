@@ -30,6 +30,9 @@
     const contactPreferenceInputs = [...form.querySelectorAll('input[name="contact_preference"]')];
     const whatsappInput = form.querySelector('input[name="contact_preference"][value="whatsapp"]');
     const confirmationNotes = [...document.querySelectorAll("[data-confirmation-note]")];
+    const dogBreedSelect = form.querySelector("#dog-breed");
+    const dogBreedOtherHint = form.querySelector("[data-dog-breed-other-hint]");
+    const messageInput = form.querySelector("#message");
 
     const setRadioGroupEnabled = (inputs, enabled) => {
         inputs.forEach((input) => {
@@ -85,6 +88,28 @@
     phoneKindInputs.forEach((input) => input.addEventListener("change", syncPhonePreference));
     if (contactChoice) {
         syncContactChoice();
+    }
+
+    const syncDogBreedHint = () => {
+        if (!dogBreedSelect || !dogBreedOtherHint) {
+            return;
+        }
+
+        const showHint = dogBreedSelect.value === "other";
+        dogBreedOtherHint.hidden = !showHint;
+
+        if (messageInput) {
+            if (showHint) {
+                messageInput.setAttribute("aria-describedby", "dog-breed-other-hint");
+            } else {
+                messageInput.removeAttribute("aria-describedby");
+            }
+        }
+    };
+
+    if (dogBreedSelect) {
+        dogBreedSelect.addEventListener("change", syncDogBreedHint);
+        syncDogBreedHint();
     }
 
     const today = new Date();

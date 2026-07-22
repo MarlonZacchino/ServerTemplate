@@ -493,6 +493,7 @@ calendar_public_result calendar_public_reserve_booking(
             .postal_code = booking->postal_code,
             .city = booking->city,
             .dog_name = booking->dog_name,
+            .dog_breed = booking->dog_breed,
             .dog_size = booking->dog_size,
             .message = booking->message,
             .auto_confirm = settings.auto_confirm_bookings

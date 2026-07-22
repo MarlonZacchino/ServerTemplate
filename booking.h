@@ -19,6 +19,7 @@
 #define BOOKING_POSTAL_CODE_SIZE 6
 #define BOOKING_CITY_SIZE 128
 #define BOOKING_DOG_NAME_SIZE 256
+#define BOOKING_DOG_BREED_SIZE 64
 #define BOOKING_DOG_SIZE_SIZE 64
 #define BOOKING_SERVICE_SIZE 128
 #define BOOKING_APPOINTMENT_DATE_SIZE 11
@@ -42,6 +43,7 @@ typedef struct booking_request {
     char postal_code[BOOKING_POSTAL_CODE_SIZE];
     char city[BOOKING_CITY_SIZE];
     char dog_name[BOOKING_DOG_NAME_SIZE];
+    char dog_breed[BOOKING_DOG_BREED_SIZE];
     char dog_size[BOOKING_DOG_SIZE_SIZE];
     char service[BOOKING_SERVICE_SIZE];
     char appointment_date[BOOKING_APPOINTMENT_DATE_SIZE];

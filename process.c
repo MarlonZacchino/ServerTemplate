@@ -1203,14 +1203,21 @@ static string *handle_booking_created(bool confirmed, int64_t booking_id)
         str_cat_cstr(body,
                 "<div class=\"customer-portal-help\"><h2>Buchung später wieder öffnen</h2>"
                 "<p>Über deinen persönlichen Link kannst du den Status prüfen und die Buchung bei Bedarf absagen.</p>"
+                "<div class=\"customer-portal-actions\">"
                 "<a class=\"button\" href=\"");
         customer_portal_append_html(body, booking_url);
-        str_cat_cstr(body, "\">Meine Buchung öffnen</a></div>");
+        str_cat_cstr(body,
+                "\">Meine Buchung öffnen</a>"
+                "<a class=\"button button-secondary\" href=\"/\">Zurück zur Startseite</a>"
+                "</div></div>");
+    } else {
+        str_cat_cstr(body,
+                "<div class=\"customer-portal-actions\">"
+                "<a class=\"button button-secondary\" href=\"/\">Zurück zur Startseite</a>"
+                "</div>");
     }
 
-    str_cat_cstr(body,
-            "<p><a class=\"button button-secondary\" href=\"/\">Zurück zur Startseite</a></p>"
-            "</section></main></body></html>");
+    str_cat_cstr(body, "</section></main></body></html>");
 
     response = build_response_bytes(
             "201 Created",
@@ -1346,8 +1353,9 @@ static string *handle_admin_bookings(
 
     if (calendar_database_get_settings(&settings) != 0 ||
         calendar_clock_now(settings.timezone, &snapshot) != 0 ||
-        calendar_database_expire_pending(snapshot.now_utc) != 0) {
-        fprintf(stderr, "Abgelaufene Terminanfragen konnten nicht aktualisiert werden: %s\n",
+        calendar_database_expire_pending(snapshot.now_utc) != 0 ||
+        calendar_database_complete_due_bookings(settings.timezone, snapshot.now_utc) != 0) {
+        fprintf(stderr, "Automatische Buchungsstatus konnten nicht aktualisiert werden: %s\n",
                 calendar_database_last_error());
         return handle_internal_error(send_body);
     }
@@ -1494,7 +1502,9 @@ static bool is_valid_admin_booking_status(const char *status)
     }
 
     return strcmp(status, "neu") == 0 ||
-           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "bestätigt") == 0 ||
+           strcmp(status, "abgelehnt") == 0 ||
+           strcmp(status, "abgesagt") == 0 ||
            strcmp(status, "erledigt") == 0;
 }
 
@@ -2377,9 +2387,23 @@ static string *handle_customer_portal_page(
     }
 
     if (cancellable) {
+        bool confirmed = strcmp(booking.decision_status, "confirmed") == 0;
+
         str_cat_cstr(body, "<div class=\"customer-portal-cancel\"><h2>");
-        str_cat_cstr(body, strcmp(booking.decision_status, "confirmed") == 0 ? "Termin absagen" : "Anfrage zurückziehen");
-        str_cat_cstr(body, "</h2><p>Der Zeitraum wird anschließend wieder für andere Kundinnen und Kunden freigegeben.</p><form method=\"post\" action=\"/buchung/");
+        str_cat_cstr(body, confirmed ? "Termin absagen" : "Anfrage zurückziehen");
+        str_cat_cstr(body, "</h2><p>Der Zeitraum wird anschließend wieder für andere Kundinnen und Kunden freigegeben.</p>");
+
+        if (confirmed) {
+            str_cat_cstr(
+                    body,
+                    "<p class=\"customer-portal-cancellation-fee\">"
+                    "<strong>Hinweis zur Stornierung:</strong> "
+                    "Bei einer Stornierung innerhalb von 72 Stunden vor dem Termin "
+                    "fällt eine Ausfallgebühr an."
+                    "</p>");
+        }
+
+        str_cat_cstr(body, "<form method=\"post\" action=\"/buchung/");
         {
             char id_text[32];
             int written = snprintf(id_text, sizeof(id_text), "%lld", (long long)booking.id);
@@ -2390,7 +2414,7 @@ static string *handle_customer_portal_page(
         str_cat_cstr(body, "/cancel\"><label class=\"consent-field\"><input type=\"checkbox\" name=\"confirm_cancel\" value=\"1\" required><span>Ja, ich möchte diese Buchung wirklich absagen.</span></label><button class=\"button button-danger\" type=\"submit\">Buchung absagen</button></form></div>");
     }
 
-    str_cat_cstr(body, "<div class=\"customer-portal-help\"><h2>Fragen oder Änderungswünsche?</h2><p>Bei Rückfragen kannst du dich direkt an den Salon wenden.</p><a class=\"button button-secondary\" href=\"/kontakt\">Kontakt aufnehmen</a></div></section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs.</small></div></footer></body></html>");
+    str_cat_cstr(body, "<div class=\"customer-portal-help\"><h2>Fragen oder Änderungswünsche?</h2><p>Die Kontaktdaten des Salons findest du im Impressum.</p><a class=\"button button-secondary\" href=\"/impressum\">Zum Impressum</a></div></section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs.</small></div></footer></body></html>");
 
     response = build_response_bytes(
             "200 OK",
@@ -2582,6 +2606,9 @@ string *process(string *request)
             if (!request_has_valid_admin_auth(request))
                 return handle_unauthorized(true);
 
+            if (strcmp(path, "/admin/notifications/toggle") == 0)
+                return handle_admin_notifications_post(
+                        request, admin_notifications_toggle_delivery, "system");
             if (strcmp(path, "/admin/notifications/smtp") == 0)
                 return handle_admin_notifications_post(
                         request, admin_notifications_update_smtp, "smtp");

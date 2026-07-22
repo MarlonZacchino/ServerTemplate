@@ -63,8 +63,14 @@ static bool smtp_url_valid(const char *url)
 bool notification_settings_are_valid(const notification_smtp_settings *settings, bool require_enabled)
 {
     bool credentials_match;
-    if (settings == NULL) return false;
-    if (!settings->enabled) return !require_enabled;
+
+    if (settings == NULL) {
+        return false;
+    }
+
+    if (!settings->enabled) {
+        return !require_enabled && !settings->delivery_enabled;
+    }
 
     credentials_match =
             (settings->username[0] == '\0' && settings->password[0] == '\0') ||
@@ -76,7 +82,8 @@ bool notification_settings_are_valid(const notification_smtp_settings *settings,
            (!settings->notify_admin_on_new_booking || settings->admin_email[0] != '\0') &&
            single_line(settings->username, true) &&
            single_line(settings->password, true) &&
-           single_line(settings->from_name, true) && credentials_match;
+           single_line(settings->from_name, true) &&
+           credentials_match;
 }
 
 static int secret_path(const char *filename, char destination[PATH_MAX])
@@ -177,14 +184,32 @@ static int load_or_create_key(unsigned char key[crypto_secretbox_KEYBYTES])
     return 0;
 }
 
-static int serialize(const notification_smtp_settings *settings, unsigned char *output, size_t size, size_t *out_length)
+static int serialize(
+        const notification_smtp_settings *settings,
+        unsigned char *output,
+        size_t size,
+        size_t *out_length
+)
 {
-    int written = snprintf((char *)output, size, "1\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s",
-                           settings->enabled ? 1 : 0,
-                           settings->notify_admin_on_new_booking ? 1 : 0,
-                           settings->url, settings->username, settings->password,
-                           settings->from_address, settings->from_name, settings->admin_email);
-    if (written < 0 || (size_t)written + 1 > size) { set_error("E-Mail-Konfiguration ist zu groß"); return -1; }
+    int written = snprintf(
+            (char *)output,
+            size,
+            "2\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s",
+            settings->enabled ? 1 : 0,
+            settings->delivery_enabled ? 1 : 0,
+            settings->notify_admin_on_new_booking ? 1 : 0,
+            settings->url,
+            settings->username,
+            settings->password,
+            settings->from_address,
+            settings->from_name,
+            settings->admin_email);
+
+    if (written < 0 || (size_t)written + 1 > size) {
+        set_error("E-Mail-Konfiguration ist zu groß");
+        return -1;
+    }
+
     *out_length = (size_t)written + 1;
     return 0;
 }
@@ -211,26 +236,62 @@ static int copy_field(char *destination, size_t size, const char *source)
     return written >= 0 && (size_t)written < size ? 0 : -1;
 }
 
-static int deserialize(unsigned char *plaintext, size_t length, notification_smtp_settings *settings)
+static int deserialize(
+        unsigned char *plaintext,
+        size_t length,
+        notification_smtp_settings *settings
+)
 {
-    char *fields[9];
-    if (length == 0 || plaintext[length - 1] != '\0' || split_fields((char *)plaintext, fields, 9) != 0 ||
-        strcmp(fields[0], "1") != 0 || (strcmp(fields[1], "0") != 0 && strcmp(fields[1], "1") != 0) ||
-        (strcmp(fields[2], "0") != 0 && strcmp(fields[2], "1") != 0)) return -1;
+    char *fields[10];
+    size_t expected_fields;
+    bool version_two;
+
+    if (length == 0 || plaintext[length - 1] != '\0') {
+        return -1;
+    }
+
+    version_two = strncmp((char *)plaintext, "2\t", 2) == 0;
+    if (!version_two && strncmp((char *)plaintext, "1\t", 2) != 0) {
+        return -1;
+    }
+
+    expected_fields = version_two ? 10 : 9;
+    if (split_fields((char *)plaintext, fields, expected_fields) != 0 ||
+        (strcmp(fields[1], "0") != 0 && strcmp(fields[1], "1") != 0)) {
+        return -1;
+    }
+
+    if (version_two) {
+        if ((strcmp(fields[2], "0") != 0 && strcmp(fields[2], "1") != 0) ||
+            (strcmp(fields[3], "0") != 0 && strcmp(fields[3], "1") != 0)) {
+            return -1;
+        }
+    } else if (strcmp(fields[2], "0") != 0 && strcmp(fields[2], "1") != 0) {
+        return -1;
+    }
 
     memset(settings, 0, sizeof(*settings));
     settings->enabled = strcmp(fields[1], "1") == 0;
+    settings->delivery_enabled = version_two
+            ? strcmp(fields[2], "1") == 0
+            : settings->enabled;
     settings->managed_by_admin = true;
-    settings->notify_admin_on_new_booking = strcmp(fields[2], "1") == 0;
-    if (copy_field(settings->url, sizeof(settings->url), fields[3]) != 0 ||
-        copy_field(settings->username, sizeof(settings->username), fields[4]) != 0 ||
-        copy_field(settings->password, sizeof(settings->password), fields[5]) != 0 ||
-        copy_field(settings->from_address, sizeof(settings->from_address), fields[6]) != 0 ||
-        copy_field(settings->from_name, sizeof(settings->from_name), fields[7]) != 0 ||
-        copy_field(settings->admin_email, sizeof(settings->admin_email), fields[8]) != 0 ||
-        !notification_settings_are_valid(settings, false)) {
-        sodium_memzero(settings, sizeof(*settings)); return -1;
+    settings->notify_admin_on_new_booking = strcmp(fields[version_two ? 3 : 2], "1") == 0;
+
+    {
+        size_t offset = version_two ? 4 : 3;
+        if (copy_field(settings->url, sizeof(settings->url), fields[offset]) != 0 ||
+            copy_field(settings->username, sizeof(settings->username), fields[offset + 1]) != 0 ||
+            copy_field(settings->password, sizeof(settings->password), fields[offset + 2]) != 0 ||
+            copy_field(settings->from_address, sizeof(settings->from_address), fields[offset + 3]) != 0 ||
+            copy_field(settings->from_name, sizeof(settings->from_name), fields[offset + 4]) != 0 ||
+            copy_field(settings->admin_email, sizeof(settings->admin_email), fields[offset + 5]) != 0 ||
+            !notification_settings_are_valid(settings, false)) {
+            sodium_memzero(settings, sizeof(*settings));
+            return -1;
+        }
     }
+
     return 0;
 }
 
@@ -311,6 +372,16 @@ static int load_environment(notification_smtp_settings *settings)
     settings->notify_admin_on_new_booking = getenv("STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING") != NULL &&
                                              strcmp(getenv("STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING"), "1") == 0;
     settings->enabled = settings->url[0] != '\0' || settings->from_address[0] != '\0';
+    {
+        const char *delivery = getenv("STYLES4DOGS_NOTIFICATIONS_ENABLED");
+        if (delivery != NULL && strcmp(delivery, "0") != 0 && strcmp(delivery, "1") != 0) {
+            set_error("STYLES4DOGS_NOTIFICATIONS_ENABLED muss 0 oder 1 sein");
+            sodium_memzero(settings, sizeof(*settings));
+            return -1;
+        }
+        settings->delivery_enabled = settings->enabled &&
+                (delivery == NULL || strcmp(delivery, "1") == 0);
+    }
     settings->managed_by_admin = false;
     if (settings->enabled && settings->from_name[0] == '\0')
         snprintf(settings->from_name, sizeof(settings->from_name), "%s", server_config_salon_name());
@@ -398,10 +469,32 @@ cleanup:
     return result;
 }
 
+int notification_settings_set_delivery_enabled(bool enabled)
+{
+    notification_smtp_settings settings;
+    int result;
+
+    if (notification_settings_load(&settings) != 0) {
+        return -1;
+    }
+
+    if (enabled && !settings.enabled) {
+        sodium_memzero(&settings, sizeof(settings));
+        set_error("Vor dem Aktivieren muss ein E-Mail-Konto verbunden werden");
+        return -1;
+    }
+
+    settings.delivery_enabled = enabled;
+    result = notification_settings_save(&settings);
+    sodium_memzero(&settings, sizeof(settings));
+    return result;
+}
+
 int notification_settings_disconnect(void)
 {
     notification_smtp_settings settings;
     memset(&settings, 0, sizeof(settings));
     settings.managed_by_admin = true;
+    settings.delivery_enabled = false;
     return notification_settings_save(&settings);
 }

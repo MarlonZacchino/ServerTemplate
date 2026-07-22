@@ -103,8 +103,41 @@
                     </div>
                     <p id="postal-lookup-status" class="form-help postal-lookup-status" role="status" aria-live="polite" data-postal-lookup-status>Nach Eingabe der PLZ kann der Wohnort automatisch ergänzt werden.</p>
 
-                    <label for="dog-name">Name des Hundes</label>
-                    <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">
+                    <div class="form-grid-two">
+                        <div class="form-field">
+                            <label for="dog-name">Name des Hundes</label>
+                            <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">
+                        </div>
+
+                        <div class="form-field">
+                            <label for="dog-breed">Rasse <span aria-hidden="true">*</span></label>
+                            <select id="dog-breed" name="dog_breed" required>
+                                <option value="">Bitte auswählen</option>
+                                <option value="affenpinscher">Affenpinscher</option>
+                                <option value="australian_shepherd">Australian Shepherd</option>
+                                <option value="beagle">Beagle</option>
+                                <option value="bernese_mountain_dog">Berner Sennenhund</option>
+                                <option value="border_collie">Border Collie</option>
+                                <option value="boxer">Boxer</option>
+                                <option value="cavalier_king_charles_spaniel">Cavalier King Charles Spaniel</option>
+                                <option value="chihuahua">Chihuahua</option>
+                                <option value="dachshund">Dackel</option>
+                                <option value="french_bulldog">Französische Bulldogge</option>
+                                <option value="german_shepherd">Deutscher Schäferhund</option>
+                                <option value="golden_retriever">Golden Retriever</option>
+                                <option value="havanese">Havaneser</option>
+                                <option value="labrador_retriever">Labrador Retriever</option>
+                                <option value="maltese">Malteser</option>
+                                <option value="miniature_schnauzer">Zwergschnauzer</option>
+                                <option value="mixed_breed">Mischling / unbekannt</option>
+                                <option value="poodle">Pudel</option>
+                                <option value="pug">Mops</option>
+                                <option value="shih_tzu">Shih Tzu</option>
+                                <option value="yorkshire_terrier">Yorkshire Terrier</option>
+                                <option value="other">Sonstiges</option>
+                            </select>
+                        </div>
+                    </div>
 
                     <div class="form-grid-two">
                         <div class="form-field">
@@ -152,7 +185,8 @@
                     </section>
 
                     <label for="message">Worum geht es?</label>
-                    <textarea id="message" name="message" rows="7" maxlength="1000" placeholder="Zum Beispiel Rasse, Fellzustand, Besonderheiten und gewünschte Pflege"></textarea>
+                    <textarea id="message" name="message" rows="7" maxlength="1000" placeholder="Zum Beispiel Fellzustand, Besonderheiten und gewünschte Pflege"></textarea>
+                    <p id="dog-breed-other-hint" class="form-help dog-breed-other-hint" data-dog-breed-other-hint role="status" aria-live="polite" hidden>Bitte trage die genaue Rasse hier im Feld „Worum geht es?“ ein.</p>
 
                     <label class="consent-field" for="privacy-consent">
                         <input id="privacy-consent" type="checkbox" name="privacy_consent" value="accepted" required>

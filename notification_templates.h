@@ -16,6 +16,8 @@ typedef struct notification_template {
 
 typedef struct notification_template_context {
     const char *customer_name;
+    const char *customer_first_name;
+    const char *customer_last_name;
     const char *booking_id;
     const char *appointment_date;
     const char *start_time;

@@ -3,7 +3,7 @@
 Der HTTP-Server sendet E-Mails nicht während einer Buchungsanfrage. Er erzeugt
 einen Job in `notification_jobs`. Der separate
 `/opt/styles4dogs/bin/notification_worker` verarbeitet die Queue über SMTP und
-wird von `styles4dogs-notification.timer` alle fünf Minuten gestartet. Eine
+wird von `styles4dogs-notification.timer` jede Minute gestartet. Derselbe Lauf pflegt außerdem überfällige Buchungsstatus. Eine
 Buchung bleibt dadurch auch erhalten, wenn der Mailanbieter vorübergehend nicht
 erreichbar ist.
 
@@ -77,6 +77,7 @@ STYLES4DOGS_SMTP_FROM_ADDRESS=termine@example.de
 STYLES4DOGS_SMTP_FROM_NAME=Styling 4 Dogs
 STYLES4DOGS_ADMIN_NOTIFICATION_EMAIL=termine@example.de
 STYLES4DOGS_NOTIFY_ADMIN_NEW_BOOKING=1
+STYLES4DOGS_NOTIFICATIONS_ENABLED=1
 ```
 
 Für neue Installationen ist die Eingabe über `/admin/notifications` der
@@ -92,7 +93,7 @@ folgende Ereignisse angepasst werden:
 ```text
 booking_received       Anfrage eingegangen
 booking_confirmed      Termin bestätigt
-booking_rejected       Termin abgesagt
+booking_rejected       Terminanfrage abgelehnt
 appointment_reminder   Erinnerung
 admin_new_booking      neue Anfrage für den Admin
 ```
@@ -132,11 +133,14 @@ den Link automatisch am Ende der Nachricht an.
 Die technische SMTP-Verbindung und die fachliche Versandfreigabe sind bewusst
 getrennt:
 
-- `/admin/notifications`: Postfach, Testmail, Admin-Mail, Vorlagen und Queue
+- `/admin/notifications`: globaler Hauptschalter, Postfach, Testmail, Admin-Mail, Vorlagen und Queue
 - `/admin/calendar`: Kunden-E-Mails, Erinnerungen und Erinnerungszeitpunkt
 
-Damit löst das bloße Speichern eines Postfachs nicht unbeabsichtigt sofort alle
-möglichen Kundenmails aus.
+Der Hauptschalter pausiert den Versand, ohne Zugangsdaten, Vorlagen oder
+wartende Jobs zu löschen. Automatische Statuspflege – insbesondere
+`bestätigt` zu `erledigt` vier Stunden nach dem Terminende – läuft unabhängig
+davon weiter. Die feineren Kalendereinstellungen greifen nur, wenn das globale
+E-Mail-System aktiviert ist.
 
 ## Warteschlange und Wiederholungen
 

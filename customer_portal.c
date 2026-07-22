@@ -326,7 +326,7 @@ int customer_portal_build_url(
     written = snprintf(
             out_url,
             out_url_size,
-            "%s%s/buchung/%lld/%s",
+            "%s%sbuchung/%lld/%s",
             base_url,
             base_length > 0 && base_url[base_length - 1] == '/' ? "" : "/",
             (long long)booking_id,
@@ -511,7 +511,7 @@ customer_portal_result customer_portal_cancel_booking(
     if (sqlite3_prepare_v2(
             database,
             "UPDATE bookings "
-            "SET decision_status = 'cancelled', decision_at = ?1, hold_expires_at = NULL, status = 'neu' "
+            "SET decision_status = 'cancelled', decision_at = ?1, hold_expires_at = NULL, status = 'abgesagt' "
             "WHERE id = ?2 AND legacy = 0 "
             "  AND decision_status IN ('pending', 'confirmed');",
             -1,

@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 7
+#define CALENDAR_SCHEMA_VERSION 9
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -371,15 +371,15 @@ static int seed_calendar_defaults(void)
             "INSERT OR IGNORE INTO notification_templates("
             "event_type, subject_template, body_template, updated_at_utc) VALUES"
             "('booking_received', 'Terminanfrage erhalten – {{salon_name}}', "
-            "'Hallo {{customer_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "'Hallo {{customer_first_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nAnfrage ansehen oder zurückziehen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
             "('booking_confirmed', 'Termin bestätigt – {{salon_name}}', "
-            "'Hallo {{customer_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "'Hallo {{customer_first_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
             "('booking_rejected', 'Terminanfrage nicht möglich – {{salon_name}}', "
-            "'Hallo {{customer_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "'Hallo {{customer_first_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
             "('appointment_reminder', 'Erinnerung an deinen Termin – {{salon_name}}', "
-            "'Hallo {{customer_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('admin_new_booking', 'Neue Terminanfrage #{{booking_id}} – {{customer_name}}', "
-            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
+            "'Hallo {{customer_first_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('admin_new_booking', 'Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}', "
+            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
 
     return execute_sql(sql);
 }
@@ -437,6 +437,9 @@ static int migrate_booking_columns(void)
         ensure_booking_column(
             "city",
             "city TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "dog_breed",
+            "dog_breed TEXT NOT NULL DEFAULT ''") != 0 ||
         ensure_booking_column(
             "service_name_snapshot",
             "service_name_snapshot TEXT NOT NULL DEFAULT ''") != 0 ||
@@ -680,6 +683,59 @@ static int migrate_notification_jobs_v6(void)
     return needed ? execute_sql(sql) : 0;
 }
 
+static int synchronize_booking_statuses(void)
+{
+    return execute_sql(
+            "UPDATE bookings SET status = CASE "
+            "    WHEN status = 'erledigt' THEN status "
+            "    WHEN decision_status = 'confirmed' THEN 'bestätigt' "
+            "    WHEN decision_status = 'rejected' THEN 'abgelehnt' "
+            "    WHEN decision_status = 'cancelled' THEN 'abgesagt' "
+            "    WHEN status IN ('kontaktiert', 'altbestand') THEN 'neu' "
+            "    ELSE status END "
+            "WHERE status IN ('kontaktiert', 'altbestand') "
+            "   OR (decision_status = 'confirmed' AND status NOT IN ('bestätigt', 'erledigt')) "
+            "   OR (decision_status = 'rejected' AND status != 'abgelehnt') "
+            "   OR (decision_status = 'cancelled' AND status != 'abgesagt');"
+    );
+}
+
+static int migrate_customer_name_placeholders(void)
+{
+    return execute_sql(
+            "UPDATE notification_templates "
+            "SET subject_template = REPLACE("
+            "        subject_template, "
+            "        '{{customer_name}}', "
+            "        CASE WHEN event_type = 'admin_new_booking' "
+            "             THEN '{{customer_first_name}} {{customer_last_name}}' "
+            "             ELSE '{{customer_first_name}}' END), "
+            "    body_template = REPLACE("
+            "        body_template, "
+            "        '{{customer_name}}', "
+            "        CASE WHEN event_type = 'admin_new_booking' "
+            "             THEN '{{customer_first_name}} {{customer_last_name}}' "
+            "             ELSE '{{customer_first_name}}' END), "
+            "    updated_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+            "WHERE instr(subject_template, '{{customer_name}}') > 0 "
+            "   OR instr(body_template, '{{customer_name}}') > 0;"
+    );
+}
+
+static int migrate_booking_links_into_templates(void)
+{
+    return execute_sql(
+            "UPDATE notification_templates "
+            "SET body_template = body_template || CASE event_type "
+            "        WHEN 'booking_received' "
+            "        THEN '\n\nAnfrage ansehen oder zurückziehen:\n{{booking_url}}' "
+            "        ELSE '\n\nTermin ansehen oder absagen:\n{{booking_url}}' END, "
+            "    updated_at_utc = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+            "WHERE event_type IN ('booking_received', 'booking_confirmed') "
+            "  AND instr(body_template, '{{booking_url}}') = 0;"
+    );
+}
+
 static int migrate_schema(void)
 {
     if (execute_sql("BEGIN IMMEDIATE;") != 0) {
@@ -689,10 +745,13 @@ static int migrate_schema(void)
     if (create_calendar_tables() != 0 ||
         create_gallery_tables() != 0 ||
         migrate_booking_columns() != 0 ||
+        synchronize_booking_statuses() != 0 ||
         migrate_notification_jobs_v6() != 0 ||
         seed_calendar_defaults() != 0 ||
+        migrate_customer_name_placeholders() != 0 ||
+        migrate_booking_links_into_templates() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 8;") != 0 ||
+        execute_sql("PRAGMA user_version = 9;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -1895,7 +1954,9 @@ int calendar_database_expire_pending(const char *now_utc)
     if (sqlite3_prepare_v2(
             calendar_database,
             "UPDATE bookings "
-            "SET decision_status = 'expired', decision_at = ?1 "
+            "SET decision_status = 'expired', status = 'abgelehnt', decision_at = ?1, "
+            "    rejection_reason = CASE WHEN rejection_reason = '' "
+            "        THEN 'Reservierung automatisch abgelaufen.' ELSE rejection_reason END "
             "WHERE decision_status = 'pending' "
             "  AND hold_expires_at IS NOT NULL "
             "  AND hold_expires_at <= ?1;",
@@ -1913,6 +1974,65 @@ int calendar_database_expire_pending(const char *now_utc)
 
     if (sqlite3_step(statement) != SQLITE_DONE) {
         set_sqlite_error("Alte Anfragen konnten nicht freigegeben werden");
+        goto cleanup;
+    }
+
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
+}
+
+int calendar_database_complete_due_bookings(
+        const char *timezone,
+        const char *now_utc
+)
+{
+    sqlite3_stmt *statement = NULL;
+    time_t now_epoch;
+    time_t cutoff_epoch;
+    char cutoff_date[11];
+    int cutoff_minute;
+    int result = -1;
+
+    if (calendar_database == NULL || timezone == NULL ||
+        calendar_utc_timestamp_to_epoch(now_utc, &now_epoch) != 0 ||
+        now_epoch < (time_t)(4 * 60 * 60)) {
+        set_error("Ungültiger Zeitpunkt für automatische Terminerledigung");
+        return -1;
+    }
+
+    cutoff_epoch = now_epoch - (time_t)(4 * 60 * 60);
+    if (calendar_epoch_to_local(
+            timezone,
+            cutoff_epoch,
+            cutoff_date,
+            &cutoff_minute) != 0) {
+        set_error("Lokale Frist für automatische Terminerledigung konnte nicht berechnet werden");
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "UPDATE bookings SET status = 'erledigt', decision_at = ?3 "
+            "WHERE status = 'bestätigt' AND decision_status = 'confirmed' "
+            "  AND appointment_date IS NOT NULL AND end_minute IS NOT NULL "
+            "  AND (appointment_date < ?1 "
+            "       OR (appointment_date = ?1 AND end_minute <= ?2));",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, cutoff_date, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 2, cutoff_minute) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 3, now_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Automatische Terminerledigung konnte nicht vorbereitet werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+        set_sqlite_error("Überfällige Termine konnten nicht als erledigt markiert werden");
         goto cleanup;
     }
 
@@ -1984,6 +2104,7 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
         booking->street_address == NULL || booking->street_address[0] == '\0' ||
         booking->postal_code == NULL || strlen(booking->postal_code) != 5 ||
         booking->city == NULL || booking->city[0] == '\0' ||
+        booking->dog_breed == NULL || booking->dog_breed[0] == '\0' ||
         !contact_fields_are_valid(
                 booking->contact_channel,
                 booking->email,
@@ -2029,15 +2150,15 @@ int calendar_database_insert_pending(
             "    appointment_date, start_minute, end_minute, blocked_until_minute,"
             "    decision_status, hold_expires_at, decision_at, rejection_reason,"
             "    contact_channel, email, phone_number, phone_kind, contact_preference,"
-            "    street_address, postal_code, city,"
+            "    street_address, postal_code, city, dog_breed,"
             "    service_name_snapshot, service_duration_minutes_snapshot,"
             "    service_buffer_minutes_snapshot"
             ") "
-            "SELECT ?1, 'neu', ?2, ?3, ?4, ?5, services.code, ?6, ?7, 0, services.id,"
+            "SELECT ?1, CASE WHEN ?11 = 1 THEN 'bestätigt' ELSE 'neu' END, ?2, ?3, ?4, ?5, services.code, ?6, ?7, 0, services.id,"
             "       ?6, ?8, ?9, ?10, CASE WHEN ?11 = 1 THEN 'confirmed' ELSE 'pending' END,"
             "       CASE WHEN ?11 = 1 THEN NULL ELSE ?12 END,"
             "       CASE WHEN ?11 = 1 THEN ?1 ELSE NULL END, '',"
-            "       ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, services.name, services.duration_minutes,"
+            "       ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?22, services.name, services.duration_minutes,"
             "       services.buffer_minutes "
             "FROM services "
             "WHERE services.code = ?21 AND services.active = 1;",
@@ -2070,7 +2191,8 @@ int calendar_database_insert_pending(
         sqlite3_bind_text(statement, 18, booking->street_address, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 19, booking->postal_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 20, booking->city, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 21, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        sqlite3_bind_text(statement, 21, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 22, booking->dog_breed, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
         set_sqlite_error("Terminreservierungswerte konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -2166,9 +2288,9 @@ calendar_booking_decision_result calendar_database_decide_booking(
     if (sqlite3_prepare_v2(
             calendar_database,
             accept
-                ? "UPDATE bookings SET decision_status = 'confirmed', decision_at = ?1, "
+                ? "UPDATE bookings SET decision_status = 'confirmed', status = 'bestätigt', decision_at = ?1, "
                   "hold_expires_at = NULL, rejection_reason = '' WHERE id = ?2 AND decision_status = 'pending';"
-                : "UPDATE bookings SET decision_status = 'rejected', decision_at = ?1, "
+                : "UPDATE bookings SET decision_status = 'rejected', status = 'abgelehnt', decision_at = ?1, "
                   "hold_expires_at = NULL, rejection_reason = ?3 WHERE id = ?2 AND decision_status = 'pending';",
             -1,
             &statement,

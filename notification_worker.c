@@ -1,5 +1,6 @@
 #include "booking_database.h"
 #include "calendar_database.h"
+#include "calendar_time.h"
 #include "contact_validation.h"
 #include "notification_queue.h"
 #include "notification_settings.h"
@@ -323,6 +324,8 @@ int main(int argc, char **argv)
 {
     const char *dry_run_directory = NULL;
     smtp_config smtp;
+    calendar_settings calendar;
+    calendar_clock_snapshot snapshot;
     char error[SMTP_ERROR_SIZE] = {0};
     int processed = 0;
     int failed = 0;
@@ -348,8 +351,12 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    if (notification_queue_enqueue_due_reminders() != 0) {
-        fprintf(stderr, "ERROR enqueueing reminders: %s\n", notification_queue_last_error());
+    if (calendar_database_get_settings(&calendar) != 0 ||
+        calendar_clock_now(calendar.timezone, &snapshot) != 0 ||
+        calendar_database_expire_pending(snapshot.now_utc) != 0 ||
+        calendar_database_complete_due_bookings(calendar.timezone, snapshot.now_utc) != 0) {
+        fprintf(stderr, "ERROR updating automatic booking statuses: %s\n",
+                calendar_database_last_error());
         calendar_database_shutdown();
         booking_database_shutdown();
         return EXIT_FAILURE;
@@ -370,10 +377,27 @@ int main(int argc, char **argv)
             booking_database_shutdown();
             return EXIT_SUCCESS;
         }
+        if (!smtp.delivery_enabled) {
+            fprintf(stderr, "Notification worker skipped: E-mail system is paused\n");
+            sodium_memzero(&smtp, sizeof(smtp));
+            calendar_database_shutdown();
+            booking_database_shutdown();
+            return EXIT_SUCCESS;
+        }
         if (smtp.from_name[0] == '\0') {
             snprintf(smtp.from_name, sizeof(smtp.from_name), "%s",
                     server_config_salon_name());
         }
+    }
+
+    if (notification_queue_enqueue_due_reminders() != 0) {
+        fprintf(stderr, "ERROR enqueueing reminders: %s\n", notification_queue_last_error());
+        if (dry_run_directory == NULL) {
+            sodium_memzero(&smtp, sizeof(smtp));
+        }
+        calendar_database_shutdown();
+        booking_database_shutdown();
+        return EXIT_FAILURE;
     }
 
     if (dry_run_directory == NULL && curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {

@@ -200,6 +200,7 @@ static int create_schema(void)
             "    postal_code TEXT NOT NULL DEFAULT '',"
             "    city TEXT NOT NULL DEFAULT '',"
             "    dog_name TEXT NOT NULL DEFAULT '',"
+            "    dog_breed TEXT NOT NULL DEFAULT '',"
             "    dog_size TEXT NOT NULL DEFAULT '',"
             "    service TEXT NOT NULL DEFAULT '',"
             "    preferred_date TEXT NOT NULL DEFAULT '',"
@@ -210,13 +211,19 @@ static int create_schema(void)
             "    ON bookings(created_at DESC, id DESC);"
             "CREATE INDEX IF NOT EXISTS idx_bookings_status "
             "    ON bookings(status);"
-            "CREATE TRIGGER IF NOT EXISTS trg_bookings_status_insert "
+            "DROP TRIGGER IF EXISTS trg_bookings_status_insert;"
+            "DROP TRIGGER IF EXISTS trg_bookings_status_update;"
+            "CREATE TRIGGER trg_bookings_status_insert "
             "BEFORE INSERT ON bookings "
-            "WHEN NEW.status NOT IN ('neu', 'kontaktiert', 'erledigt', 'altbestand') "
+            "WHEN NEW.status NOT IN ("
+            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt'"
+            ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
-            "CREATE TRIGGER IF NOT EXISTS trg_bookings_status_update "
+            "CREATE TRIGGER trg_bookings_status_update "
             "BEFORE UPDATE OF status ON bookings "
-            "WHEN NEW.status NOT IN ('neu', 'kontaktiert', 'erledigt', 'altbestand') "
+            "WHEN NEW.status NOT IN ("
+            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt'"
+            ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
             "CREATE TABLE IF NOT EXISTS app_metadata ("
             "    key TEXT PRIMARY KEY,"
@@ -225,6 +232,73 @@ static int create_schema(void)
             "COMMIT;";
 
     return execute_sql(schema_sql);
+}
+
+static int bookings_column_exists(const char *column_name, bool *out_exists)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (column_name == NULL || out_exists == NULL) {
+        set_error_text("Spaltenname oder Ausgabewert fehlt");
+        return -1;
+    }
+
+    *out_exists = false;
+
+    if (sqlite3_prepare_v2(
+            database,
+            "PRAGMA table_info(bookings);",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK) {
+        set_sqlite_error("Buchungsschema konnte nicht gelesen werden");
+        return -1;
+    }
+
+    while ((step_result = sqlite3_step(statement)) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(statement, 1);
+
+        if (name != NULL && strcmp((const char *) name, column_name) == 0) {
+            *out_exists = true;
+            break;
+        }
+    }
+
+    if (step_result != SQLITE_ROW && step_result != SQLITE_DONE) {
+        set_sqlite_error("Buchungsschema konnte nicht vollständig gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
+static int migrate_booking_schema(void)
+{
+    bool dog_breed_exists = false;
+
+    if (bookings_column_exists("dog_breed", &dog_breed_exists) != 0) {
+        return -1;
+    }
+
+    if (!dog_breed_exists &&
+        execute_sql(
+                "ALTER TABLE bookings "
+                "ADD COLUMN dog_breed TEXT NOT NULL DEFAULT '';"
+        ) != 0) {
+        return -1;
+    }
+
+    if (execute_sql(
+            "UPDATE bookings SET status = 'neu' "
+            "WHERE status IN ('kontaktiert', 'altbestand');"
+    ) != 0) {
+        return -1;
+    }
+
+    return 0;
 }
 
 static int metadata_key_exists(const char *key, bool *out_exists)
@@ -424,7 +498,7 @@ static bool parse_legacy_booking_line(char *line, legacy_booking *booking)
         booking->legacy = true;
 
         return decode_legacy_field(fields[0], booking->created_at, sizeof(booking->created_at)) &&
-               decode_legacy_field("altbestand", booking->status, sizeof(booking->status)) &&
+               decode_legacy_field("neu", booking->status, sizeof(booking->status)) &&
                decode_legacy_field(fields[1], booking->name, sizeof(booking->name)) &&
                decode_legacy_field(fields[2], booking->contact, sizeof(booking->contact)) &&
                decode_legacy_field(fields[3], booking->dog_name, sizeof(booking->dog_name)) &&
@@ -706,6 +780,7 @@ int booking_database_initialize(void)
 
     if (configure_database() != 0 ||
         create_schema() != 0 ||
+        migrate_booking_schema() != 0 ||
         import_legacy_tsv() != 0) {
         booking_database_shutdown();
         return -1;
@@ -786,15 +861,15 @@ int booking_database_insert(const booking_request *booking)
     const char *insert_sql = booking_calendar_columns_exist()
             ? "INSERT INTO bookings("
               "created_at, status, customer_name, contact, street_address, postal_code, city, "
-              "dog_name, dog_size, service, preferred_date, message, legacy, service_id, decision_status"
+              "dog_name, dog_breed, dog_size, service, preferred_date, message, legacy, service_id, decision_status"
               ") VALUES("
-              "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, "
-              "(SELECT id FROM services WHERE code = ?10), 'legacy'"
+              "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, "
+              "(SELECT id FROM services WHERE code = ?11), 'legacy'"
               ");"
             : "INSERT INTO bookings("
               "created_at, status, customer_name, contact, street_address, postal_code, city, "
-              "dog_name, dog_size, service, preferred_date, message, legacy"
-              ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0);";
+              "dog_name, dog_breed, dog_size, service, preferred_date, message, legacy"
+              ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0);";
 
     if (sqlite3_prepare_v2(
             database,
@@ -814,10 +889,11 @@ int booking_database_insert(const booking_request *booking)
         bind_text(statement, 6, booking->postal_code) != 0 ||
         bind_text(statement, 7, booking->city) != 0 ||
         bind_text(statement, 8, booking->dog_name) != 0 ||
-        bind_text(statement, 9, booking->dog_size) != 0 ||
-        bind_text(statement, 10, booking->service) != 0 ||
-        bind_text(statement, 11, booking->preferred_date) != 0 ||
-        bind_text(statement, 12, booking->message) != 0) {
+        bind_text(statement, 9, booking->dog_breed) != 0 ||
+        bind_text(statement, 10, booking->dog_size) != 0 ||
+        bind_text(statement, 11, booking->service) != 0 ||
+        bind_text(statement, 12, booking->preferred_date) != 0 ||
+        bind_text(statement, 13, booking->message) != 0) {
         set_sqlite_error("Buchungswerte konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -912,7 +988,7 @@ int booking_database_for_each_filtered(
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
             "       decision_at, rejection_reason, service_name_snapshot, "
-            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed "
             "FROM bookings "
             "WHERE (?1 = '' OR status = ?1) "
             "  AND (?2 = '%%' OR customer_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
@@ -923,8 +999,15 @@ int booking_database_for_each_filtered(
             "       OR postal_code LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR city LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR dog_breed LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR CAST(id AS TEXT) LIKE ?2 ESCAPE '\\') "
-            "ORDER BY created_at DESC, id DESC;",
+            "ORDER BY "
+            "  CASE WHEN ?1 = 'bestätigt' AND appointment_date IS NULL THEN 1 ELSE 0 END ASC, "
+            "  CASE WHEN ?1 = 'bestätigt' THEN appointment_date END ASC, "
+            "  CASE WHEN ?1 = 'bestätigt' THEN start_minute END ASC, "
+            "  CASE WHEN ?1 IN ('abgelehnt', 'abgesagt', 'erledigt') "
+            "       THEN COALESCE(decision_at, created_at) END DESC, "
+            "  created_at DESC, id DESC;",
             -1,
             &statement,
             NULL) != SQLITE_OK) {
@@ -960,6 +1043,7 @@ int booking_database_for_each_filtered(
                 .postal_code = column_text_or_empty(statement, 6),
                 .city = column_text_or_empty(statement, 7),
                 .dog_name = column_text_or_empty(statement, 8),
+                .dog_breed = column_text_or_empty(statement, 29),
                 .dog_size = column_text_or_empty(statement, 9),
                 .service = column_text_or_empty(statement, 10),
                 .preferred_date = column_text_or_empty(statement, 11),
@@ -1024,7 +1108,7 @@ int booking_database_for_each_appointment(
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
             "       decision_at, rejection_reason, service_name_snapshot, "
-            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed "
             "FROM bookings "
             "WHERE appointment_date BETWEEN ?1 AND ?2 "
             "  AND decision_status IN ('pending', 'confirmed') "
@@ -1050,6 +1134,7 @@ int booking_database_for_each_appointment(
                 .postal_code = column_text_or_empty(statement, 6),
                 .city = column_text_or_empty(statement, 7),
                 .dog_name = column_text_or_empty(statement, 8),
+                .dog_breed = column_text_or_empty(statement, 29),
                 .dog_size = column_text_or_empty(statement, 9),
                 .service = column_text_or_empty(statement, 10),
                 .preferred_date = column_text_or_empty(statement, 11),
@@ -1105,9 +1190,10 @@ int booking_database_get_status_counts(booking_status_counts *counts)
             database,
             "SELECT COUNT(*), "
             "       SUM(CASE WHEN status = 'neu' THEN 1 ELSE 0 END), "
-            "       SUM(CASE WHEN status = 'kontaktiert' THEN 1 ELSE 0 END), "
-            "       SUM(CASE WHEN status = 'erledigt' THEN 1 ELSE 0 END), "
-            "       SUM(CASE WHEN status = 'altbestand' THEN 1 ELSE 0 END) "
+            "       SUM(CASE WHEN status = 'bestätigt' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'abgelehnt' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'abgesagt' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'erledigt' THEN 1 ELSE 0 END) "
             "FROM bookings;",
             -1,
             &statement,
@@ -1126,9 +1212,10 @@ int booking_database_get_status_counts(booking_status_counts *counts)
 
     counts->total = (size_t)sqlite3_column_int64(statement, 0);
     counts->new_count = (size_t)sqlite3_column_int64(statement, 1);
-    counts->contacted_count = (size_t)sqlite3_column_int64(statement, 2);
-    counts->completed_count = (size_t)sqlite3_column_int64(statement, 3);
-    counts->legacy_count = (size_t)sqlite3_column_int64(statement, 4);
+    counts->confirmed_count = (size_t)sqlite3_column_int64(statement, 2);
+    counts->rejected_count = (size_t)sqlite3_column_int64(statement, 3);
+    counts->cancelled_count = (size_t)sqlite3_column_int64(statement, 4);
+    counts->completed_count = (size_t)sqlite3_column_int64(statement, 5);
 
     sqlite3_finalize(statement);
     return 0;
@@ -1141,7 +1228,9 @@ static bool is_valid_mutable_status(const char *status)
     }
 
     return strcmp(status, "neu") == 0 ||
-           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "bestätigt") == 0 ||
+           strcmp(status, "abgelehnt") == 0 ||
+           strcmp(status, "abgesagt") == 0 ||
            strcmp(status, "erledigt") == 0;
 }
 
@@ -1165,7 +1254,24 @@ booking_status_update_result booking_database_update_status(
 
     if (sqlite3_prepare_v2(
             database,
-            "UPDATE bookings SET status = ?1 WHERE id = ?2;",
+            "UPDATE bookings SET "
+            "status = ?1, "
+            "decision_status = CASE ?1 "
+            "    WHEN 'bestätigt' THEN 'confirmed' "
+            "    WHEN 'abgelehnt' THEN 'rejected' "
+            "    WHEN 'abgesagt' THEN 'cancelled' "
+            "    ELSE decision_status END, "
+            "decision_at = CASE "
+            "    WHEN ?1 IN ('bestätigt', 'abgelehnt', 'abgesagt') "
+            "    THEN strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "    ELSE decision_at END, "
+            "hold_expires_at = CASE "
+            "    WHEN ?1 IN ('bestätigt', 'abgelehnt', 'abgesagt') THEN NULL "
+            "    ELSE hold_expires_at END, "
+            "rejection_reason = CASE "
+            "    WHEN ?1 IN ('bestätigt', 'abgesagt') THEN '' "
+            "    ELSE rejection_reason END "
+            "WHERE id = ?2;",
             -1,
             &statement,
             NULL) != SQLITE_OK) {

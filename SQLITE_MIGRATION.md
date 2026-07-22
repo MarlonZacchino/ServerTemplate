@@ -171,3 +171,30 @@ sqlite3 /var/lib/styles4dogs/styles4dogs.db \
 Erwartet werden Version `8` sowie die drei Spalten `city`, `postal_code` und
 `street_address`. Vor jedem produktiven Upgrade bleibt ein geprüftes Backup
 verpflichtend.
+
+## Buchungsworkflow Version 9
+
+Phase 13 erweitert die Datenbank idempotent auf:
+
+```text
+PRAGMA user_version = 9
+```
+
+Die Tabelle `bookings` erhält `dog_breed`. Bestehende Datensätze bekommen
+einen leeren Wert; neue öffentliche Buchungen speichern einen validierten
+Rassecode. Die Statuswerte werden um `bestätigt`, `abgelehnt` und `abgesagt`
+erweitert. Terminentscheidungen synchronisieren den sichtbaren Buchungsstatus,
+und bestätigte Termine werden vier Stunden nach ihrem Terminende automatisch
+auf `erledigt` gesetzt.
+
+Prüfung nach der Installation:
+
+```bash
+sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT name FROM pragma_table_info('bookings') WHERE name='dog_breed';"
+```
+
+Erwartet werden Version `9` und die Spalte `dog_breed`. Die Migration der
+Rassespalte läuft bereits beim Öffnen der Buchungsdatenbank, damit auch ein
+noch ausstehender Legacy-TSV-Import nicht auf einem älteren Schema scheitert.

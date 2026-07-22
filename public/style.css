@@ -2117,26 +2117,81 @@ select:focus {
 }
 
 .notification-template-card {
-    padding: 20px;
+    overflow: hidden;
+    padding: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
     background: rgba(255, 250, 245, 0.72);
 }
 
+.notification-template-summary {
+    display: block;
+    padding: 18px 20px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.notification-template-summary::-webkit-details-marker {
+    display: none;
+}
+
+.notification-template-summary:hover,
+.notification-template-summary:focus-visible {
+    outline: none;
+    background: rgba(154, 104, 69, 0.08);
+}
+
 .notification-template-heading {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 20px;
 }
 
-.notification-template-heading h3 {
+.notification-template-title {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.notification-template-title .eyebrow {
     margin: 0;
 }
 
+.notification-template-title strong {
+    font-size: 1.35rem;
+    line-height: 1.15;
+}
+
 .notification-template-heading code {
+    margin-left: auto;
     color: var(--muted);
     overflow-wrap: anywhere;
+}
+
+.notification-template-toggle {
+    flex: 0 0 auto;
+    color: var(--accent-dark);
+    font-size: 0.88rem;
+    font-weight: 800;
+}
+
+.notification-template-card[open] > .notification-template-summary {
+    border-bottom: 1px solid var(--line);
+    background: rgba(154, 104, 69, 0.05);
+}
+
+.notification-template-card[open] .notification-template-toggle {
+    font-size: 0;
+}
+
+.notification-template-card[open] .notification-template-toggle::after {
+    content: "Schließen";
+    font-size: 0.88rem;
+}
+
+.notification-template-body {
+    padding: 0 20px 20px;
 }
 
 .notification-template-form {
@@ -2196,9 +2251,22 @@ select:focus {
         width: 100%;
     }
 
+    .notification-template-summary {
+        padding: 16px;
+    }
+
     .notification-template-heading {
+        align-items: flex-start;
         flex-direction: column;
         gap: 8px;
+    }
+
+    .notification-template-heading code {
+        margin-left: 0;
+    }
+
+    .notification-template-body {
+        padding: 0 16px 16px;
     }
 }
 
@@ -2788,9 +2856,33 @@ select:focus {
     border-top: 1px solid var(--line);
 }
 
+.customer-portal-cancellation-fee {
+    margin: 16px 0;
+    padding: 14px 16px;
+    border: 1px solid #d1a35f;
+    border-radius: 14px;
+    background: #fff7e7;
+    color: var(--text);
+}
+
+.customer-portal-cancellation-fee strong {
+    color: #7a4f16;
+}
+
 .customer-portal-cancel form {
     display: grid;
     gap: 16px;
+}
+
+.customer-portal-actions {
+    display: grid;
+    gap: 10px;
+    width: min(100%, 270px);
+    margin-top: 18px;
+}
+
+.customer-portal-actions .button {
+    width: 100%;
 }
 
 .dashboard-summary-grid,
@@ -3252,7 +3344,7 @@ select:focus {
     font-weight: 800;
     text-decoration: underline;
     text-decoration-thickness: 2px;
-    text-underline-offset:px;
+    text-underline-offset: 4px;
     white-space: nowrap;
 }
 
@@ -3282,5 +3374,263 @@ select:focus {
     .appointment-week-day-count,
     .appointment-week-day-toggle {
         justify-self: start;
+    }
+}
+
+/* Phase 13: Rasse, Statusgruppen und E-Mail-Hauptschalter */
+.notification-status-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.dog-breed-other-hint {
+    margin-top: 2px;
+    padding: 12px 14px;
+    border: 1px solid #d1a35f;
+    border-radius: 12px;
+    background: #fff7e7;
+    color: var(--text);
+    font-weight: 700;
+}
+
+.dog-breed-other-hint[hidden] {
+    display: none;
+}
+
+.admin-summary {
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+}
+
+.booking-status-groups {
+    display: grid;
+    gap: 18px;
+    margin: 28px 0;
+}
+
+.booking-status-group {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 250, 245, 0.72);
+}
+
+.booking-status-group > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 68px;
+    padding: 18px 22px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 1.25rem;
+    font-weight: 850;
+}
+
+.booking-status-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.booking-status-group > summary:hover,
+.booking-status-group > summary:focus-visible {
+    outline: none;
+    background: rgba(154, 104, 69, 0.08);
+}
+
+.booking-status-group > summary strong {
+    display: inline-grid;
+    min-width: 40px;
+    min-height: 34px;
+    place-items: center;
+    padding: 4px 11px;
+    border-radius: 999px;
+    background: var(--surface-soft);
+    color: var(--accent-dark);
+    font-size: 0.95rem;
+}
+
+.booking-status-group[open] > summary {
+    border-bottom: 1px solid var(--line);
+}
+
+.booking-status-group .booking-grid {
+    margin: 0;
+    padding: 10px;
+    gap: 10px;
+    background: #f1e6da;
+}
+
+.booking-group-empty {
+    margin: 0;
+    padding: 16px;
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.72);
+    text-align: center;
+}
+
+.booking-card {
+    padding: 12px 14px;
+    border-color: rgba(154, 104, 69, 0.34);
+    border-left: 4px solid var(--accent);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 7px 18px rgba(66, 42, 24, 0.07);
+}
+
+.booking-card-head {
+    gap: 10px;
+}
+
+.booking-card h2 {
+    margin: 1px 0 8px;
+    font-size: 1.22rem;
+}
+
+.booking-time,
+.booking-id {
+    font-size: 0.72rem;
+    line-height: 1.3;
+}
+
+.booking-details {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px 14px;
+}
+
+.booking-details span {
+    font-size: 0.72rem;
+}
+
+.booking-details strong {
+    margin-top: 1px;
+    font-size: 0.88rem;
+    line-height: 1.22;
+}
+
+.booking-status {
+    min-height: 24px;
+    padding: 3px 8px;
+    font-size: 0.74rem;
+}
+
+.contact-quick-actions {
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.booking-card .contact-quick-actions .button {
+    min-height: 40px;
+    padding: 8px 14px;
+    font-size: 0.86rem;
+}
+
+.booking-message {
+    margin-top: 8px;
+    padding: 9px 11px;
+    border: 1px solid rgba(154, 104, 69, 0.12);
+    border-radius: 10px;
+    font-size: 0.86rem;
+    line-height: 1.35;
+}
+
+.booking-status-form {
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+}
+
+.booking-status-form label {
+    font-size: 0.9rem;
+}
+
+.booking-status-controls {
+    gap: 8px;
+}
+
+.booking-status-controls select,
+.booking-status-controls .button {
+    min-height: 42px;
+}
+
+.booking-status-controls .button {
+    padding: 8px 16px;
+    font-size: 0.88rem;
+}
+
+.notification-master-switch {
+    border-color: #8ab394;
+    background: #edf7ef;
+}
+
+.notification-master-switch-paused {
+    border-color: #d1a35f;
+    background: #fff7e7;
+}
+
+.notification-master-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.notification-master-switch-row h2,
+.notification-master-switch-row p {
+    margin-bottom: 0;
+}
+
+.notification-system-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    font-weight: 800;
+}
+
+.notification-system-state::before {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #4b8059;
+    content: "";
+}
+
+.notification-master-switch-paused .notification-system-state::before {
+    background: #bf7b2d;
+}
+
+@media (max-width: 1100px) {
+    .booking-details {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .booking-details {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .booking-status-group .booking-grid {
+        padding: 8px;
+    }
+
+    .booking-card {
+        padding: 11px 12px;
+    }
+
+    .booking-details {
+        grid-template-columns: 1fr;
+    }
+
+    .notification-master-switch-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .notification-master-switch-row .button {
+        width: 100%;
     }
 }

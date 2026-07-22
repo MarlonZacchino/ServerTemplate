@@ -18,19 +18,19 @@ typedef struct default_template {
 
 static const default_template defaults[] = {
     {"booking_received", "Terminanfrage erhalten – {{salon_name}}",
-     "Hallo {{customer_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Hallo {{customer_first_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nAnfrage ansehen oder zurückziehen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
      "Eingangsbestätigung"},
     {"booking_confirmed", "Termin bestätigt – {{salon_name}}",
-     "Hallo {{customer_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Hallo {{customer_first_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
      "Terminbestätigung"},
     {"booking_rejected", "Terminanfrage nicht möglich – {{salon_name}}",
-     "Hallo {{customer_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Hallo {{customer_first_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
      "Terminabsage"},
     {"appointment_reminder", "Erinnerung an deinen Termin – {{salon_name}}",
-     "Hallo {{customer_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Hallo {{customer_first_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
      "Terminerinnerung"},
-    {"admin_new_booking", "Neue Terminanfrage #{{booking_id}} – {{customer_name}}",
-     "Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings",
+    {"admin_new_booking", "Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
+     "Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings",
      "Admin-Benachrichtigung"}
 };
 
@@ -76,6 +76,8 @@ static int copy_column(sqlite3_stmt *stmt, int column, char *destination, size_t
 static const char *placeholder(const notification_template_context *context, const char *name)
 {
     if (strcmp(name, "customer_name") == 0) return context->customer_name;
+    if (strcmp(name, "customer_first_name") == 0) return context->customer_first_name;
+    if (strcmp(name, "customer_last_name") == 0) return context->customer_last_name;
     if (strcmp(name, "booking_id") == 0) return context->booking_id;
     if (strcmp(name, "appointment_date") == 0) return context->appointment_date;
     if (strcmp(name, "start_time") == 0) return context->start_time;
@@ -135,7 +137,7 @@ static bool subject_valid(const char *subject)
 
 static bool valid_template(const notification_template *value)
 {
-    notification_template_context empty = {"", "", "", "", "", "", "", "", "", "", "", "", ""};
+    notification_template_context empty = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
     char subject[NOTIFICATION_SUBJECT_SIZE], body[NOTIFICATION_BODY_SIZE];
     return value != NULL && notification_template_event_is_valid(value->event_type) &&
            subject_valid(value->subject_template) && value->body_template[0] != '\0' &&

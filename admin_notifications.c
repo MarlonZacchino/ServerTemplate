@@ -96,6 +96,7 @@ static const char *notice(const char *code)
 {
     if (code == NULL) return NULL;
     if (strcmp(code, "smtp") == 0) return "Die E-Mail-Verbindung wurde verschlüsselt gespeichert.";
+    if (strcmp(code, "system") == 0) return "Der Status des E-Mail-Systems wurde aktualisiert.";
     if (strcmp(code, "disconnected") == 0) return "Die E-Mail-Verbindung wurde deaktiviert.";
     if (strcmp(code, "test") == 0) return "Die Testmail wurde in die Warteschlange eingereiht.";
     if (strcmp(code, "template") == 0) return "Die Nachrichtenvorlage wurde gespeichert.";
@@ -117,13 +118,20 @@ static int template_editor(const notification_template *value, void *opaque)
     }
 
     page = context->page;
-    str_cat_cstr(page, "<article class=\"notification-template-card\" data-notification-template=\"");
+    str_cat_cstr(page, "<details class=\"notification-template-card\" data-notification-template=\"");
     html(page, value->event_type);
-    str_cat_cstr(page, "\"><div class=\"notification-template-heading\"><div><p class=\"eyebrow\">Vorlage</p><h3>");
+    str_cat_cstr(page,
+            "\"><summary class=\"notification-template-summary\">"
+            "<span class=\"notification-template-heading\">"
+            "<span class=\"notification-template-title\">"
+            "<span class=\"eyebrow\">Vorlage</span>"
+            "<strong>");
     html(page, notification_template_event_label(value->event_type));
-    str_cat_cstr(page, "</h3></div><code>");
+    str_cat_cstr(page, "</strong></span><code>");
     html(page, value->event_type);
-    str_cat_cstr(page, "</code></div>");
+    str_cat_cstr(page,
+            "</code><span class=\"notification-template-toggle\">Bearbeiten</span>"
+            "</span></summary><div class=\"notification-template-body\">");
 
     if (strcmp(value->event_type, "booking_received") == 0) {
         str_cat_cstr(page,
@@ -148,7 +156,7 @@ static int template_editor(const notification_template *value, void *opaque)
     csrf(page, context->csrf_token);
     str_cat_cstr(page, "<input type=\"hidden\" name=\"event_type\" value=\"");
     html(page, value->event_type);
-    str_cat_cstr(page, "\"><button class=\"button button-small button-secondary\" type=\"submit\">Standard wiederherstellen</button></form></article>");
+    str_cat_cstr(page, "\"><button class=\"button button-small button-secondary\" type=\"submit\">Standard wiederherstellen</button></form></div></details>");
     return 0;
 }
 
@@ -169,21 +177,161 @@ string *admin_notifications_build_page(const char *csrf_token, const char *notic
     if (page == NULL) { sodium_memzero(&smtp, sizeof(smtp)); set_error("Speicher für Adminseite fehlt"); return NULL; }
     message = notice(notice_code);
 
-    str_cat_cstr(page, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>E-Mail und Nachrichten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/admin-notifications.js\" defer></script></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
-                       "<a href=\"/\">Website öffnen</a>"
-                       "<a href=\"/admin\">Übersicht</a>"
-                       "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
-                       "<a href=\"/admin/gallery\">Fotos</a>"
-                       "<a href=\"/admin/appointments\">Termine</a>"
-                       "<a href=\"/admin/notifications\" aria-current=\"page\">E-Mail</a><"
-                       "<a href=\"/admin/calendar\">Einstellungen</a>"
-                       "/nav></div></header><main class=\"page admin-page admin-notifications-page\"><section class=\"card admin-card\"><p class=\"eyebrow\">Admin</p><h1>E-Mail und Nachrichten</h1><p>Verbinde das Salon-Postfach, teste den Versand und passe automatische Nachrichten an.</p>");
+    str_cat_cstr(page, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>E-Mail und Nachrichten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/admin-notifications.js\" defer></script></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>"
+                "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
+                "<a href=\"/admin\">Übersicht</a>"
+                "<a href=\"/\">Website öffnen</a>"
+                "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
+                "<a href=\"/admin/gallery\">Fotos</a>"
+                "<a href=\"/admin/appointments\">Termine</a>"
+                "<a href=\"/admin/notifications\" aria-current=\"page\">E-Mail</a>"
+                "<a href=\"/admin/calendar\">Einstellungen</a>"
+                "</nav>"
+                "</div>"
+                "</header>"
+                       "<main class=\"page admin-page admin-notifications-page\"><section class=\"card admin-card\"><p class=\"eyebrow\">Admin</p><h1>E-Mail und Nachrichten</h1><p>Verbinde das Salon-Postfach, teste den Versand und passe automatische Nachrichten an.</p>");
     if (message != NULL) { str_cat_cstr(page, "<p class=\"admin-success\" role=\"status\">"); html(page, message); str_cat_cstr(page, "</p>"); }
-    str_cat_cstr(page, "<div class=\"notification-status-grid\"><div><span>Verbindung</span><strong>"); str_cat_cstr(page, smtp.enabled ? "Aktiv" : "Nicht verbunden");
-    str_cat_cstr(page, "</strong></div><div><span>Ausstehend</span><strong>"); append_size(page, counts.pending);
-    str_cat_cstr(page, "</strong></div><div><span>Fehlgeschlagen</span><strong>"); append_size(page, counts.failed);
-    str_cat_cstr(page, "</strong></div><div><span>Gesendet</span><strong>"); append_size(page, counts.sent);
-    str_cat_cstr(page, "</strong></div></div></section>");
+    str_cat_cstr(
+            page,
+            "<div class=\"notification-status-grid\">"
+            "<div><span>System</span><strong>"
+    );
+    str_cat_cstr(
+            page,
+            smtp.delivery_enabled ? "Aktiv" : "Pausiert"
+    );
+
+    str_cat_cstr(
+            page,
+            "</strong></div>"
+            "<div><span>Verbindung</span><strong>"
+    );
+    str_cat_cstr(
+            page,
+            smtp.enabled ? "Aktiv" : "Nicht verbunden"
+    );
+
+    str_cat_cstr(
+            page,
+            "</strong></div>"
+            "<div><span>Ausstehend</span><strong>"
+    );
+    append_size(page, counts.pending);
+
+    str_cat_cstr(
+            page,
+            "</strong></div>"
+            "<div><span>Fehlgeschlagen</span><strong>"
+    );
+    append_size(page, counts.failed);
+
+    str_cat_cstr(
+            page,
+            "</strong></div>"
+            "<div><span>Gesendet</span><strong>"
+    );
+    append_size(page, counts.sent);
+
+    str_cat_cstr(
+            page,
+            "</strong></div>"
+            "</div>"
+            "</section>"
+    );
+
+    str_cat_cstr(
+            page,
+            "<section class=\"card admin-card notification-master-switch"
+    );
+
+    if (!smtp.delivery_enabled) {
+        str_cat_cstr(
+                page,
+                " notification-master-switch-paused"
+        );
+    }
+
+    str_cat_cstr(
+            page,
+            "\">"
+            "<div class=\"notification-master-switch-row\">"
+            "<div>"
+            "<p class=\"eyebrow\">Hauptschalter</p>"
+            "<h2>E-Mail-System</h2>"
+            "<p class=\"notification-system-state\">"
+    );
+
+    str_cat_cstr(
+            page,
+            smtp.delivery_enabled
+                ? "Automatischer Versand ist aktiviert"
+                : "Automatischer Versand ist pausiert"
+    );
+
+    str_cat_cstr(
+            page,
+            "</p>"
+            "<p>"
+            "Beim Pausieren bleiben SMTP-Daten, Vorlagen und "
+            "wartende Nachrichten erhalten. Automatische "
+            "Statusänderungen laufen unabhängig davon weiter."
+            "</p>"
+            "</div>"
+            "<form method=\"post\" "
+            "action=\"/admin/notifications/toggle\">"
+    );
+
+    csrf(page, csrf_token);
+
+    str_cat_cstr(
+            page,
+            "<input type=\"hidden\" "
+            "name=\"delivery_enabled\" value=\""
+    );
+    str_cat_cstr(
+            page,
+            smtp.delivery_enabled ? "0" : "1"
+    );
+
+    str_cat_cstr(
+            page,
+            "\">"
+            "<button class=\"button"
+    );
+
+    if (smtp.delivery_enabled) {
+        str_cat_cstr(page, " button-secondary");
+    }
+
+    str_cat_cstr(
+            page,
+            "\" type=\"submit\""
+    );
+
+    if (!smtp.enabled && !smtp.delivery_enabled) {
+        str_cat_cstr(
+                page,
+                " disabled "
+                "title=\"Zuerst ein E-Mail-Konto verbinden\""
+        );
+    }
+
+    str_cat_cstr(page, ">");
+
+    str_cat_cstr(
+            page,
+            smtp.delivery_enabled
+                ? "E-Mail-System pausieren"
+                : "E-Mail-System aktivieren"
+    );
+
+    str_cat_cstr(
+            page,
+            "</button>"
+            "</form>"
+            "</div>"
+            "</section>"
+    );
 
     str_cat_cstr(page, "<section class=\"card admin-card\"><p class=\"eyebrow\">Postfach</p><h2>E-Mail-Konto verbinden</h2><p>Die Zugangsdaten werden verschlüsselt im Secrets-Verzeichnis gespeichert. Ein leeres Passwortfeld behält beim Bearbeiten das vorhandene Passwort.</p><form class=\"admin-calendar-form\" method=\"post\" action=\"/admin/notifications/smtp\">"); csrf(page, csrf_token);
     str_cat_cstr(page, "<div class=\"admin-calendar-fields notification-smtp-fields\"><label class=\"admin-calendar-wide\">SMTP-Adresse<input name=\"smtp_url\" maxlength=\"511\" required placeholder=\"smtps://smtp.anbieter.de:465\" value=\""); html(page, smtp.url);
@@ -206,7 +354,7 @@ string *admin_notifications_build_page(const char *csrf_token, const char *notic
     str_cat_cstr(page, "<button class=\"button button-danger\" type=\"submit\" onclick=\"return confirm('Alle fehlgeschlagenen Nachrichten endgültig entfernen?')\">Fehlgeschlagene löschen</button></form><form method=\"post\" action=\"/admin/notifications/clear-completed\">"); csrf(page, csrf_token);
     str_cat_cstr(page, "<button class=\"button button-danger\" type=\"submit\" onclick=\"return confirm('Gesendete und fehlgeschlagene Nachrichten vollständig bereinigen?')\">Abgeschlossene Historie leeren</button></form></div><p class=\"admin-calendar-hint\">Ausstehende und gerade verarbeitete E-Mails werden durch diese Bereinigung nicht gelöscht.</p></section>");
 
-    str_cat_cstr(page, "<section class=\"card admin-card notification-template-section\"><p class=\"eyebrow\">Texte</p><h2>Automatische Nachrichten individualisieren</h2><p>Bereits eingereihte E-Mails behalten ihren bisherigen Text.</p><details class=\"notification-placeholder-help\"><summary>Verfügbare Platzhalter</summary><code>{{customer_name}}</code> <code>{{booking_id}}</code> <code>{{appointment_date}}</code> <code>{{start_time}}</code> <code>{{end_time}}</code> <code>{{service_name}}</code> <code>{{dog_name}}</code> <code>{{rejection_reason}}</code> <code>{{salon_name}}</code> <code>{{salon_address}}</code> <code>{{salon_phone}}</code> <code>{{website_url}}</code> <code>{{booking_url}}</code></details><div class=\"notification-template-list\">");
+    str_cat_cstr(page, "<section class=\"card admin-card notification-template-section\"><p class=\"eyebrow\">Texte</p><h2>Automatische Nachrichten individualisieren</h2><p>Bereits eingereihte E-Mails behalten ihren bisherigen Text.</p><details class=\"notification-placeholder-help\"><summary>Verfügbare Platzhalter</summary><p><code>{{customer_first_name}}</code> enthält den Vornamen, <code>{{customer_last_name}}</code> den Nachnamen des Kunden.</p><code>{{customer_first_name}}</code> <code>{{customer_last_name}}</code> <code>{{booking_id}}</code> <code>{{appointment_date}}</code> <code>{{start_time}}</code> <code>{{end_time}}</code> <code>{{service_name}}</code> <code>{{dog_name}}</code> <code>{{rejection_reason}}</code> <code>{{salon_name}}</code> <code>{{salon_address}}</code> <code>{{salon_phone}}</code> <code>{{website_url}}</code> <code>{{booking_url}}</code></details><div class=\"notification-template-list\">");
     context.page = page; context.csrf_token = csrf_token;
     if (notification_template_for_each(template_editor, &context) != 0) { free_str(page); sodium_memzero(&smtp, sizeof(smtp)); set_error(notification_templates_last_error()); return NULL; }
     str_cat_cstr(page, "</div></section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs Admin.</small></div></footer></body></html>");
@@ -233,11 +381,34 @@ admin_notifications_result admin_notifications_update_smtp(const string *request
         }
         snprintf(updated.password, sizeof(updated.password), "%s", current.password);
     } else snprintf(updated.password, sizeof(updated.password), "%s", password);
-    updated.enabled = true; updated.managed_by_admin = true; updated.notify_admin_on_new_booking = checked(request, "notify_admin_on_new_booking");
+    updated.enabled = true;
+    updated.delivery_enabled = current.enabled ? current.delivery_enabled : true;
+    updated.managed_by_admin = true;
+    updated.notify_admin_on_new_booking = checked(request, "notify_admin_on_new_booking");
     if (updated.from_name[0] == '\0') snprintf(updated.from_name, sizeof(updated.from_name), "%s", server_config_salon_name());
     if (!notification_settings_are_valid(&updated, true)) { set_error("SMTP-Adresse, Absender oder Zugangsdaten sind ungültig"); sodium_memzero(&current, sizeof(current)); sodium_memzero(&updated, sizeof(updated)); sodium_memzero(password, sizeof(password)); return ADMIN_NOTIFICATIONS_BAD_REQUEST; }
     if (notification_settings_save(&updated) != 0) { set_error(notification_settings_last_error()); sodium_memzero(&current, sizeof(current)); sodium_memzero(&updated, sizeof(updated)); sodium_memzero(password, sizeof(password)); return ADMIN_NOTIFICATIONS_ERROR; }
     sodium_memzero(&current, sizeof(current)); sodium_memzero(&updated, sizeof(updated)); sodium_memzero(password, sizeof(password)); return ADMIN_NOTIFICATIONS_OK;
+}
+
+admin_notifications_result admin_notifications_toggle_delivery(const string *request)
+{
+    char value[8];
+    bool enabled;
+
+    if (!field(request, "delivery_enabled", value, sizeof(value), true, false) ||
+        (strcmp(value, "0") != 0 && strcmp(value, "1") != 0)) {
+        set_error("Ungültiger Status für das E-Mail-System");
+        return ADMIN_NOTIFICATIONS_BAD_REQUEST;
+    }
+
+    enabled = strcmp(value, "1") == 0;
+    if (notification_settings_set_delivery_enabled(enabled) != 0) {
+        set_error(notification_settings_last_error());
+        return enabled ? ADMIN_NOTIFICATIONS_BAD_REQUEST : ADMIN_NOTIFICATIONS_ERROR;
+    }
+
+    return ADMIN_NOTIFICATIONS_OK;
 }
 
 admin_notifications_result admin_notifications_disconnect_smtp(const string *request) { (void)request; if (notification_settings_disconnect() != 0) { set_error(notification_settings_last_error()); return ADMIN_NOTIFICATIONS_ERROR; } return ADMIN_NOTIFICATIONS_OK; }

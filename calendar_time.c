@@ -321,6 +321,49 @@ bool calendar_utc_timestamp_is_valid(const char *timestamp)
            second >= 0 && second <= 59;
 }
 
+int calendar_utc_timestamp_to_epoch(
+        const char *timestamp,
+        time_t *out_epoch
+)
+{
+    char date[11];
+    int year;
+    int month;
+    int day;
+    int hour;
+    int minute;
+    int second;
+    int64_t epoch_seconds;
+    time_t value;
+
+    if (out_epoch == NULL || !calendar_utc_timestamp_is_valid(timestamp)) {
+        return -1;
+    }
+
+    memcpy(date, timestamp, 10);
+    date[10] = '\0';
+    if (!parse_date(date, &year, &month, &day)) {
+        return -1;
+    }
+
+    hour = (timestamp[11] - '0') * 10 + (timestamp[12] - '0');
+    minute = (timestamp[14] - '0') * 10 + (timestamp[15] - '0');
+    second = (timestamp[17] - '0') * 10 + (timestamp[18] - '0');
+    epoch_seconds = days_from_civil(
+            year,
+            (unsigned int)month,
+            (unsigned int)day) * 86400 +
+            hour * 3600 + minute * 60 + second;
+    value = (time_t)epoch_seconds;
+
+    if ((int64_t)value != epoch_seconds) {
+        return -1;
+    }
+
+    *out_epoch = value;
+    return 0;
+}
+
 int calendar_utc_add_minutes(
         const char *timestamp,
         int minutes,
@@ -412,6 +455,33 @@ static bool timezone_is_valid(const char *timezone)
     }
 
     return true;
+}
+
+int calendar_epoch_to_local(
+        const char *timezone,
+        time_t epoch,
+        char out_date[11],
+        int *out_minute
+)
+{
+    struct tm local_time;
+
+    if (out_date == NULL || out_minute == NULL || !timezone_is_valid(timezone)) {
+        return -1;
+    }
+
+    if (setenv("TZ", timezone, 1) != 0) {
+        return -1;
+    }
+    tzset();
+
+    if (localtime_r(&epoch, &local_time) == NULL ||
+        strftime(out_date, 11, "%Y-%m-%d", &local_time) != 10) {
+        return -1;
+    }
+
+    *out_minute = local_time.tm_hour * 60 + local_time.tm_min;
+    return 0;
 }
 
 int calendar_clock_now(

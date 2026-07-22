@@ -71,6 +71,7 @@ def address_fields(
         "street_address": street_address,
         "postal_code": postal_code,
         "city": city,
+        "dog_breed": "mixed_breed",
     }
 
 
@@ -162,8 +163,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 8:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 8, erhalten {schema_version}")
+            if schema_version != 9:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 9, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -196,7 +197,7 @@ def run_stateful_tests() -> int:
             ).fetchone()
 
             if legacy_row != (
-                "altbestand",
+                "neu",
                 "Legacy Test",
                 "legacy@example.invalid",
                 "",
@@ -248,6 +249,7 @@ def run_stateful_tests() -> int:
         postal_position = page.find('name="postal_code"')
         city_position = page.find('name="city"')
         dog_name_position = page.find('name="dog_name"')
+        dog_breed_position = page.find('name="dog_breed"')
 
         if min(
             contact_position,
@@ -257,6 +259,7 @@ def run_stateful_tests() -> int:
             postal_position,
             city_position,
             dog_name_position,
+            dog_breed_position,
         ) < 0:
             raise AssertionError("Kontaktformular enthält nicht alle erwarteten Felder")
         if not (
@@ -267,6 +270,7 @@ def run_stateful_tests() -> int:
             < postal_position
             < city_position
             < dog_name_position
+            < dog_breed_position
         ):
             raise AssertionError("Name und Pflichtadresse stehen nicht in der erwarteten Reihenfolge")
         for field_name in ("street_address", "postal_code", "city"):
@@ -275,6 +279,10 @@ def run_stateful_tests() -> int:
                 page,
             ) is None:
                 raise AssertionError(f"Adressfeld {field_name!r} ist nicht verpflichtend")
+        if re.search(r'<select[^>]+name="dog_breed"[^>]+required', page) is None:
+            raise AssertionError("Rasse ist kein verpflichtendes Auswahlfeld")
+        if 'value="other">Sonstiges</option>' not in page or 'data-dog-breed-other-hint' not in page:
+            raise AssertionError("Sonstiges-Auswahl oder Rassehinweis fehlt")
         if 'pattern="[0-9]{5}"' not in page:
             raise AssertionError("PLZ-Formatprüfung fehlt")
         if '<script src="/postal-code.js" defer></script>' not in page:
@@ -466,6 +474,10 @@ def run_stateful_tests() -> int:
             raise AssertionError("Persönlicher Kundenbereich darf nicht gecacht werden")
         if b"Bello" not in portal_body or "Wird vom Salon geprüft".encode("utf-8") not in portal_body:
             raise AssertionError("Persönlicher Kundenbereich zeigt Buchung oder Status nicht an")
+        if b'href="/impressum">Zum Impressum</a>' not in portal_body:
+            raise AssertionError("Kundenbereich verweist für Kontaktdaten nicht auf das Impressum")
+        if b'href="/kontakt">Kontakt aufnehmen</a>' in portal_body:
+            raise AssertionError("Kundenbereich verweist noch auf das Buchungsformular")
 
         invalid_portal = portal_path[:-1] + ("0" if portal_path[-1] != "0" else "1")
         invalid_response = raw_request(request_text("GET", invalid_portal).encode())
@@ -888,12 +900,31 @@ def run_stateful_tests() -> int:
         if ("Teststraße 12a".encode("utf-8") not in admin_body or
             b"26121 Oldenburg" not in admin_body):
             raise AssertionError("Adminbereich zeigt die gespeicherte Pflichtadresse nicht")
+        for group in ("Neue Anfragen", "Bestätigt", "Abgelehnt", "Abgesagt", "Erledigt"):
+            if group.encode("utf-8") not in admin_body:
+                raise AssertionError(f"Statussegment fehlt: {group!r}")
+        for removed_group in ("Kontaktiert", "Altbestand"):
+            if removed_group.encode("utf-8") in admin_body:
+                raise AssertionError(f"Entferntes Statussegment wird noch angezeigt: {removed_group!r}")
+        for value, label in (
+            ("neu", "Neu"),
+            ("bestätigt", "Bestätigt"),
+            ("abgelehnt", "Abgelehnt"),
+            ("abgesagt", "Abgesagt"),
+            ("erledigt", "Erledigt"),
+        ):
+            option = f'<option value="{value}">{label}</option>'.encode("utf-8")
+            selected = f'<option value="{value}" selected>{label}</option>'.encode("utf-8")
+            if option not in admin_body and selected not in admin_body:
+                raise AssertionError(f"Statusoption fehlt: {label!r}")
+        if b'class="booking-status-group booking-status-group-abgelehnt" open' in admin_body:
+            raise AssertionError("Abgelehnte Buchungen sind nicht standardmäßig eingeklappt")
         csrf_token = csrf_match.group(1).decode("ascii")
 
         with sqlite3.connect(database_file) as connection:
             target = connection.execute(
                 "SELECT id, status FROM bookings WHERE customer_name = ?",
-                ("Pew Pew Test",),
+                ("Legacy Test",),
             ).fetchone()
             untouched = connection.execute(
                 "SELECT id, status FROM bookings WHERE customer_name = ?",
@@ -909,7 +940,7 @@ def run_stateful_tests() -> int:
         missing_auth_body = urlencode({
             "csrf_token": csrf_token,
             "booking_id": str(target_id),
-            "status": "kontaktiert",
+            "status": "abgelehnt",
         })
         missing_auth_response = raw_request(request_text(
             "POST",
@@ -922,7 +953,7 @@ def run_stateful_tests() -> int:
         invalid_csrf_body = urlencode({
             "csrf_token": "0" * 64,
             "booking_id": str(target_id),
-            "status": "kontaktiert",
+            "status": "abgelehnt",
         })
         invalid_csrf_response = raw_request(request_text(
             "POST",
@@ -954,7 +985,7 @@ def run_stateful_tests() -> int:
         invalid_id_body = urlencode({
             "csrf_token": csrf_token,
             "booking_id": "12x",
-            "status": "kontaktiert",
+            "status": "abgelehnt",
         })
         invalid_id_response = raw_request(request_text(
             "POST",
@@ -970,7 +1001,7 @@ def run_stateful_tests() -> int:
         unknown_id_body = urlencode({
             "csrf_token": csrf_token,
             "booking_id": "9223372036854775807",
-            "status": "kontaktiert",
+            "status": "abgelehnt",
         })
         unknown_id_response = raw_request(request_text(
             "POST",
@@ -986,7 +1017,7 @@ def run_stateful_tests() -> int:
         update_body = urlencode({
             "csrf_token": csrf_token,
             "booking_id": str(target_id),
-            "status": "kontaktiert",
+            "status": "abgelehnt",
         })
         update_response = raw_request(request_text(
             "POST",
@@ -1003,17 +1034,21 @@ def run_stateful_tests() -> int:
             raise AssertionError("Statusänderung leitet nicht zum Adminbereich zurück")
 
         with sqlite3.connect(database_file) as connection:
-            updated_status = connection.execute(
-                "SELECT status FROM bookings WHERE id = ?",
+            updated_status, updated_decision_status = connection.execute(
+                "SELECT status, decision_status FROM bookings WHERE id = ?",
                 (target_id,),
-            ).fetchone()[0]
+            ).fetchone()
             current_untouched_status = connection.execute(
                 "SELECT status FROM bookings WHERE id = ?",
                 (untouched_id,),
             ).fetchone()[0]
 
-        if updated_status != "kontaktiert":
+        if updated_status != "abgelehnt":
             raise AssertionError(f"Status wurde nicht gespeichert: {updated_status!r}")
+        if updated_decision_status != "rejected":
+            raise AssertionError(
+                "Manueller Status und Terminentscheidung wurden nicht synchronisiert"
+            )
         if current_untouched_status != untouched_status:
             raise AssertionError("Eine andere Buchung wurde unerwartet verändert")
         if original_status == updated_status:
@@ -1027,9 +1062,10 @@ def run_stateful_tests() -> int:
         _, refreshed_body = assert_status(refreshed_response, "200 OK")
 
         selected_pattern = (
-            rb'<option value="kontaktiert" selected>Kontaktiert</option>'
+            '<option value="abgelehnt" selected>Abgelehnt</option>'
+            .encode("utf-8")
         )
-        if re.search(selected_pattern, refreshed_body) is None:
+        if selected_pattern not in refreshed_body:
             raise AssertionError("Adminseite zeigt den gespeicherten Status nicht als ausgewählt")
 
     def admin_filter_workflow() -> None:
@@ -1038,7 +1074,7 @@ def run_stateful_tests() -> int:
         ).decode()
         auth_headers = {"Authorization": f"Basic {auth_token}"}
 
-        status_query = urlencode({"status": "kontaktiert"})
+        status_query = urlencode({"status": "abgelehnt"})
         status_response = raw_request(request_text(
             "GET",
             f"/admin/bookings?{status_query}",
@@ -1046,11 +1082,11 @@ def run_stateful_tests() -> int:
         ).encode())
         _, status_body = assert_status(status_response, "200 OK")
 
-        if b"Pew Pew Test" not in status_body:
-            raise AssertionError("Statusfilter zeigt die kontaktierte Buchung nicht")
-        if b"TSV V2 Test" in status_body or b"Legacy Test" in status_body:
+        if b"Legacy Test" not in status_body:
+            raise AssertionError("Statusfilter zeigt die abgelehnte Buchung nicht")
+        if b"TSV V2 Test" in status_body or b"Pew Pew Test" in status_body:
             raise AssertionError("Statusfilter zeigt Buchungen mit anderem Status")
-        if b'<option value="kontaktiert" selected>' not in status_body:
+        if '<option value="abgelehnt" selected>'.encode("utf-8") not in status_body:
             raise AssertionError("Gewählter Statusfilter wird nicht beibehalten")
         if b'class="admin-summary"' not in status_body:
             raise AssertionError("Adminübersicht enthält keine Statuszähler")
@@ -1095,7 +1131,7 @@ def run_stateful_tests() -> int:
         ).encode())
         _, literal_wildcard_body = assert_status(literal_wildcard_response, "200 OK")
 
-        if "Für diesen Filter wurden keine Buchungsanfragen gefunden.".encode("utf-8") not in literal_wildcard_body:
+        if "Für diese Suche wurden keine Buchungsanfragen gefunden.".encode("utf-8") not in literal_wildcard_body:
             raise AssertionError("LIKE-Sonderzeichen werden nicht als wörtliche Suche behandelt")
 
         invalid_status_response = raw_request(request_text(
@@ -1205,11 +1241,11 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             accepted = connection.execute(
-                "SELECT decision_status, hold_expires_at, decision_at "
+                "SELECT decision_status, status, hold_expires_at, decision_at "
                 "FROM bookings WHERE id = ?",
                 (pending_id,),
             ).fetchone()
-        if accepted is None or accepted[0] != "confirmed" or accepted[1] is not None or not accepted[2]:
+        if accepted is None or accepted[0:2] != ("confirmed", "bestätigt") or accepted[2] is not None or not accepted[3]:
             raise AssertionError(f"Terminannahme wurde falsch gespeichert: {accepted!r}")
 
         repeated_response = raw_request(request_text(
@@ -1288,11 +1324,11 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             rejected = connection.execute(
-                "SELECT decision_status, hold_expires_at, rejection_reason "
+                "SELECT decision_status, status, hold_expires_at, rejection_reason "
                 "FROM bookings WHERE id = ?",
                 (phone_booking[0],),
             ).fetchone()
-        if rejected != ("rejected", None, "Der Termin ist intern nicht möglich"):
+        if rejected != ("rejected", "abgelehnt", None, "Der Termin ist intern nicht möglich"):
             raise AssertionError(f"Terminablehnung wurde falsch gespeichert: {rejected!r}")
 
         released_response = raw_request(request_text(
@@ -1342,7 +1378,7 @@ def run_stateful_tests() -> int:
             "Leistung hinzufügen",
             'name="auto_confirm_bookings"',
             "Frühester buchbarer Termin",
-            "Freihaltezeit für offene Anfragen",
+            'name="pending_hold_hours"',
             "Änderungen speichern",
             "/admin/calendar/save-all",
             "/admin-calendar.js",
@@ -1772,14 +1808,23 @@ def run_stateful_tests() -> int:
         if headers.get("cache-control") != "no-store":
             raise AssertionError("E-Mail-Adminseite setzt Cache-Control: no-store nicht")
         for expected in (
+            "E-Mail-System",
             "E-Mail-Konto verbinden",
             "Automatische Nachrichten individualisieren",
             "Terminbestätigung",
             "Terminabsage",
-            "{{customer_name}}",
+            "{{customer_first_name}}",
+            "{{customer_last_name}}",
+            "Vornamen",
+            "Nachnamen des Kunden",
         ):
             if expected.encode("utf-8") not in body:
                 raise AssertionError(f"E-Mail-Adminseite enthält {expected!r} nicht")
+
+        if body.count(b'<details class="notification-template-card"') != 5:
+            raise AssertionError("Nicht jede E-Mail-Vorlage ist einklappbar")
+        if body.count(b'class="notification-template-summary"') != 5:
+            raise AssertionError("Einklappbare E-Mail-Vorlagen haben keine Zusammenfassung")
 
         match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
         if match is None:
@@ -1814,6 +1859,37 @@ def run_stateful_tests() -> int:
             raise AssertionError("SMTP-Secrets besitzen nicht den Modus 0600")
         if password.encode() in smtp_file.read_bytes():
             raise AssertionError("SMTP-Passwort wurde unverschlüsselt gespeichert")
+
+        pause_response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/toggle",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "delivery_enabled": "0",
+            }),
+        ).encode())
+        pause_headers, _ = assert_status(pause_response, "303 See Other")
+        if pause_headers.get("location") != "/admin/notifications?saved=system":
+            raise AssertionError("Pausieren des E-Mail-Systems leitet falsch zurück")
+
+        paused_page = raw_request(request_text(
+            "GET", "/admin/notifications", auth_headers
+        ).encode())
+        _, paused_body = assert_status(paused_page, "200 OK")
+        if "Automatischer Versand ist pausiert".encode("utf-8") not in paused_body:
+            raise AssertionError("E-Mail-Hauptschalter zeigt den pausierten Zustand nicht")
+
+        enable_response = raw_request(request_text(
+            "POST",
+            "/admin/notifications/toggle",
+            form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "delivery_enabled": "1",
+            }),
+        ).encode())
+        assert_status(enable_response, "303 See Other")
 
         response = raw_request(request_text(
             "POST",
@@ -1921,9 +1997,27 @@ def run_stateful_tests() -> int:
         if "automatisch bestätigt".encode("utf-8") not in confirmation_body:
             raise AssertionError("Kundenseite zeigt die automatische Bestätigung nicht an")
 
+        portal_match = re.search(
+            rb'href="[^" ]*(/buchung/[0-9]+/[0-9a-f]{64})"',
+            confirmation_body,
+        )
+        if portal_match is None:
+            raise AssertionError("Automatische Bestätigung enthält keinen persönlichen Kundenlink")
+
+        portal_response = raw_request(request_text(
+            "GET",
+            portal_match.group(1).decode("ascii"),
+        ).encode())
+        _, portal_body = assert_status(portal_response, "200 OK")
+        if (
+            "innerhalb von 72 Stunden".encode("utf-8") not in portal_body
+            or "Ausfallgebühr".encode("utf-8") not in portal_body
+        ):
+            raise AssertionError("Kundenbereich zeigt den Stornierungshinweis nicht an")
+
         with sqlite3.connect(database_file) as connection:
             row = connection.execute(
-                "SELECT id, decision_status, hold_expires_at, decision_at, contact_channel, email "
+                "SELECT id, decision_status, status, hold_expires_at, decision_at, contact_channel, email "
                 "FROM bookings WHERE customer_name = 'Auto Bestätigung' "
                 "ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -1942,14 +2036,24 @@ def run_stateful_tests() -> int:
             )
             connection.commit()
 
-        if row[1] != "confirmed" or row[2] is not None or not row[3] or row[4:] != (
+        if row[1:3] != ("confirmed", "bestätigt") or row[3] is not None or not row[4] or row[5:] != (
             "email", "auto@example.invalid"
         ):
             raise AssertionError(f"Automatisch bestätigter Termin wurde falsch gespeichert: {row!r}")
         if notification is None or notification[0] != "pending" or notification[1] != "auto@example.invalid":
             raise AssertionError(f"Bestätigungs-E-Mail wurde nicht eingereiht: {notification!r}")
-        if "Termin bestätigt" not in notification[2] or "Auto Bestätigung" not in notification[3]:
-            raise AssertionError("Bestätigungs-E-Mail enthält nicht die erwarteten Termindaten")
+        expected_date = datetime.strptime(target_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+        if (
+            "Termin bestätigt" not in notification[2]
+            or "Hallo Auto," not in notification[3]
+            or expected_date not in notification[3]
+            or selected_slot["start"] not in notification[3]
+            or "Milo" not in notification[3]
+            or portal_match.group(1).decode("ascii") not in notification[3]
+        ):
+            raise AssertionError(
+                "Bestätigungs-E-Mail enthält nicht die erwarteten Termindaten"
+            )
         if "BEGIN:VCALENDAR" not in notification[4] or "BEGIN:VEVENT" not in notification[4]:
             raise AssertionError("Bestätigungs-E-Mail enthält keine gültige Kalenderdatei")
 
@@ -2052,10 +2156,10 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             row = connection.execute(
-                "SELECT decision_status, hold_expires_at, decision_at FROM bookings WHERE id = ?",
+                "SELECT decision_status, status, hold_expires_at, decision_at FROM bookings WHERE id = ?",
                 (booking_id,),
             ).fetchone()
-        if row is None or row[0] != "cancelled" or row[1] is not None or not row[2]:
+        if row is None or row[0:2] != ("cancelled", "abgesagt") or row[2] is not None or not row[3]:
             raise AssertionError(f"Kundenabsage wurde falsch gespeichert: {row!r}")
 
         availability_after = raw_request(request_text(
@@ -2096,6 +2200,21 @@ def run_stateful_tests() -> int:
         if match is None:
             raise AssertionError("CSRF-Token für Vorlagen fehlt")
         csrf_token = match.group(1).decode("ascii")
+
+        with sqlite3.connect(database_file) as connection:
+            booking_link_templates = connection.execute(
+                "SELECT event_type, body_template FROM notification_templates "
+                "WHERE event_type IN ('booking_received', 'booking_confirmed') "
+                "ORDER BY event_type"
+            ).fetchall()
+        if len(booking_link_templates) != 2 or any(
+            "{{booking_url}}" not in template_body
+            for _, template_body in booking_link_templates
+        ):
+            raise AssertionError(
+                f"Reservierungs- oder Bestätigungsvorlage enthält keinen Buchungslink: "
+                f"{booking_link_templates!r}"
+            )
 
         subject = "Dein Termin für {{dog_name}} ist bestätigt"
         message = (

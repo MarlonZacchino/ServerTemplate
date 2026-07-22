@@ -43,6 +43,7 @@ typedef struct availability_reservation_request {
     const char *postal_code;
     const char *city;
     const char *dog_name;
+    const char *dog_breed;
     const char *dog_size;
     const char *message;
     bool auto_confirm;

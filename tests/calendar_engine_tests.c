@@ -79,7 +79,7 @@ static int execute_direct_sql(const char *sql)
     if (sqlite3_open_v2(
             server_config_database_file(),
             &connection,
-            SQLITE_OPEN_READWRITE,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
             NULL) != SQLITE_OK) {
         goto cleanup;
     }
@@ -134,6 +134,7 @@ int main(void)
             .name = "Bestehende Anfrage",
             .contact = "legacy@example.invalid",
             .dog_name = "Waldi",
+            .dog_breed = "mixed_breed",
             .dog_size = "medium",
             .service = "wash_dry",
             .preferred_date = "2026-08-03",
@@ -200,10 +201,36 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    expect_int(execute_direct_sql(
+            "CREATE TABLE bookings ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    created_at TEXT NOT NULL,"
+            "    status TEXT NOT NULL DEFAULT 'neu',"
+            "    customer_name TEXT NOT NULL,"
+            "    contact TEXT NOT NULL,"
+            "    street_address TEXT NOT NULL DEFAULT '',"
+            "    postal_code TEXT NOT NULL DEFAULT '',"
+            "    city TEXT NOT NULL DEFAULT '',"
+            "    dog_name TEXT NOT NULL DEFAULT '',"
+            "    dog_size TEXT NOT NULL DEFAULT '',"
+            "    service TEXT NOT NULL DEFAULT '',"
+            "    preferred_date TEXT NOT NULL DEFAULT '',"
+            "    message TEXT NOT NULL DEFAULT '',"
+            "    legacy INTEGER NOT NULL DEFAULT 0 CHECK (legacy IN (0, 1))"
+            ");"),
+            0,
+            "Phase-12-Buchungstabelle ohne Rasse wird vorbereitet");
+
     if (booking_database_initialize() != 0) {
         fprintf(stderr, "Buchungsdatenbankfehler: %s\n", booking_database_last_error());
         return EXIT_FAILURE;
     }
+
+    expect_int(query_single_int(
+            "SELECT COUNT(*) FROM pragma_table_info('bookings') "
+            "WHERE name = 'dog_breed';",
+            &value), 0, "Rassespalte ist nach der Buchungsmigration abfragbar");
+    expect_int(value, 1, "Buchungsmigration ergänzt dog_breed vor dem ersten Insert");
 
     expect_int(booking_database_insert(&old_request), 0, "Bestehende Anfrage wird vor Migration gespeichert");
 
@@ -237,7 +264,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 8, "Kalenderschema verwendet Version 8");
+    expect_int(schema_version, 9, "Kalenderschema verwendet Version 9");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -279,6 +306,8 @@ int main(void)
         notification_template template_value;
         notification_template_context context = {
             .customer_name = "Marlon Test",
+            .customer_first_name = "Marlon",
+            .customer_last_name = "Test",
             .booking_id = "42",
             .appointment_date = "21.08.2026",
             .start_time = "09:00",
@@ -300,7 +329,7 @@ int main(void)
         snprintf(template_value.subject_template, sizeof(template_value.subject_template),
                  "%s", "Termin für {{dog_name}} bestätigt");
         snprintf(template_value.body_template, sizeof(template_value.body_template),
-                 "%s", "Hallo {{customer_name}}, Buchung {{booking_id}} ist bestätigt.");
+                 "%s", "Hallo {{customer_first_name}} {{customer_last_name}}, Buchung {{booking_id}} ist bestätigt.");
         expect_int(notification_template_update(&template_value), 0,
                    "Nachrichtenvorlage kann individualisiert werden");
         expect_int(notification_template_render(&template_value, &context, subject, body), 0,
@@ -326,6 +355,7 @@ int main(void)
 
         memset(&saved, 0, sizeof(saved));
         saved.enabled = true;
+        saved.delivery_enabled = true;
         saved.managed_by_admin = true;
         saved.notify_admin_on_new_booking = true;
         snprintf(saved.url, sizeof(saved.url), "%s", "smtps://smtp.example.invalid:465");
@@ -340,7 +370,7 @@ int main(void)
         memset(&loaded, 0, sizeof(loaded));
         expect_int(notification_settings_load(&loaded), 0,
                    "Verschlüsselte SMTP-Verbindung ist lesbar");
-        expect_true(loaded.enabled && loaded.managed_by_admin &&
+        expect_true(loaded.enabled && loaded.delivery_enabled && loaded.managed_by_admin &&
                     loaded.notify_admin_on_new_booking,
                     "SMTP-Status bleibt gespeichert");
         expect_true(strcmp(loaded.password, saved.password) == 0,
@@ -360,7 +390,7 @@ int main(void)
         memset(&loaded, 0, sizeof(loaded));
         expect_int(notification_settings_load(&loaded), 0,
                    "Deaktivierter Zustand ist lesbar");
-        expect_true(!loaded.enabled && loaded.managed_by_admin,
+        expect_true(!loaded.enabled && !loaded.delivery_enabled && loaded.managed_by_admin,
                     "Deaktivieren verhindert den Umgebungsvariablen-Fallback");
     }
 
@@ -442,6 +472,7 @@ int main(void)
     reservation.city = "Oldenburg";
     reservation.auto_confirm = false;
     reservation.dog_name = "Flocke";
+    reservation.dog_breed = "mixed_breed";
     reservation.dog_size = "small";
     reservation.message = "Transaktionssichere Reservierung";
 
@@ -507,6 +538,7 @@ int main(void)
             "Offene Terminanfrage kann angenommen werden");
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings WHERE decision_status = 'confirmed' "
+            "AND status = 'bestätigt' "
             "AND appointment_date = '2026-08-10' AND start_minute = 540 "
             "AND hold_expires_at IS NULL AND decision_at = '2026-08-09T08:05:00Z';",
             &value), 0, "Angenommener Termin ist abfragbar");
@@ -539,6 +571,7 @@ int main(void)
                 "Offene Terminanfrage kann abgelehnt werden");
         expect_int(query_single_int(
                 "SELECT COUNT(*) FROM bookings WHERE decision_status = 'rejected' "
+                "AND status = 'abgelehnt' "
                 "AND rejection_reason = 'Termin nicht möglich';",
                 &value), 0, "Ablehnungsgrund ist abfragbar");
         expect_true(value >= 1, "Ablehnung und Ablehnungsgrund werden gespeichert");
@@ -566,9 +599,20 @@ int main(void)
                 "Freier Slot kann automatisch bestätigt werden");
         expect_int(query_single_int(
                 "SELECT COUNT(*) FROM bookings WHERE decision_status = 'confirmed' "
+                "AND status = 'bestätigt' "
                 "AND hold_expires_at IS NULL AND appointment_date = '2026-08-17';",
                 &value), 0, "Automatisch bestätigter Termin ist abfragbar");
         expect_int(value, 1, "Automatische Bestätigung speichert direkt confirmed");
+
+        expect_int(calendar_database_complete_due_bookings(
+                "Europe/Berlin", "2026-08-17T12:01:00Z"), 0,
+                "Termin wird vier Stunden nach Terminende automatisch erledigt");
+        expect_int(query_single_int(
+                "SELECT COUNT(*) FROM bookings WHERE id = "
+                "(SELECT MAX(id) FROM bookings) AND status = 'erledigt' "
+                "AND decision_at = '2026-08-17T12:01:00Z';",
+                &value), 0, "Automatisch erledigter Termin ist abfragbar");
+        expect_int(value, 1, "Vier-Stunden-Regel setzt den Status erledigt");
     }
     settings.auto_confirm_bookings = false;
     expect_int(calendar_database_update_settings(&settings), 0,

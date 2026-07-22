@@ -48,11 +48,25 @@ int calendar_date_format_de(
 /* Validiert UTC-Zeitstempel im festen Format YYYY-MM-DDTHH:MM:SSZ. */
 bool calendar_utc_timestamp_is_valid(const char *timestamp);
 
+/* Wandelt einen validen UTC-Zeitstempel in einen Unix-Zeitpunkt um. */
+int calendar_utc_timestamp_to_epoch(
+        const char *timestamp,
+        time_t *out_epoch
+);
+
 /* Addiert Minuten zu einem validen UTC-Zeitstempel. */
 int calendar_utc_add_minutes(
         const char *timestamp,
         int minutes,
         char out_timestamp[21]
+);
+
+/* Wandelt einen Unix-Zeitpunkt in lokales Datum und Minuten seit Mitternacht um. */
+int calendar_epoch_to_local(
+        const char *timezone,
+        time_t epoch,
+        char out_date[11],
+        int *out_minute
 );
 
 /* Liest die aktuelle Salonzeit und die aktuelle UTC-Zeit. */

@@ -22,6 +22,7 @@ typedef struct booking_record {
     const char *postal_code;
     const char *city;
     const char *dog_name;
+    const char *dog_breed;
     const char *dog_size;
     const char *service;
     const char *preferred_date;
@@ -42,9 +43,10 @@ typedef struct booking_record {
 typedef struct booking_status_counts {
     size_t total;
     size_t new_count;
-    size_t contacted_count;
+    size_t confirmed_count;
+    size_t rejected_count;
+    size_t cancelled_count;
     size_t completed_count;
-    size_t legacy_count;
 } booking_status_counts;
 
 typedef void (*booking_record_callback)(
@@ -96,8 +98,9 @@ int booking_database_for_each_appointment(
 int booking_database_get_status_counts(booking_status_counts *counts);
 
 /*
- * Ändert den Status einer vorhandenen Buchung. Erlaubt sind ausschließlich
- * "neu", "kontaktiert" und "erledigt".
+ * Ändert den sichtbaren Status einer vorhandenen Buchung. Erlaubt sind
+ * "neu", "bestätigt", "abgelehnt", "abgesagt" und "erledigt".
+ * Kalenderentscheidungen pflegen diese Werte weiterhin automatisch.
  */
 booking_status_update_result booking_database_update_status(
         int64_t booking_id,

@@ -337,6 +337,30 @@ static bool equals_one_of(
 
 bool parse_booking_request(const string *request, booking_request *booking)
 {
+    static const char *const allowed_dog_breeds[] = {
+            "affenpinscher",
+            "australian_shepherd",
+            "beagle",
+            "bernese_mountain_dog",
+            "border_collie",
+            "boxer",
+            "cavalier_king_charles_spaniel",
+            "chihuahua",
+            "dachshund",
+            "french_bulldog",
+            "german_shepherd",
+            "golden_retriever",
+            "havanese",
+            "labrador_retriever",
+            "maltese",
+            "miniature_schnauzer",
+            "mixed_breed",
+            "poodle",
+            "pug",
+            "shih_tzu",
+            "yorkshire_terrier",
+            "other"
+    };
     static const char *const allowed_dog_sizes[] = {
             "small",
             "medium",
@@ -377,6 +401,11 @@ bool parse_booking_request(const string *request, booking_request *booking)
             sizeof(booking->dog_name)) ||
         !get_required_field(
             request,
+            "dog_breed",
+            booking->dog_breed,
+            sizeof(booking->dog_breed)) ||
+        !get_required_field(
+            request,
             "dog_size",
             booking->dog_size,
             sizeof(booking->dog_size)) ||
@@ -408,6 +437,10 @@ bool parse_booking_request(const string *request, booking_request *booking)
     }
 
     if (!equals_one_of(
+            booking->dog_breed,
+            allowed_dog_breeds,
+            sizeof(allowed_dog_breeds) / sizeof(allowed_dog_breeds[0])) ||
+        !equals_one_of(
             booking->dog_size,
             allowed_dog_sizes,
             sizeof(allowed_dog_sizes) / sizeof(allowed_dog_sizes[0])) ||
@@ -439,9 +472,10 @@ static bool is_valid_admin_filter_status(const char *status)
     }
 
     return strcmp(status, "neu") == 0 ||
-           strcmp(status, "kontaktiert") == 0 ||
-           strcmp(status, "erledigt") == 0 ||
-           strcmp(status, "altbestand") == 0;
+           strcmp(status, "bestätigt") == 0 ||
+           strcmp(status, "abgelehnt") == 0 ||
+           strcmp(status, "abgesagt") == 0 ||
+           strcmp(status, "erledigt") == 0;
 }
 
 bool parse_booking_admin_filter(
@@ -548,6 +582,49 @@ static void append_html_text_or_fallback(
     append_html_text(destination, source);
 }
 
+static const char *dog_breed_label(const char *value)
+{
+    static const struct {
+        const char *value;
+        const char *label;
+    } labels[] = {
+            {"affenpinscher", "Affenpinscher"},
+            {"australian_shepherd", "Australian Shepherd"},
+            {"beagle", "Beagle"},
+            {"bernese_mountain_dog", "Berner Sennenhund"},
+            {"border_collie", "Border Collie"},
+            {"boxer", "Boxer"},
+            {"cavalier_king_charles_spaniel", "Cavalier King Charles Spaniel"},
+            {"chihuahua", "Chihuahua"},
+            {"dachshund", "Dackel"},
+            {"french_bulldog", "Französische Bulldogge"},
+            {"german_shepherd", "Deutscher Schäferhund"},
+            {"golden_retriever", "Golden Retriever"},
+            {"havanese", "Havaneser"},
+            {"labrador_retriever", "Labrador Retriever"},
+            {"maltese", "Malteser"},
+            {"miniature_schnauzer", "Zwergschnauzer"},
+            {"mixed_breed", "Mischling / unbekannt"},
+            {"poodle", "Pudel"},
+            {"pug", "Mops"},
+            {"shih_tzu", "Shih Tzu"},
+            {"yorkshire_terrier", "Yorkshire Terrier"},
+            {"other", "Sonstiges"}
+    };
+
+    if (value == NULL || value[0] == '\0') {
+        return "Nicht angegeben";
+    }
+
+    for (size_t index = 0; index < sizeof(labels) / sizeof(labels[0]); index++) {
+        if (strcmp(value, labels[index].value) == 0) {
+            return labels[index].label;
+        }
+    }
+
+    return value;
+}
+
 static const char *dog_size_label(const char *value)
 {
     if (value == NULL || value[0] == '\0') {
@@ -612,16 +689,20 @@ static const char *status_label(const char *value)
         return "Neu";
     }
 
-    if (strcmp(value, "kontaktiert") == 0) {
-        return "Kontaktiert";
+    if (strcmp(value, "bestätigt") == 0) {
+        return "Bestätigt";
+    }
+
+    if (strcmp(value, "abgelehnt") == 0) {
+        return "Abgelehnt";
+    }
+
+    if (strcmp(value, "abgesagt") == 0) {
+        return "Abgesagt";
     }
 
     if (strcmp(value, "erledigt") == 0) {
         return "Erledigt";
-    }
-
-    if (strcmp(value, "altbestand") == 0) {
-        return "Altbestand";
     }
 
     return value;
@@ -634,7 +715,9 @@ static bool is_mutable_status(const char *status)
     }
 
     return strcmp(status, "neu") == 0 ||
-           strcmp(status, "kontaktiert") == 0 ||
+           strcmp(status, "bestätigt") == 0 ||
+           strcmp(status, "abgelehnt") == 0 ||
+           strcmp(status, "abgesagt") == 0 ||
            strcmp(status, "erledigt") == 0;
 }
 
@@ -683,12 +766,14 @@ static void append_status_summary(
     append_size_value(page, counts->total);
     str_cat_cstr(page, "</strong></div>\n                <div><span>Neu</span><strong>");
     append_size_value(page, counts->new_count);
-    str_cat_cstr(page, "</strong></div>\n                <div><span>Kontaktiert</span><strong>");
-    append_size_value(page, counts->contacted_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Bestätigt</span><strong>");
+    append_size_value(page, counts->confirmed_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Abgelehnt</span><strong>");
+    append_size_value(page, counts->rejected_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Abgesagt</span><strong>");
+    append_size_value(page, counts->cancelled_count);
     str_cat_cstr(page, "</strong></div>\n                <div><span>Erledigt</span><strong>");
     append_size_value(page, counts->completed_count);
-    str_cat_cstr(page, "</strong></div>\n                <div><span>Altbestand</span><strong>");
-    append_size_value(page, counts->legacy_count);
     str_cat_cstr(page, "</strong></div>\n            </div>\n");
 }
 
@@ -709,9 +794,10 @@ static void append_admin_filter_form(
 
     append_filter_option(page, "", "Alle Status", filter->status);
     append_filter_option(page, "neu", "Neu", filter->status);
-    append_filter_option(page, "kontaktiert", "Kontaktiert", filter->status);
+    append_filter_option(page, "bestätigt", "Bestätigt", filter->status);
+    append_filter_option(page, "abgelehnt", "Abgelehnt", filter->status);
+    append_filter_option(page, "abgesagt", "Abgesagt", filter->status);
     append_filter_option(page, "erledigt", "Erledigt", filter->status);
-    append_filter_option(page, "altbestand", "Altbestand", filter->status);
 
     str_cat_cstr(page,
             "                    </select>\n"
@@ -801,7 +887,9 @@ static void append_status_form(
     }
 
     append_status_option(page, "neu", "Neu", record->status);
-    append_status_option(page, "kontaktiert", "Kontaktiert", record->status);
+    append_status_option(page, "bestätigt", "Bestätigt", record->status);
+    append_status_option(page, "abgelehnt", "Abgelehnt", record->status);
+    append_status_option(page, "abgesagt", "Abgesagt", record->status);
     append_status_option(page, "erledigt", "Erledigt", record->status);
 
     str_cat_cstr(page,
@@ -1120,6 +1208,7 @@ static void append_booking_card(
                 "Nicht angegeben");
     }
     append_booking_detail(page, "Hund", record->dog_name, "Nicht angegeben");
+    append_booking_detail(page, "Rasse", dog_breed_label(record->dog_breed), "Nicht angegeben");
     append_booking_detail(page, "Größe", dog_size_label(record->dog_size), "Nicht angegeben");
     append_booking_detail(
             page,
@@ -1152,25 +1241,94 @@ static void append_booking_card(
     context->booking_count++;
 }
 
+static int append_booking_status_group(
+        string *page,
+        const char *csrf_token,
+        const booking_admin_filter *base_filter,
+        const char *status,
+        const char *label,
+        bool open_by_default,
+        size_t *out_count
+)
+{
+    booking_admin_filter group_filter;
+    admin_page_context context;
+    string *cards;
+    int result;
+
+    if (page == NULL || csrf_token == NULL || base_filter == NULL ||
+        status == NULL || label == NULL) {
+        return -1;
+    }
+
+    group_filter = *base_filter;
+    if (strlen(status) >= sizeof(group_filter.status)) {
+        return -1;
+    }
+    snprintf(group_filter.status, sizeof(group_filter.status), "%s", status);
+
+    cards = _new_string();
+    if (cards == NULL) {
+        return -1;
+    }
+
+    context.page = cards;
+    context.csrf_token = csrf_token;
+    context.booking_count = 0;
+    result = booking_database_for_each_filtered(
+            &group_filter,
+            append_booking_card,
+            &context);
+
+    str_cat_cstr(page, "            <details class=\"booking-status-group booking-status-group-");
+    append_html_text(page, status);
+    str_cat_cstr(page, "\"");
+    if (open_by_default) {
+        str_cat_cstr(page, " open");
+    }
+    str_cat_cstr(page, ">\n                <summary><span>");
+    append_html_text(page, label);
+    str_cat_cstr(page, "</span><strong>");
+    append_size_value(page, context.booking_count);
+    str_cat_cstr(page, "</strong></summary>\n                <div class=\"booking-grid\">\n");
+
+    if (result != 0) {
+        str_cat_cstr(page,
+                "                    <p class=\"booking-group-empty\">"
+                "Die Buchungsanfragen konnten momentan nicht geladen werden.</p>\n");
+    } else if (context.booking_count == 0) {
+        str_cat_cstr(page,
+                "                    <p class=\"booking-group-empty\">"
+                "Keine Buchungsanfragen in diesem Bereich.</p>\n");
+    } else {
+        str_cat(page, get_char_str(cards), get_length(cards));
+    }
+
+    str_cat_cstr(page, "                </div>\n            </details>\n");
+
+    if (out_count != NULL) {
+        *out_count += context.booking_count;
+    }
+
+    free_str(cards);
+    return result;
+}
+
 string *build_booking_admin_page(
         const char *csrf_token,
         const booking_admin_filter *filter
 )
 {
-    admin_page_context context;
     booking_status_counts counts;
     string *page = _new_string();
-    int database_result;
     int counts_result;
+    int groups_result = 0;
+    size_t rendered_count = 0;
 
     if (csrf_token == NULL || csrf_token[0] == '\0' || filter == NULL) {
         free_str(page);
         return NULL;
     }
-
-    context.page = page;
-    context.csrf_token = csrf_token;
-    context.booking_count = 0;
 
     str_cat_cstr(page,
             "<!doctype html>\n"
@@ -1186,50 +1344,76 @@ string *build_booking_admin_page(
             "    <header class=\"site-header\">\n"
             "        <div class=\"container nav-wrap\">\n"
             "            <a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>\n"
-            "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
+            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
             "<a href=\"/admin\">Übersicht</a>"
             "<a href=\"/\">Website öffnen</a>"
-            "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
+            "<a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a>"
             "<a href=\"/admin/gallery\">Fotos</a>"
-            "<a href=\"/admin/appointments\" aria-current=\"page\">Termine</a>"
+            "<a href=\"/admin/appointments\">Termine</a>"
             "<a href=\"/admin/notifications\">E-Mail</a>"
             "<a href=\"/admin/calendar\">Einstellungen</a>"
-            "</nav></div></header>"
+            "</nav>\n"
+            "        </div>\n"
             "    </header>\n"
             "    <main class=\"page admin-page\">\n"
             "        <section class=\"card admin-card\">\n"
             "            <p class=\"eyebrow\">Admin</p>\n"
             "            <h1>Buchungsanfragen</h1>\n"
-            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen.</p>\n");
+            "            <p class=\"admin-intro\">Hier findest du alle gespeicherten Terminanfragen nach Status geordnet.</p>\n");
 
     counts_result = booking_database_get_status_counts(&counts);
-
     if (counts_result == 0) {
         append_status_summary(page, &counts);
     }
 
     append_admin_filter_form(page, filter);
-    str_cat_cstr(page, "            <div class=\"booking-grid\">\n");
+    str_cat_cstr(page, "            <div class=\"booking-status-groups\">\n");
 
-    database_result = booking_database_for_each_filtered(
-            filter,
-            append_booking_card,
-            &context);
+    if (filter->status[0] != '\0') {
+        groups_result = append_booking_status_group(
+                page,
+                csrf_token,
+                filter,
+                filter->status,
+                status_label(filter->status),
+                true,
+                &rendered_count);
+    } else {
+        static const struct {
+            const char *status;
+            const char *label;
+            bool open_by_default;
+        } groups[] = {
+                {"neu", "Neue Anfragen", true},
+                {"bestätigt", "Bestätigt", true},
+                {"abgelehnt", "Abgelehnt", false},
+                {"abgesagt", "Abgesagt", false},
+                {"erledigt", "Erledigt", false}
+        };
 
-    if (database_result != 0) {
+        for (size_t index = 0; index < sizeof(groups) / sizeof(groups[0]); index++) {
+            if (append_booking_status_group(
+                    page,
+                    csrf_token,
+                    filter,
+                    groups[index].status,
+                    groups[index].label,
+                    groups[index].open_by_default,
+                    &rendered_count) != 0) {
+                groups_result = -1;
+            }
+        }
+    }
+
+    str_cat_cstr(page, "            </div>\n");
+
+    if (groups_result == 0 && rendered_count == 0 && filter->search[0] != '\0') {
         str_cat_cstr(page,
-                "                <p>Die Buchungsanfragen konnten momentan nicht geladen werden.</p>\n");
-    } else if (context.booking_count == 0 &&
-               (filter->status[0] != '\0' || filter->search[0] != '\0')) {
-        str_cat_cstr(page,
-                "                <p>Für diesen Filter wurden keine Buchungsanfragen gefunden.</p>\n");
-    } else if (context.booking_count == 0) {
-        str_cat_cstr(page,
-                "                <p>Es wurden noch keine Buchungsanfragen gespeichert.</p>\n");
+                "            <p class=\"admin-warning\">"
+                "Für diese Suche wurden keine Buchungsanfragen gefunden.</p>\n");
     }
 
     str_cat_cstr(page,
-            "            </div>\n"
             "            <p><a href=\"/\">Zurück zur Startseite</a></p>\n"
             "        </section>\n"
             "    </main>\n"

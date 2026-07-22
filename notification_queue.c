@@ -22,6 +22,8 @@
 typedef struct notification_booking_data {
     int64_t id;
     char customer_name[256];
+    char customer_first_name[128];
+    char customer_last_name[128];
     char email[NOTIFICATION_EMAIL_SIZE];
     char dog_name[256];
     char appointment_date[11];
@@ -134,6 +136,56 @@ static int copy_column(
     return written >= 0 && (size_t)written < destination_size ? 0 : -1;
 }
 
+static int split_customer_name(notification_booking_data *data)
+{
+    const char *separator;
+    const char *last_name;
+    size_t first_length;
+    int written;
+
+    if (data == NULL || data->customer_name[0] == '\0') {
+        return -1;
+    }
+
+    separator = strrchr(data->customer_name, ' ');
+    if (separator == NULL) {
+        written = snprintf(
+                data->customer_first_name,
+                sizeof(data->customer_first_name),
+                "%s",
+                data->customer_name);
+        data->customer_last_name[0] = '\0';
+        return written >= 0 &&
+               (size_t)written < sizeof(data->customer_first_name) ? 0 : -1;
+    }
+
+    first_length = (size_t)(separator - data->customer_name);
+    while (first_length > 0 && data->customer_name[first_length - 1] == ' ') {
+        first_length--;
+    }
+
+    last_name = separator + 1;
+    while (*last_name == ' ') {
+        last_name++;
+    }
+
+    if (first_length == 0 || *last_name == '\0' ||
+        first_length >= sizeof(data->customer_first_name)) {
+        return -1;
+    }
+
+    memcpy(data->customer_first_name, data->customer_name, first_length);
+    data->customer_first_name[first_length] = '\0';
+
+    written = snprintf(
+            data->customer_last_name,
+            sizeof(data->customer_last_name),
+            "%s",
+            last_name);
+    return written >= 0 &&
+           (size_t)written < sizeof(data->customer_last_name) ? 0 : -1;
+}
+
 static bool booking_event_type_is_valid(const char *event_type)
 {
     return event_type != NULL &&
@@ -215,6 +267,7 @@ static int load_booking(
     data->email_notifications_enabled = sqlite3_column_int(statement, 11) != 0;
 
     if (copy_column(statement, 1, data->customer_name, sizeof(data->customer_name)) != 0 ||
+        split_customer_name(data) != 0 ||
         copy_column(statement, 2, data->email, sizeof(data->email)) != 0 ||
         copy_column(statement, 3, data->dog_name, sizeof(data->dog_name)) != 0 ||
         copy_column(statement, 4, data->appointment_date, sizeof(data->appointment_date)) != 0 ||
@@ -488,6 +541,8 @@ static int build_payload(
     }
 
     context.customer_name = data->customer_name;
+    context.customer_first_name = data->customer_first_name;
+    context.customer_last_name = data->customer_last_name;
     context.booking_id = booking_id;
     context.appointment_date = appointment_date_display;
     context.start_time = start;

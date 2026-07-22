@@ -11,6 +11,7 @@ typedef enum admin_notifications_result {
 
 string *admin_notifications_build_page(const char *csrf_token, const char *notice_code);
 admin_notifications_result admin_notifications_update_smtp(const string *request);
+admin_notifications_result admin_notifications_toggle_delivery(const string *request);
 admin_notifications_result admin_notifications_disconnect_smtp(const string *request);
 admin_notifications_result admin_notifications_enqueue_test(const string *request);
 admin_notifications_result admin_notifications_update_template(const string *request);

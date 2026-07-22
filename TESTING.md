@@ -83,7 +83,7 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 8, Legacy-Migration, sichere geschlossene Defaults,
+Er prüft Schema-Version 9, Legacy- und Rassespalten-Migration, sichere geschlossene Defaults,
 Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
 Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
 ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
@@ -257,3 +257,15 @@ Zusätzlich geprüft werden:
 - Suchbarkeit nach Straße, Postleitzahl und Wohnort,
 - Schema-Version 8,
 - Produktionswert des lokalen Caddy-Upstreams.
+
+## Buchungsworkflow Phase 13
+
+Der Regressionstest prüft zusätzlich:
+
+- Pflichtauswahl einer Hunderasse und den dynamischen Hinweis bei `Sonstiges`,
+- Schema-Migration auf Version 9 einschließlich `dog_breed`,
+- automatische Synchronisierung von `bestätigt`, `abgelehnt` und `abgesagt`,
+- automatische Erledigung vier Stunden nach Terminende,
+- getrennte, einklappbare Statusbereiche in der Buchungsverwaltung,
+- vollständigen Vor- und Nachnamen in `{{customer_name}}`,
+- globales Pausieren und erneutes Aktivieren des E-Mail-Systems.
