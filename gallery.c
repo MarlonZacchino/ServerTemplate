@@ -1040,7 +1040,17 @@ static int append_admin_gallery_item(const gallery_item *item, void *opaque)
     context->count++;
     str_cat_cstr(context->page, "<article class=\"gallery-admin-item\" draggable=\"true\" data-gallery-item data-image-id=\"");
     append_int64(context->page, item->id);
-    str_cat_cstr(context->page, "\"><button class=\"gallery-drag-handle\" type=\"button\" aria-label=\"Foto verschieben\" title=\"Zum Sortieren ziehen\">↕</button><div class=\"gallery-admin-preview\"><img src=\"/admin/gallery/media/");
+    str_cat_cstr(
+    context->page,
+    "\"><div class=\"gallery-sort-controls\" role=\"group\" aria-label=\"Foto sortieren\">"
+    "<button class=\"gallery-sort-button\" type=\"button\" "
+    "data-gallery-move=\"up\" aria-label=\"Foto nach oben verschieben\" "
+    "title=\"Nach oben verschieben\">↑</button>"
+    "<button class=\"gallery-sort-button\" type=\"button\" "
+    "data-gallery-move=\"down\" aria-label=\"Foto nach unten verschieben\" "
+    "title=\"Nach unten verschieben\">↓</button>"
+    "</div><div class=\"gallery-admin-preview\"><img src=\"/admin/gallery/media/"
+);
     append_html_escaped(context->page, item->file_name);
     str_cat_cstr(context->page, "\" alt=\"");
     append_html_escaped(context->page, item->alt_text[0] == '\0' ? item->title : item->alt_text);

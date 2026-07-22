@@ -590,7 +590,184 @@ def run_stateful_tests() -> int:
             remaining = connection.execute("SELECT COUNT(*) FROM gallery_images").fetchone()[0]
         if remaining != 0:
             raise AssertionError("Galeriebild wurde nicht gelöscht")
+    def admin_gallery_reorder_workflow() -> None:
+        database_file_value = os.environ.get(
+            "STYLES4DOGS_TEST_DATABASE_FILE"
+        )
+        if not database_file_value:
+            raise AssertionError(
+                "STYLES4DOGS_TEST_DATABASE_FILE fehlt"
+            )
 
+        database_file = Path(database_file_value)
+
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+
+        auth_headers = {
+            "Authorization": f"Basic {auth_token}"
+        }
+
+        image_ids: list[int] = []
+
+        try:
+            with sqlite3.connect(database_file) as connection:
+                connection.execute(
+                    "DELETE FROM gallery_images "
+                    "WHERE file_name LIKE 'reorder-test-%'"
+                )
+
+                titles = (
+                    "Foto Eins",
+                    "Foto Zwei",
+                    "Foto Drei",
+                )
+
+                for index, title in enumerate(titles):
+                    cursor = connection.execute(
+                        "INSERT INTO gallery_images("
+                        "created_at, title, alt_text, file_name, "
+                        "mime_type, image_data, sort_order, visible"
+                        ") VALUES(?, ?, ?, ?, 'image/png', ?, ?, 1)",
+                        (
+                            "2026-07-22T12:00:00Z",
+                            title,
+                            f"Alternativtext {index + 1}",
+                            f"reorder-test-{index + 1}.png",
+                            b"test-image",
+                            index,
+                        ),
+                    )
+
+                    image_ids.append(cursor.lastrowid)
+
+            admin_response = raw_request(
+                request_text(
+                    "GET",
+                    "/admin/gallery",
+                    auth_headers,
+                ).encode()
+            )
+
+            _, admin_body = assert_status(
+                admin_response,
+                "200 OK",
+            )
+
+            csrf_match = re.search(
+                rb'name="csrf_token" value="([0-9a-f]+)"',
+                admin_body,
+            )
+
+            if csrf_match is None:
+                raise AssertionError(
+                    "Galerie-Adminseite enthält kein CSRF-Token"
+                )
+
+            if (
+                    b'data-gallery-move="up"' not in admin_body
+                    or b'data-gallery-move="down"' not in admin_body
+            ):
+                raise AssertionError(
+                    "Galerie-Adminseite enthält nicht beide "
+                    "Sortierknöpfe"
+                )
+
+            if b"gallery-drag-handle" in admin_body:
+                raise AssertionError(
+                    "Der entfernte Ziehgriff wird noch ausgeliefert"
+                )
+
+            csrf_token = csrf_match.group(1).decode("ascii")
+
+            expected_ids = [
+                image_ids[2],
+                image_ids[0],
+                image_ids[1],
+            ]
+
+            reorder_body = urlencode({
+                "csrf_token": csrf_token,
+                "order": ",".join(
+                    str(image_id)
+                    for image_id in expected_ids
+                ),
+            })
+
+            reorder_response = raw_request(
+                request_text(
+                    "POST",
+                    "/admin/gallery/reorder",
+                    {
+                        **auth_headers,
+                        "Content-Type":
+                            "application/x-www-form-urlencoded",
+                    },
+                    reorder_body,
+                ).encode()
+            )
+
+            _, reorder_response_body = assert_status(
+                reorder_response,
+                "204 No Content",
+            )
+
+            if reorder_response_body != b"":
+                raise AssertionError(
+                    "Galerie-Sortierung liefert trotz 204 "
+                    "einen Response-Body"
+                )
+
+            with sqlite3.connect(database_file) as connection:
+                persisted_ids = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT id FROM gallery_images "
+                        "WHERE id IN (?, ?, ?) "
+                        "ORDER BY sort_order ASC",
+                        tuple(image_ids),
+                    )
+                ]
+
+            if persisted_ids != expected_ids:
+                raise AssertionError(
+                    "Galerie-Reihenfolge wurde nicht gespeichert: "
+                    f"{persisted_ids!r}"
+                )
+
+            api_response = raw_request(
+                request_text(
+                    "GET",
+                    "/api/gallery",
+                ).encode()
+            )
+
+            _, api_body = assert_status(
+                api_response,
+                "200 OK",
+            )
+
+            api_items = json.loads(api_body)
+            api_ids = [
+                item["id"]
+                for item in api_items
+            ]
+
+            if api_ids != expected_ids:
+                raise AssertionError(
+                    "Galerie-API liefert die falsche Reihenfolge: "
+                    f"{api_ids!r}"
+                )
+
+        finally:
+            if image_ids:
+                with sqlite3.connect(database_file) as connection:
+                    connection.execute(
+                        "DELETE FROM gallery_images "
+                        "WHERE id IN (?, ?, ?)",
+                        tuple(image_ids),
+                    )
     def admin_status_workflow() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
         if not database_file_value:
@@ -2137,6 +2314,7 @@ def run_stateful_tests() -> int:
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin sieht das zentrale Dashboard", admin_dashboard_overview)
     check("Admin lädt Galeriebilder hoch und löscht sie", admin_gallery_workflow)
+    check("Admin sortiert Galeriebilder dauerhaft", admin_gallery_reorder_workflow)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
     check("Admin nimmt Terminanfragen an oder lehnt sie ab", admin_booking_decisions)

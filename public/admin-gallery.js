@@ -18,11 +18,16 @@
         }
 
         status.textContent = message;
-        status.classList.toggle('gallery-order-status-error', Boolean(isError));
+        status.classList.toggle(
+            'gallery-order-status-error',
+            Boolean(isError)
+        );
     }
 
     function items() {
-        return Array.from(list.querySelectorAll('[data-gallery-item]'));
+        return Array.from(
+            list.querySelectorAll('[data-gallery-item]')
+        );
     }
 
     function currentOrder() {
@@ -49,21 +54,26 @@
             method: 'POST',
             credentials: 'same-origin',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                'Content-Type':
+                    'application/x-www-form-urlencoded;charset=UTF-8'
             },
             body: new URLSearchParams({
                 csrf_token: csrfToken,
                 order: order
             }).toString()
-        }).then(function (response) {
-            if (!response.ok) {
-                throw new Error('Reihenfolge konnte nicht gespeichert werden.');
-            }
+        })
+            .then(function (response) {
+                if (!response.ok) {
+                    throw new Error(
+                        'Reihenfolge konnte nicht gespeichert werden.'
+                    );
+                }
 
-            setStatus('Reihenfolge gespeichert', false);
-        }).catch(function () {
-            setStatus('Speichern fehlgeschlagen', true);
-        });
+                setStatus('Reihenfolge gespeichert', false);
+            })
+            .catch(function () {
+                setStatus('Speichern fehlgeschlagen', true);
+            });
     }
 
     function scheduleSave() {
@@ -75,6 +85,7 @@
         const otherItems = items().filter(function (item) {
             return item !== activeItem;
         });
+
         let insertBefore = null;
 
         otherItems.some(function (item) {
@@ -100,12 +111,19 @@
             return;
         }
 
-        if (pointerOwner && pointerOwner.hasPointerCapture(activePointerId)) {
+        if (
+            pointerOwner &&
+            pointerOwner.hasPointerCapture(activePointerId)
+        ) {
             pointerOwner.releasePointerCapture(activePointerId);
         }
 
-        activeItem.classList.remove('gallery-admin-item-dragging');
-        document.body.classList.remove('gallery-sorting-active');
+        activeItem.classList.remove(
+            'gallery-admin-item-dragging'
+        );
+        document.body.classList.remove(
+            'gallery-sorting-active'
+        );
 
         const changed = currentOrder() !== orderBeforeMove;
 
@@ -121,83 +139,158 @@
         }
     }
 
-    list.querySelectorAll('[data-gallery-item]').forEach(function (item) {
-        const handle = item.querySelector('.gallery-drag-handle');
-
-        /*
-         * Das native HTML-Drag-and-drop ist bei Bildern, Buttons und in
-         * Firefox unzuverlässig. Deshalb verwenden wir Pointer Events.
-         */
-        item.draggable = false;
-
-        if (handle) {
-            handle.style.touchAction = 'none';
-        }
-
-        item.addEventListener('pointerdown', function (event) {
-            const startedOnHandle = Boolean(event.target.closest('.gallery-drag-handle'));
-            const startedOnControl = Boolean(
-                event.target.closest('form, a, input, textarea, select, button')
+    list.querySelectorAll('[data-gallery-item]').forEach(
+        function (item) {
+            const handle = item.querySelector(
+                '.gallery-drag-handle'
             );
 
-            if (event.button !== 0 || activeItem) {
-                return;
-            }
+            const moveButtons = item.querySelectorAll(
+                '[data-gallery-move]'
+            );
 
             /*
-             * Mit der Maus kann die ganze Fotokarte gezogen werden.
-             * Auf Touch-Geräten dient der Griff als eindeutige Ziehfläche,
-             * damit normales Scrollen weiterhin möglich bleibt.
+             * Das native HTML-Drag-and-drop ist bei Bildern,
+             * Buttons und insbesondere in Firefox unzuverlässig.
+             * Deshalb verwenden wir Pointer Events.
              */
-            if ((event.pointerType === 'touch' && !startedOnHandle) ||
-                (startedOnControl && !startedOnHandle)) {
-                return;
+            item.draggable = false;
+
+            if (handle) {
+                handle.style.touchAction = 'none';
             }
 
-            event.preventDefault();
-            activeItem = item;
-            pointerOwner = item;
-            activePointerId = event.pointerId;
-            orderBeforeMove = currentOrder();
+            function moveItem(direction) {
+                const sibling = direction === 'up'
+                    ? item.previousElementSibling
+                    : item.nextElementSibling;
 
-            item.setPointerCapture(event.pointerId);
-            item.classList.add('gallery-admin-item-dragging');
-            document.body.classList.add('gallery-sorting-active');
-            setStatus('Reihenfolge ändern …', false);
-        });
-
-        item.addEventListener('pointermove', function (event) {
-            if (!activeItem || event.pointerId !== activePointerId) {
-                return;
-            }
-
-            event.preventDefault();
-            moveItemForPointer(event.clientY);
-        });
-
-        item.addEventListener('pointerup', finishPointerSort);
-        item.addEventListener('pointercancel', finishPointerSort);
-
-        if (handle) {
-            handle.addEventListener('keydown', function (event) {
-                let sibling;
-
-                if (event.key === 'ArrowUp') {
-                    sibling = item.previousElementSibling;
-                    if (sibling && sibling.matches('[data-gallery-item]')) {
-                        event.preventDefault();
-                        list.insertBefore(item, sibling);
-                        scheduleSave();
-                    }
-                } else if (event.key === 'ArrowDown') {
-                    sibling = item.nextElementSibling;
-                    if (sibling && sibling.matches('[data-gallery-item]')) {
-                        event.preventDefault();
-                        list.insertBefore(sibling, item);
-                        scheduleSave();
-                    }
+                if (
+                    !sibling ||
+                    !sibling.matches('[data-gallery-item]')
+                ) {
+                    return;
                 }
+
+                if (direction === 'up') {
+                    list.insertBefore(item, sibling);
+                } else {
+                    list.insertBefore(sibling, item);
+                }
+
+                setStatus('Reihenfolge ändern …', false);
+                scheduleSave();
+            }
+
+            moveButtons.forEach(function (button) {
+                button.addEventListener('click', function () {
+                    moveItem(button.dataset.galleryMove);
+                });
             });
+
+            if (handle) {
+                handle.addEventListener(
+                    'keydown',
+                    function (event) {
+                        if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            moveItem('up');
+                        } else if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            moveItem('down');
+                        }
+                    }
+                );
+            }
+
+            item.addEventListener(
+                'pointerdown',
+                function (event) {
+                    const startedOnHandle = Boolean(
+                        event.target.closest(
+                            '.gallery-drag-handle'
+                        )
+                    );
+
+                    const startedOnControl = Boolean(
+                        event.target.closest(
+                            'form, a, input, textarea, select, button'
+                        )
+                    );
+
+                    if (event.button !== 0 || activeItem) {
+                        return;
+                    }
+
+                    /*
+                     * Mit der Maus kann die gesamte Fotokarte
+                     * gezogen werden.
+                     *
+                     * Auf Touch-Geräten dient der Griff als
+                     * eindeutige Ziehfläche, damit normales
+                     * Scrollen weiterhin möglich bleibt.
+                     */
+                    if (
+                        (
+                            event.pointerType === 'touch' &&
+                            !startedOnHandle
+                        ) ||
+                        (
+                            startedOnControl &&
+                            !startedOnHandle
+                        )
+                    ) {
+                        return;
+                    }
+
+                    event.preventDefault();
+
+                    activeItem = item;
+                    pointerOwner = item;
+                    activePointerId = event.pointerId;
+                    orderBeforeMove = currentOrder();
+
+                    item.setPointerCapture(event.pointerId);
+
+                    item.classList.add(
+                        'gallery-admin-item-dragging'
+                    );
+
+                    document.body.classList.add(
+                        'gallery-sorting-active'
+                    );
+
+                    setStatus(
+                        'Reihenfolge ändern …',
+                        false
+                    );
+                }
+            );
+
+            item.addEventListener(
+                'pointermove',
+                function (event) {
+                    if (
+                        !activeItem ||
+                        event.pointerId !== activePointerId
+                    ) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    moveItemForPointer(event.clientY);
+                }
+            );
+
+            item.addEventListener(
+                'pointerup',
+                finishPointerSort
+            );
+
+            item.addEventListener(
+                'pointercancel',
+                finishPointerSort
+            );
         }
-    });
+    );
 }());

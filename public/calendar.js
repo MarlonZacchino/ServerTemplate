@@ -325,9 +325,9 @@
 
             const data = await response.json();
             confirmationNotes.forEach((note) => {
-                note.textContent =
-                    "Der Termin wird sofort verbindlich bestätigt. " +
-                    "Wir melden uns bei Bedarf über deinen gewählten Kontaktweg.";
+                note.textContent = data.automatic_confirmation
+                    ? "Der Termin wird automatisch und anschließend verbindlich bestätigt. "
+                    : "Der Termin wird zunächst reserviert und anschließend von uns verbindlich bestätigt.";
             });
             submitButton.textContent = data.automatic_confirmation
                 ? "Termin verbindlich buchen"
