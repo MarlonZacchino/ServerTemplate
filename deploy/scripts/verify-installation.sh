@@ -12,6 +12,7 @@ ENV_FILE=${STYLES4DOGS_ENV_FILE:-$CONFIG_DIR/server.env}
 NOTIFICATION_ENV_FILE=${STYLES4DOGS_NOTIFICATION_ENV_FILE:-$CONFIG_DIR/notification.env}
 NOTIFICATION_SECRET_FILE=${STYLES4DOGS_NOTIFICATION_SECRET_FILE:-$CONFIG_DIR/secrets/notification.smtp}
 NOTIFICATION_KEY_FILE=${STYLES4DOGS_NOTIFICATION_KEY_FILE:-$CONFIG_DIR/secrets/notification.key}
+CUSTOMER_PORTAL_KEY_FILE=${STYLES4DOGS_CUSTOMER_PORTAL_KEY_FILE:-$CONFIG_DIR/secrets/customer-portal.key}
 
 failures=0
 
@@ -71,6 +72,18 @@ check_mode "$STATE_DIR/styles4dogs.db" 600
 check_mode "$CONFIG_DIR/secrets/admin.auth" 600
 check_mode "$NOTIFICATION_SECRET_FILE" 600
 check_mode "$NOTIFICATION_KEY_FILE" 600
+check_mode "$CUSTOMER_PORTAL_KEY_FILE" 600
+
+if [[ -e "$CUSTOMER_PORTAL_KEY_FILE" ]]; then
+    [[ -f "$CUSTOMER_PORTAL_KEY_FILE" ]] \
+        && ok "customer portal key exists" \
+        || bad "customer portal key is not a regular file"
+    [[ "$(stat -c '%s' "$CUSTOMER_PORTAL_KEY_FILE")" == "32" ]] \
+        && ok "customer portal key has the expected size" \
+        || bad "customer portal key has an unexpected size"
+else
+    ok "customer portal key will be created with the first booking link"
+fi
 
 
 if [[ -f "$STATE_DIR/styles4dogs.db" ]] && command -v sqlite3 >/dev/null 2>&1; then

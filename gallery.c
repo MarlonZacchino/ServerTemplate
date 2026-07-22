@@ -208,16 +208,6 @@ static void append_json_escaped(string *destination, const char *source)
     }
 }
 
-static void append_int(string *destination, int value)
-{
-    char buffer[32];
-    int written = snprintf(buffer, sizeof(buffer), "%d", value);
-
-    if (written > 0 && (size_t)written < sizeof(buffer)) {
-        str_cat(destination, buffer, (size_t)written);
-    }
-}
-
 static void append_int64(string *destination, int64_t value)
 {
     char buffer[48];
@@ -728,31 +718,6 @@ bool gallery_extract_multipart_text_field(
     return text_has_only_allowed_controls(out);
 }
 
-static bool parse_sort_order(const char *text, int *out_value)
-{
-    char *end = NULL;
-    long value;
-
-    if (out_value == NULL) {
-        return false;
-    }
-
-    if (text == NULL || text[0] == '\0') {
-        *out_value = 0;
-        return true;
-    }
-
-    errno = 0;
-    value = strtol(text, &end, 10);
-    if (errno != 0 || end == text || *end != '\0' ||
-        value < -100000 || value > 100000) {
-        return false;
-    }
-
-    *out_value = (int)value;
-    return true;
-}
-
 static bool detect_image_type(
         const unsigned char *data,
         size_t data_length,
@@ -824,6 +789,21 @@ static bool build_unique_file_name(
             extension);
 
     return written > 0 && (size_t)written < out_name_size;
+}
+
+static int next_gallery_sort_order(int *out_sort_order)
+{
+    sqlite3 *database = NULL;
+    sqlite3_stmt *statement = NULL;
+    int result;
+    if (out_sort_order == NULL) { set_error("Ausgabe für Galerie-Reihenfolge fehlt"); return -1; }
+    if (gallery_open(&database) != 0) return -1;
+    result = sqlite3_prepare_v2(database, "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM gallery_images;", -1, &statement, NULL);
+    if (result != SQLITE_OK) { set_sqlite_error(database, "Galerie-Reihenfolge konnte nicht vorbereitet werden"); gallery_close(database); return -1; }
+    result = sqlite3_step(statement);
+    if (result != SQLITE_ROW) { set_sqlite_error(database, "Galerie-Reihenfolge konnte nicht gelesen werden"); sqlite3_finalize(statement); gallery_close(database); return -1; }
+    *out_sort_order = sqlite3_column_int(statement, 0);
+    sqlite3_finalize(statement); gallery_close(database); return 0;
 }
 
 static int insert_gallery_item(
@@ -1057,47 +1037,22 @@ typedef struct gallery_admin_context {
 static int append_admin_gallery_item(const gallery_item *item, void *opaque)
 {
     gallery_admin_context *context = opaque;
-
     context->count++;
-    str_cat_cstr(
-            context->page,
-            "<article class=\"gallery-admin-item\"><div class=\"gallery-admin-preview\"><img src=\"/admin/gallery/media/");
+    str_cat_cstr(context->page, "<article class=\"gallery-admin-item\" draggable=\"true\" data-gallery-item data-image-id=\"");
+    append_int64(context->page, item->id);
+    str_cat_cstr(context->page, "\"><button class=\"gallery-drag-handle\" type=\"button\" aria-label=\"Foto verschieben\" title=\"Zum Sortieren ziehen\">↕</button><div class=\"gallery-admin-preview\"><img src=\"/admin/gallery/media/");
     append_html_escaped(context->page, item->file_name);
     str_cat_cstr(context->page, "\" alt=\"");
-    append_html_escaped(
-            context->page,
-            item->alt_text[0] == '\0' ? item->title : item->alt_text);
-    str_cat_cstr(
-            context->page,
-            "\"></div><div class=\"gallery-admin-content\"><div><h3>");
-    append_html_escaped(
-            context->page,
-            item->title[0] == '\0' ? "Ohne Titel" : item->title);
+    append_html_escaped(context->page, item->alt_text[0] == '\0' ? item->title : item->alt_text);
+    str_cat_cstr(context->page, "\"></div><div class=\"gallery-admin-content\"><div><h3>");
+    append_html_escaped(context->page, item->title[0] == '\0' ? "Ohne Titel" : item->title);
     str_cat_cstr(context->page, "</h3><p>");
-    append_html_escaped(
-            context->page,
-            item->alt_text[0] == '\0'
-                    ? "Kein Alternativtext hinterlegt."
-                    : item->alt_text);
-    str_cat_cstr(
-            context->page,
-            "</p><ul class=\"gallery-meta\"><li>Datei: <code>");
-    append_html_escaped(context->page, item->file_name);
-    str_cat_cstr(context->page, "</code></li><li>Reihenfolge: ");
-    append_int(context->page, item->sort_order);
-    str_cat_cstr(context->page, "</li><li>Status: ");
-    str_cat_cstr(context->page, item->visible ? "Sichtbar" : "Ausgeblendet");
-    str_cat_cstr(
-            context->page,
-            "</li></ul></div><form method=\"post\" action=\"/admin/gallery/delete\" class=\"gallery-delete-form\"><input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html_escaped(context->page, item->alt_text[0] == '\0' ? "Kein Alternativtext hinterlegt." : item->alt_text);
+    str_cat_cstr(context->page, "</p></div><form method=\"post\" action=\"/admin/gallery/delete\" class=\"gallery-delete-form\"><input type=\"hidden\" name=\"csrf_token\" value=\"");
     append_html_escaped(context->page, context->csrf_token);
-    str_cat_cstr(
-            context->page,
-            "\"><input type=\"hidden\" name=\"image_id\" value=\"");
+    str_cat_cstr(context->page, "\"><input type=\"hidden\" name=\"image_id\" value=\"");
     append_int64(context->page, item->id);
-    str_cat_cstr(
-            context->page,
-            "\"><button class=\"button button-small button-danger\" type=\"submit\">Löschen</button></form></div></article>");
+    str_cat_cstr(context->page, "\"><button class=\"button button-small button-danger\" type=\"submit\">Löschen</button></form></div></article>");
     return 0;
 }
 
@@ -1119,7 +1074,7 @@ string *gallery_build_admin_page(
 
     str_cat_cstr(
             page,
-            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Galerie verwalten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\" aria-current=\"page\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header><main class=\"page admin-page admin-gallery-page\"><section class=\"card admin-card admin-calendar-section\"><p class=\"eyebrow\">Admin</p><h1>Galerie verwalten</h1><p>Lade Bilder für Kundinnen und Kunden hoch und pflege die öffentliche Galerie.</p>");
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Galerie verwalten - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/admin-gallery.js\" defer></script></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/admin\">Übersicht</a><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\" aria-current=\"page\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header><main class=\"page admin-page admin-gallery-page\"><section class=\"card admin-card admin-calendar-section\"><p class=\"eyebrow\">Admin</p><h1>Galerie verwalten</h1><p>Lade Bilder für Kundinnen und Kunden hoch und pflege die öffentliche Galerie.</p>");
 
     if (notice != NULL) {
         str_cat_cstr(page, "<p class=\"admin-success\" role=\"status\">");
@@ -1133,7 +1088,9 @@ string *gallery_build_admin_page(
     append_html_escaped(page, csrf_token);
     str_cat_cstr(
             page,
-            "\"><label for=\"gallery-title\">Titel</label><input id=\"gallery-title\" type=\"text\" name=\"title\" maxlength=\"160\" placeholder=\"Zum Beispiel: Nach dem Komplettschnitt\"><label for=\"gallery-alt\">Alternativtext</label><input id=\"gallery-alt\" type=\"text\" name=\"alt_text\" maxlength=\"255\" placeholder=\"Kurze Bildbeschreibung für Barrierefreiheit\"><div class=\"form-grid-two\"><div class=\"form-field\"><label for=\"gallery-sort-order\">Reihenfolge</label><input id=\"gallery-sort-order\" type=\"number\" name=\"sort_order\" value=\"0\"></div><label class=\"consent-field gallery-visible-field\" for=\"gallery-visible\"><input id=\"gallery-visible\" type=\"checkbox\" name=\"visible\" value=\"1\" checked><span>Direkt öffentlich anzeigen</span></label></div><label for=\"gallery-image\">Bilddatei</label><input id=\"gallery-image\" type=\"file\" name=\"image\" accept=\"image/jpeg,image/png,image/webp\" required><label class=\"consent-field gallery-publication-consent\" for=\"gallery-publication-consent\"><input id=\"gallery-publication-consent\" type=\"checkbox\" name=\"publication_consent\" value=\"1\" required><span>Die Veröffentlichung ist mit der betreffenden Kundin oder dem betreffenden Kunden abgestimmt. Personenbezogene Bilddaten und Standort-Metadaten wurden geprüft.</span></label><p class=\"admin-calendar-hint\">Erlaubt sind echte JPG-, PNG- und WebP-Dateien bis 8 MB. Die Bilder werden zusammen mit der SQLite-Datenbank gesichert. Exportiere Fotos möglichst ohne EXIF- oder Standortdaten.</p><button class=\"button\" type=\"submit\">Foto hochladen</button></form></section><section class=\"gallery-list-card\"><h2>Vorhandene Fotos</h2><div class=\"gallery-admin-list\">");
+            "\"><label for=\"gallery-title\">Titel</label><input id=\"gallery-title\" type=\"text\" name=\"title\" maxlength=\"160\" placeholder=\"Zum Beispiel: Nach dem Komplettschnitt\"><label for=\"gallery-alt\">Alternativtext</label><input id=\"gallery-alt\" type=\"text\" name=\"alt_text\" maxlength=\"255\" placeholder=\"Kurze Bildbeschreibung für Barrierefreiheit\"><label for=\"gallery-image\">Bilddatei</label><input id=\"gallery-image\" type=\"file\" name=\"image\" accept=\"image/jpeg,image/png,image/webp\" required><p class=\"admin-calendar-hint\">Erlaubt sind echte JPG-, PNG- und WebP-Dateien bis 8 MB. Neue Fotos werden sofort veröffentlicht.</p><button class=\"button\" type=\"submit\">Foto hochladen</button></form></section><section class=\"gallery-list-card\"><div class=\"gallery-list-heading\"><div><h2>Vorhandene Fotos</h2><p>Ziehe die Fotos in die gewünschte Reihenfolge. Änderungen werden automatisch gespeichert.</p></div><span class=\"gallery-order-status\" data-gallery-order-status aria-live=\"polite\"></span></div><div class=\"gallery-admin-list\" data-gallery-sort-list data-csrf-token=\"");
+    append_html_escaped(page, csrf_token);
+    str_cat_cstr(page, "\">");
 
     context.page = page;
     context.csrf_token = csrf_token;
@@ -1160,9 +1117,6 @@ gallery_result gallery_handle_upload(const string *request)
 {
     char title[GALLERY_TITLE_SIZE + 1] = {0};
     char alt_text[GALLERY_ALT_SIZE + 1] = {0};
-    char sort_order_text[32] = {0};
-    char visible_text[8] = {0};
-    char publication_consent_text[8] = {0};
     char original_filename[GALLERY_FILENAME_SIZE + 1] = {0};
     char reported_content_type[GALLERY_CONTENT_TYPE_SIZE] = {0};
     char stored_name[GALLERY_FILENAME_SIZE + 1] = {0};
@@ -1171,35 +1125,10 @@ gallery_result gallery_handle_upload(const string *request)
     const char *detected_extension = NULL;
     size_t image_length = 0;
     int sort_order = 0;
-    bool visible;
 
     gallery_extract_multipart_text_field(request, "title", title, sizeof(title));
     gallery_extract_multipart_text_field(request, "alt_text", alt_text, sizeof(alt_text));
-    gallery_extract_multipart_text_field(
-            request,
-            "sort_order",
-            sort_order_text,
-            sizeof(sort_order_text));
-    visible = gallery_extract_multipart_text_field(
-            request,
-            "visible",
-            visible_text,
-            sizeof(visible_text));
-
-    if (!gallery_extract_multipart_text_field(
-            request,
-            "publication_consent",
-            publication_consent_text,
-            sizeof(publication_consent_text)) ||
-        strcmp(publication_consent_text, "1") != 0) {
-        set_error("Die Veröffentlichungsfreigabe muss bestätigt werden");
-        return GALLERY_BAD_REQUEST;
-    }
-
-    if (!parse_sort_order(sort_order_text, &sort_order)) {
-        set_error("Die Reihenfolge ist ungültig");
-        return GALLERY_BAD_REQUEST;
-    }
+    if (next_gallery_sort_order(&sort_order) != 0) return GALLERY_ERROR;
 
     if (!find_multipart_part(
             request,
@@ -1259,7 +1188,7 @@ gallery_result gallery_handle_upload(const string *request)
             image_data,
             image_length,
             sort_order,
-            visible) != 0) {
+            true) != 0) {
         return GALLERY_ERROR;
     }
 
@@ -1297,6 +1226,49 @@ gallery_result gallery_handle_delete(const string *request)
         return GALLERY_ERROR;
     }
 
+    return GALLERY_OK;
+}
+
+gallery_result gallery_handle_reorder(const string *request)
+{
+    char order[8192] = {0};
+    sqlite3 *database = NULL;
+    sqlite3_stmt *statement = NULL;
+    char *cursor;
+    int position = 0;
+    int result = SQLITE_DONE;
+
+    if (form_urlencoded_get(request, "order", order, sizeof(order)) != FORM_VALUE_OK || order[0] == '\0') {
+        set_error("Die neue Galerie-Reihenfolge fehlt");
+        return GALLERY_BAD_REQUEST;
+    }
+    if (gallery_open(&database) != 0) return GALLERY_ERROR;
+    if (execute_sql(database, "BEGIN IMMEDIATE;") != 0) { gallery_close(database); return GALLERY_ERROR; }
+    result = sqlite3_prepare_v2(database, "UPDATE gallery_images SET sort_order = ?1 WHERE id = ?2;", -1, &statement, NULL);
+    if (result != SQLITE_OK) { set_sqlite_error(database, "Galerie-Reihenfolge konnte nicht vorbereitet werden"); execute_sql(database, "ROLLBACK;"); gallery_close(database); return GALLERY_ERROR; }
+
+    cursor = order;
+    while (*cursor != '\0') {
+        char *separator = strchr(cursor, ',');
+        char *end = NULL;
+        long long image_id;
+        if (separator != NULL) *separator = '\0';
+        errno = 0;
+        image_id = strtoll(cursor, &end, 10);
+        if (errno != 0 || end == cursor || *end != '\0' || image_id <= 0) { result = SQLITE_MISMATCH; break; }
+        sqlite3_reset(statement); sqlite3_clear_bindings(statement);
+        sqlite3_bind_int(statement, 1, position++);
+        sqlite3_bind_int64(statement, 2, (sqlite3_int64)image_id);
+        result = sqlite3_step(statement);
+        if (result != SQLITE_DONE || sqlite3_changes(database) != 1) break;
+        if (separator == NULL) break;
+        cursor = separator + 1;
+        if (*cursor == '\0') { result = SQLITE_MISMATCH; break; }
+    }
+    sqlite3_finalize(statement);
+    if (result != SQLITE_DONE) { execute_sql(database, "ROLLBACK;"); gallery_close(database); set_error("Die neue Galerie-Reihenfolge ist ungültig"); return GALLERY_BAD_REQUEST; }
+    if (execute_sql(database, "COMMIT;") != 0) { execute_sql(database, "ROLLBACK;"); gallery_close(database); return GALLERY_ERROR; }
+    gallery_close(database);
     return GALLERY_OK;
 }
 

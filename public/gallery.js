@@ -6,9 +6,42 @@
         return;
     }
 
+    const lightbox = document.createElement('dialog');
+    lightbox.className = 'gallery-lightbox';
+    lightbox.innerHTML = '<button class="gallery-lightbox-close" type="button" aria-label="Großansicht schließen">×</button><img alt="">';
+    document.body.appendChild(lightbox);
+
+    const lightboxImage = lightbox.querySelector('img');
+    const closeButton = lightbox.querySelector('button');
+
+    function closeLightbox() {
+        if (lightbox.open) {
+            lightbox.close();
+        }
+    }
+
+    closeButton.addEventListener('click', closeLightbox);
+    lightbox.addEventListener('click', function (event) {
+        if (event.target === lightbox) {
+            closeLightbox();
+        }
+    });
+
+    function openLightbox(item) {
+        lightboxImage.src = item.url;
+        lightboxImage.alt = item.alt || item.title || 'Galeriebild';
+        lightbox.showModal();
+    }
+
     function createCard(item) {
         const article = document.createElement('article');
         article.className = 'gallery-card';
+
+        const button = document.createElement('button');
+        button.className = 'gallery-image-button';
+        button.type = 'button';
+        button.setAttribute('aria-label', 'Bild vergrößern');
+        button.addEventListener('click', function () { openLightbox(item); });
 
         const image = document.createElement('img');
         image.className = 'gallery-image';
@@ -22,8 +55,9 @@
         const title = document.createElement('h2');
         title.textContent = item.title || 'Styling 4 Dogs';
 
+        button.appendChild(image);
         content.appendChild(title);
-        article.appendChild(image);
+        article.appendChild(button);
         article.appendChild(content);
         return article;
     }

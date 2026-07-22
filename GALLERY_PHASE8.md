@@ -30,13 +30,12 @@ Der Admin kann dort:
 
 - JPG-, PNG- und WebP-Bilder bis 8 MB hochladen,
 - Titel und Alternativtext festlegen,
-- eine Sortierreihenfolge angeben,
-- Bilder direkt sichtbar oder zunächst ausgeblendet speichern,
+- Bilder per Drag-and-drop sortieren,
 - Bilder wieder löschen.
 
-Vor dem Upload muss bestätigt werden, dass die Veröffentlichung abgestimmt ist.
-Der Adminbereich erinnert zusätzlich daran, Fotos ohne Standort- oder andere
-unnötige Metadaten zu exportieren.
+Neue Bilder werden direkt veröffentlicht. Die öffentliche Galerie zeigt
+höchstens zwei Bilder nebeneinander. Ein Klick öffnet das Bild vergrößert in
+einer Lightbox.
 
 ## Speicherung und Backup
 
@@ -56,4 +55,4 @@ PRAGMA user_version = 7
 - 9-MiB-Caddy-Limit einschließlich Multipart-Overhead
 - serverseitige Erkennung der tatsächlichen JPEG-, PNG- oder WebP-Signatur
 - `nosniff` bei Bildantworten
-- keine Auslieferung ausgeblendeter Bilder über die öffentliche Route
+- ausschließlich vom Admin hochgeladene Bilder über die öffentliche Route

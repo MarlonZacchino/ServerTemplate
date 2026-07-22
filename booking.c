@@ -1123,7 +1123,7 @@ string *build_booking_admin_page(
             "    <header class=\"site-header\">\n"
             "        <div class=\"container nav-wrap\">\n"
             "            <a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>\n"
-            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
+            "            <nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/admin\">Übersicht</a><a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\" aria-current=\"page\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"
             "        </div>\n"
             "    </header>\n"
             "    <main class=\"page admin-page\">\n"

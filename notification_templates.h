@@ -27,6 +27,7 @@ typedef struct notification_template_context {
     const char *salon_address;
     const char *salon_phone;
     const char *website_url;
+    const char *booking_url;
 } notification_template_context;
 
 typedef int (*notification_template_callback)(const notification_template *, void *);

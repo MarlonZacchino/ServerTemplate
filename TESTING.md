@@ -223,3 +223,20 @@ Der Regressionstest prüft zusätzlich:
 - vollständiges Löschen des Galerieeintrags,
 - Schema-Migration auf Version 7,
 - Einbindung des Logos und des Namens „Styling 4 Dogs“.
+
+
+## Kundenbereich und Dashboard – Phase 9
+
+Der Regressionstest prüft zusätzlich:
+
+- geschützte Route `/admin` mit zentralen Kennzahlen und Schnellzugriffen,
+- persönlichen Kundenlink direkt nach einer Buchung,
+- 64-stelligen, nicht erratbaren Zugriffstoken,
+- `Cache-Control: no-store` und ungültige Token-Antworten,
+- Schlüsseldatei `customer-portal.key` mit Modus `0600`,
+- Statusanzeige im Kundenbereich,
+- Absage offener oder bestätigter Buchungen,
+- idempotente wiederholte Absagen,
+- sofortige Freigabe des stornierten Zeitraums,
+- Kundenlink in automatisch erzeugten E-Mails,
+- Backup und Restore von Datenbank und Kundenbereich-Schlüssel.

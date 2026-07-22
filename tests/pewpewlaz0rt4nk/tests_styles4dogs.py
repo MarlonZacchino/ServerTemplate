@@ -324,7 +324,10 @@ def run_stateful_tests() -> int:
             ),
             body,
         ).encode())
-        assert_status(response, "201 Created")
+        _, booking_created_body = assert_status(response, "201 Created")
+        portal_match = re.search(rb'href="[^" ]*(/buchung/([0-9]+)/[0-9a-f]{64})"', booking_created_body)
+        if portal_match is None:
+            raise AssertionError("Die Buchungsbestätigung enthält keinen persönlichen Kundenlink")
 
         with sqlite3.connect(database_file) as connection:
             after_count = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
@@ -362,6 +365,22 @@ def run_stateful_tests() -> int:
             raise AssertionError(f"Strukturierter E-Mail-Kontakt wurde falsch gespeichert: {row!r}")
         if row[21] != "Komplettpflege" or row[22] != 120 or row[23] != 15:
             raise AssertionError(f"Leistungssnapshot wurde falsch gespeichert: {row!r}")
+
+        portal_path = portal_match.group(1).decode("ascii")
+        portal_response = raw_request(request_text("GET", portal_path).encode())
+        portal_headers, portal_body = assert_status(portal_response, "200 OK")
+        if portal_headers.get("cache-control") != "no-store":
+            raise AssertionError("Persönlicher Kundenbereich darf nicht gecacht werden")
+        if b"Bello" not in portal_body or "Wird vom Salon geprüft".encode("utf-8") not in portal_body:
+            raise AssertionError("Persönlicher Kundenbereich zeigt Buchung oder Status nicht an")
+
+        invalid_portal = portal_path[:-1] + ("0" if portal_path[-1] != "0" else "1")
+        invalid_response = raw_request(request_text("GET", invalid_portal).encode())
+        assert_status(invalid_response, "404 Not Found")
+
+        portal_key = Path(os.environ["STYLES4DOGS_TEST_SECRETS_DIR"]) / "customer-portal.key"
+        if not portal_key.is_file() or portal_key.stat().st_mode & 0o777 != 0o600:
+            raise AssertionError("Kundenbereich-Schlüssel fehlt oder besitzt nicht Modus 0600")
 
         updated_response = raw_request(request_text(
             "GET",
@@ -497,9 +516,6 @@ def run_stateful_tests() -> int:
         add_text("csrf_token", csrf_token)
         add_text("title", "Bello nach der Pflege")
         add_text("alt_text", "Kleiner Hund mit frisch geschnittenem Fell")
-        add_text("sort_order", "10")
-        add_text("visible", "1")
-        add_text("publication_consent", "1")
         parts.append(
             f"--{boundary}\r\n"
             "Content-Disposition: form-data; name=\"image\"; filename=\"bello.png\"\r\n"
@@ -533,7 +549,7 @@ def run_stateful_tests() -> int:
             "Kleiner Hund mit frisch geschnittenem Fell",
         ):
             raise AssertionError(f"Galerietexte wurden falsch gespeichert: {row!r}")
-        if row[4] != "image/png" or row[5] != len(image_bytes) or row[6:] != (10, 1):
+        if row[4] != "image/png" or row[5] != len(image_bytes) or row[6:] != (0, 1):
             raise AssertionError(f"Galeriebild-Metadaten sind inkonsistent: {row!r}")
 
         image_id = row[0]
@@ -832,6 +848,25 @@ def run_stateful_tests() -> int:
             raise AssertionError("Suchwert wird ungeescaped in die Adminseite geschrieben")
         if b'&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;' not in escaped_body:
             raise AssertionError("Suchwert wird nicht sicher im Formular wiedergegeben")
+
+
+    def admin_dashboard_overview() -> None:
+        valid_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        unauthorized = raw_request(request_text("GET", "/admin").encode())
+        assert_status(unauthorized, "401 Unauthorized")
+
+        response = raw_request(request_text(
+            "GET",
+            "/admin",
+            {"Authorization": f"Basic {valid_token}"},
+        ).encode())
+        _, body = assert_status(response, "200 OK")
+        if "Salonübersicht".encode("utf-8") not in body or "Fehlgeschlagene E-Mails".encode("utf-8") not in body:
+            raise AssertionError("Admin-Dashboard enthält nicht die erwarteten Kennzahlen")
+        if b"/admin/appointments" not in body or b"/admin/gallery" not in body:
+            raise AssertionError("Admin-Dashboard enthält nicht die erwarteten Schnellzugriffe")
 
 
     def admin_booking_decisions() -> None:
@@ -1632,6 +1667,106 @@ def run_stateful_tests() -> int:
         assert_status(disable_response, "303 See Other")
 
 
+    def customer_portal_cancellation() -> None:
+        database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+        target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=21)
+        target_date = target.date().isoformat()
+        query = urlencode({
+            "service": "claw_care",
+            "from": target_date,
+            "to": target_date,
+        })
+
+        availability_response = raw_request(request_text(
+            "GET",
+            f"/api/availability?{query}",
+        ).encode())
+        _, availability_body = assert_status(availability_response, "200 OK")
+        availability = json.loads(availability_body)
+        free_slots = [slot for slot in availability["days"][0]["slots"] if slot["available"]]
+        if not free_slots:
+            raise AssertionError("Kein freier Termin für den Kundenbereich-Absagetest vorhanden")
+        selected_slot = free_slots[0]
+
+        booking_body = urlencode({
+            "first_name": "Portal",
+            "last_name": "Absage",
+            **email_contact("portal-absage@example.invalid"),
+            "dog_name": "Flocke",
+            "dog_size": "small",
+            "service": "claw_care",
+            "appointment_date": target_date,
+            "appointment_start": selected_slot["start"],
+            "message": "Kundenbereich-Absagetest",
+            "privacy_consent": "accepted",
+        })
+        booking_response = raw_request(request_text(
+            "POST",
+            "/booking",
+            proxy_headers(
+                "198.51.100.190",
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            ),
+            booking_body,
+        ).encode())
+        _, booking_page = assert_status(booking_response, "201 Created")
+        portal_match = re.search(rb'href="[^" ]*(/buchung/([0-9]+)/[0-9a-f]{64})"', booking_page)
+        if portal_match is None:
+            raise AssertionError("Absagetest erhielt keinen persönlichen Kundenlink")
+        portal_path = portal_match.group(1).decode("ascii")
+        booking_id = int(portal_match.group(2))
+
+        cancel_response = raw_request(request_text(
+            "POST",
+            f"{portal_path}/cancel",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+            urlencode({"confirm_cancel": "1"}),
+        ).encode())
+        cancel_headers, _ = assert_status(cancel_response, "303 See Other")
+        expected_location = f"{portal_path}?cancelled=1"
+        if cancel_headers.get("location") != expected_location:
+            raise AssertionError("Kundenabsage leitet nicht korrekt zurück")
+
+        cancelled_page_response = raw_request(request_text(
+            "GET",
+            expected_location,
+        ).encode())
+        _, cancelled_page = assert_status(cancelled_page_response, "200 OK")
+        if "Von dir abgesagt".encode("utf-8") not in cancelled_page or "wieder freigegeben".encode("utf-8") not in cancelled_page:
+            raise AssertionError("Kundenbereich bestätigt die Absage nicht verständlich")
+
+        repeated_cancel = raw_request(request_text(
+            "POST",
+            f"{portal_path}/cancel",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+            urlencode({"confirm_cancel": "1"}),
+        ).encode())
+        _, repeated_body = assert_status(repeated_cancel, "200 OK")
+        if "Von dir abgesagt".encode("utf-8") not in repeated_body:
+            raise AssertionError("Wiederholte Absage zeigt nicht den aktuellen Status")
+
+        with sqlite3.connect(database_file) as connection:
+            row = connection.execute(
+                "SELECT decision_status, hold_expires_at, decision_at FROM bookings WHERE id = ?",
+                (booking_id,),
+            ).fetchone()
+        if row is None or row[0] != "cancelled" or row[1] is not None or not row[2]:
+            raise AssertionError(f"Kundenabsage wurde falsch gespeichert: {row!r}")
+
+        availability_after = raw_request(request_text(
+            "GET",
+            f"/api/availability?{query}",
+        ).encode())
+        _, availability_after_body = assert_status(availability_after, "200 OK")
+        after_payload = json.loads(availability_after_body)
+        slot_after = next(
+            slot for slot in after_payload["days"][0]["slots"]
+            if slot["start"] == selected_slot["start"]
+        )
+        if not slot_after["available"]:
+            raise AssertionError("Vom Kunden abgesagter Zeitraum wurde nicht wieder freigegeben")
+
+
     def admin_message_templates() -> None:
         database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
         auth_token = base64.b64encode(
@@ -2000,6 +2135,7 @@ def run_stateful_tests() -> int:
     check("Kontaktformular trennt Vor- und Nachname", contact_form_layout)
     check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
+    check("Admin sieht das zentrale Dashboard", admin_dashboard_overview)
     check("Admin lädt Galeriebilder hoch und löscht sie", admin_gallery_workflow)
     check("Admin kann einen Buchungsstatus sicher ändern", admin_status_workflow)
     check("Admin kann Buchungen filtern und durchsuchen", admin_filter_workflow)
@@ -2009,6 +2145,7 @@ def run_stateful_tests() -> int:
     check("Admin verbindet ein E-Mail-Konto und reiht eine Testmail ein", admin_email_connection)
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
     check("Admin individualisiert Bestätigungen, Absagen und bereinigt die Queue", admin_message_templates)
+    check("Kunden sehen und stornieren ihre Buchung über einen sicheren Link", customer_portal_cancellation)
     check("Admin sieht Termine in Tages-, Wochen- und 30-Tage-Ansicht", admin_appointments_workflow)
     check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
 

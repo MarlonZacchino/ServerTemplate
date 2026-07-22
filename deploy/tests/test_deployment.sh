@@ -6,6 +6,8 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 STAGING_ROOT=$(mktemp -d)
 TEST_DATABASE="$STAGING_ROOT/test-source.db"
 RESTORED_DATABASE="$STAGING_ROOT/restored/styles4dogs.db"
+SOURCE_PORTAL_KEY="$STAGING_ROOT/source-customer-portal.key"
+RESTORED_PORTAL_KEY="$STAGING_ROOT/restored-secrets/customer-portal.key"
 
 cleanup() {
     rm -rf -- "$STAGING_ROOT"
@@ -40,6 +42,7 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE5.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE6.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/GALLERY_PHASE8.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/CUSTOMER_PORTAL_PHASE9.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
@@ -95,6 +98,10 @@ grep -Fq 'header_up X-Styles4Dogs-Proxy-Token {$STYLES4DOGS_TRUSTED_PROXY_TOKEN}
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 grep -Fq '@gallery_upload_body path /admin/gallery/upload' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq 'log_skip /buchung/*' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq '>Referrer-Policy "no-referrer"' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 grep -Fq 'max_size 9MiB' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 
@@ -107,6 +114,9 @@ if command -v systemd-analyze >/dev/null 2>&1; then
         styles4dogs-notification.timer
 fi
 
+head -c 32 /dev/urandom > "$SOURCE_PORTAL_KEY"
+chmod 0600 "$SOURCE_PORTAL_KEY"
+
 sqlite3 "$TEST_DATABASE" <<'SQL'
 CREATE TABLE smoke_test (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO smoke_test(value) VALUES ('backup works');
@@ -114,6 +124,7 @@ SQL
 
 BACKUP_FILE=$(
     STYLES4DOGS_BACKUP_LOCK="$STAGING_ROOT/backup.lock" \
+    STYLES4DOGS_CUSTOMER_PORTAL_KEY_FILE="$SOURCE_PORTAL_KEY" \
     "$PROJECT_ROOT/deploy/scripts/backup.sh" \
         --database "$TEST_DATABASE" \
         --output-dir "$STAGING_ROOT/backups" \
@@ -122,11 +133,14 @@ BACKUP_FILE=$(
 
 [[ -f "$BACKUP_FILE" ]]
 [[ -f "$BACKUP_FILE.sha256" ]]
+[[ -f "$BACKUP_FILE.customer-portal.key" ]]
+cmp -s "$SOURCE_PORTAL_KEY" "$BACKUP_FILE.customer-portal.key"
 
 mkdir -p "$(dirname -- "$RESTORED_DATABASE")"
 STYLES4DOGS_SKIP_SYSTEMD=1 \
 STYLES4DOGS_DATABASE_FILE="$RESTORED_DATABASE" \
 STYLES4DOGS_BACKUP_DIR="$STAGING_ROOT/restore-safety" \
+STYLES4DOGS_CUSTOMER_PORTAL_KEY_FILE="$RESTORED_PORTAL_KEY" \
     "$PROJECT_ROOT/deploy/scripts/restore.sh" \
     --backup "$BACKUP_FILE" \
     --database "$RESTORED_DATABASE" \
@@ -136,5 +150,8 @@ STYLES4DOGS_BACKUP_DIR="$STAGING_ROOT/restore-safety" \
 
 RESTORED_VALUE=$(sqlite3 "$RESTORED_DATABASE" 'SELECT value FROM smoke_test;')
 [[ "$RESTORED_VALUE" == "backup works" ]]
+[[ -f "$RESTORED_PORTAL_KEY" ]]
+[[ "$(stat -c '%a' "$RESTORED_PORTAL_KEY")" == "600" ]]
+cmp -s "$SOURCE_PORTAL_KEY" "$RESTORED_PORTAL_KEY"
 
 echo "Deployment, Caddy staging, backup and restore tests: OK"

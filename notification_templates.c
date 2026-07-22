@@ -87,6 +87,7 @@ static const char *placeholder(const notification_template_context *context, con
     if (strcmp(name, "salon_address") == 0) return context->salon_address;
     if (strcmp(name, "salon_phone") == 0) return context->salon_phone;
     if (strcmp(name, "website_url") == 0) return context->website_url;
+    if (strcmp(name, "booking_url") == 0) return context->booking_url;
     return NULL;
 }
 
@@ -134,7 +135,7 @@ static bool subject_valid(const char *subject)
 
 static bool valid_template(const notification_template *value)
 {
-    notification_template_context empty = {"", "", "", "", "", "", "", "", "", "", "", ""};
+    notification_template_context empty = {"", "", "", "", "", "", "", "", "", "", "", "", ""};
     char subject[NOTIFICATION_SUBJECT_SIZE], body[NOTIFICATION_BODY_SIZE];
     return value != NULL && notification_template_event_is_valid(value->event_type) &&
            subject_valid(value->subject_template) && value->body_template[0] != '\0' &&

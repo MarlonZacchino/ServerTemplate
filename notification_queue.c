@@ -2,6 +2,7 @@
 
 #include "calendar_time.h"
 #include "contact_validation.h"
+#include "customer_portal.h"
 #include "notification_settings.h"
 #include "notification_templates.h"
 #include "server_config.h"
@@ -462,6 +463,7 @@ static int build_payload(
     char appointment_date_display[48];
     char booking_id[32];
     char rejection_reason[640];
+    char booking_url[CUSTOMER_PORTAL_URL_SIZE];
 
     if (data == NULL || !internal_event_type_is_valid(event_type) ||
         calendar_time_format_hhmm(data->start_minute, start) != 0 ||
@@ -471,7 +473,8 @@ static int build_payload(
                 data->appointment_date,
                 true,
                 appointment_date_display,
-                sizeof(appointment_date_display)) != 0) {
+                sizeof(appointment_date_display)) != 0 ||
+        customer_portal_build_url(data->id, booking_url, sizeof(booking_url)) != 0) {
         return -1;
     }
 
@@ -498,9 +501,23 @@ static int build_payload(
     context.salon_address = server_config_salon_address();
     context.salon_phone = server_config_salon_phone();
     context.website_url = server_config_public_base_url();
+    context.booking_url = booking_url;
 
     if (notification_template_render(&template_value, &context, subject, body) != 0)
         return -1;
+
+    if (booking_event_type_is_valid(event_type) && strstr(body, booking_url) == NULL) {
+        size_t body_length = strlen(body);
+        int written = snprintf(
+                body + body_length,
+                NOTIFICATION_BODY_SIZE - body_length,
+                "\n\nBuchung ansehen oder absagen:\n%s",
+                booking_url);
+        if (written < 0 || (size_t)written >= NOTIFICATION_BODY_SIZE - body_length) {
+            set_error("Kundenlink passt nicht in die Benachrichtigung");
+            return -1;
+        }
+    }
 
     ics[0] = '\0';
     if ((strcmp(event_type, "booking_confirmed") == 0 ||

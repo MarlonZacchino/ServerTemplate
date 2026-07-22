@@ -6,6 +6,10 @@
 
     # Privacy-conscious structured access logging. Search terms are redacted,
     # credentials are redacted by Caddy by default, and IP addresses are masked.
+    # Customer portal URLs contain an unguessable bearer token. Never write
+    # those paths to the access log.
+    log_skip /buchung/*
+
     log styles4dogs_access {
         output file /var/log/caddy/styles4dogs-access.log {
             mode 0640
@@ -31,7 +35,7 @@
         >Strict-Transport-Security "max-age=31536000"
         >X-Content-Type-Options "nosniff"
         >X-Frame-Options "DENY"
-        >Referrer-Policy "strict-origin-when-cross-origin"
+        >Referrer-Policy "no-referrer"
         >Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }

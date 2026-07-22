@@ -745,7 +745,7 @@ string *admin_calendar_build_page(
             "    <header class=\"site-header\"><div class=\"container nav-wrap\">\n"
             "        <a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>\n"
             "        <nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
-            "<a href=\"/\">Website öffnen</a>"
+            "<a href=\"/admin\">Übersicht</a><a href=\"/\">Website öffnen</a>"
             "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
             "<a href=\"/admin/appointments\">Termine</a>"
             "<a href=\"/admin/calendar\" aria-current=\"page\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav>\n"

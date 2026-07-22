@@ -325,9 +325,9 @@
 
             const data = await response.json();
             confirmationNotes.forEach((note) => {
-                note.textContent = data.automatic_confirmation
-                    ? "Freie Termine werden sofort verbindlich bestätigt. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg."
-                    : "Der Zeitraum wird zunächst reserviert und anschließend vom Salon angenommen oder abgelehnt.";
+                note.textContent =
+                    "Der Termin wird sofort verbindlich bestätigt. " +
+                    "Wir melden uns bei Bedarf über deinen gewählten Kontaktweg.";
             });
             submitButton.textContent = data.automatic_confirmation
                 ? "Termin verbindlich buchen"

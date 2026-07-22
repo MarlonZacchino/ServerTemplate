@@ -86,6 +86,8 @@ add_executable(Server
         admin_appointments.c
         admin_notifications.c
         gallery.c
+        customer_portal.c
+        admin_dashboard.c
         notification_queue.c
         notification_settings.c
         notification_templates.c
@@ -102,6 +104,7 @@ add_executable(notification_worker
         calendar_database.c
         contact_validation.c
         server_config.c
+        customer_portal.c
 )
 
 target_include_directories(notification_worker PRIVATE

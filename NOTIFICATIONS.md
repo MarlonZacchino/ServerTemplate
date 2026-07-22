@@ -112,6 +112,7 @@ Erlaubte Platzhalter:
 {{salon_address}}      Salonadresse aus server.env
 {{salon_phone}}        Salontelefon aus server.env
 {{website_url}}        öffentliche Basis-URL
+{{booking_url}}        persönlicher Link zur Buchungsübersicht
 ```
 
 Unbekannte Platzhalter, unvollständige `{{...}}`-Ausdrücke und Zeilenumbrüche
@@ -121,6 +122,10 @@ Standard zurückgesetzt werden.
 Bereits eingereihte Nachrichten behalten den Text, der zum Zeitpunkt der
 Einreihung erzeugt wurde. Dadurch ändern spätere Bearbeitungen keine bereits
 geplanten Bestätigungen oder Erinnerungen.
+
+Kunden-E-Mails erhalten immer einen persönlichen Buchungslink. Wird
+`{{booking_url}}` nicht ausdrücklich in der Vorlage verwendet, hängt das System
+den Link automatisch am Ende der Nachricht an.
 
 ## Aktivierung und Erinnerungen
 

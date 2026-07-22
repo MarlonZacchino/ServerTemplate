@@ -140,3 +140,10 @@ Caddy zusätzlich deaktivieren:
 ```bash
 sudo ./deploy/scripts/uninstall-caddy.sh --disable-service
 ```
+
+## Schutz persönlicher Buchungslinks
+
+Pfade unter `/buchung/*` enthalten einen geheimen Zugriffstoken. Die verwaltete
+Caddy-Konfiguration schließt diese Requests mit `log_skip` aus dem Access-Log
+aus und setzt `Referrer-Policy: no-referrer`. Nach einem Phase-9-Update muss die
+Caddy-Konfiguration deshalb erneut installiert werden.

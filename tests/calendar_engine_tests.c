@@ -278,11 +278,20 @@ int main(void)
     {
         notification_template template_value;
         notification_template_context context = {
-                "Marlon Test", "42", "21.08.2026", "09:00", "10:00",
-                "Komplettpflege", "Flocke", "Grund: Test",
-                "Styling 4 Dogs", "Teststraße 1", "02571 12345",
-                "https://example.invalid"
-        };
+            .customer_name = "Marlon Test",
+            .booking_id = "42",
+            .appointment_date = "21.08.2026",
+            .start_time = "09:00",
+            .end_time = "10:00",
+            .service_name = "Komplettpflege",
+            .dog_name = "Flocke",
+            .rejection_reason = "Grund: Test",
+            .salon_name = "Styling 4 Dogs",
+            .salon_address = "Teststraße 1",
+            .salon_phone = "02571 12345",
+            .website_url = "https://example.invalid",
+            .booking_url = "https://example.invalid/buchung/test-token"
+    };
         char subject[NOTIFICATION_SUBJECT_SIZE];
         char body[NOTIFICATION_BODY_SIZE];
 

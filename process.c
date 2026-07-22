@@ -16,6 +16,8 @@
 #include "server_config.h"
 #include "notification_queue.h"
 #include "gallery.h"
+#include "customer_portal.h"
+#include "admin_dashboard.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -34,6 +36,11 @@
 #define SETUP_PASSWORD_SIZE 513
 #define FORM_CSRF_TOKEN_BYTES 32
 #define FORM_CSRF_TOKEN_HEX_SIZE (FORM_CSRF_TOKEN_BYTES * 2 + 1)
+
+static void customer_portal_append_html(
+        string *destination,
+        const char *source
+);
 
 /*
  * Content-Type anhand der Dateiendung bestimmen.
@@ -1084,36 +1091,67 @@ static string *handle_calendar_availability(
     return response;
 }
 
-static string *handle_booking_created(bool confirmed)
+static string *handle_booking_created(bool confirmed, int64_t booking_id)
 {
-    const char *body_pending =
-            "<!doctype html>\n"
-            "<html lang=\"de\">\n"
-            "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Terminanfrage gesendet | Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
-            "<body><main class=\"page\"><section class=\"card\">"
-            "<p class=\"eyebrow\">Termin vorläufig reserviert</p><h1>Vielen Dank!</h1>"
-            "<p>Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum vorläufig reserviert. "
-            "Der Termin wird verbindlich, sobald der Salon ihn annimmt.</p>"
-            "<p><a class=\"button\" href=\"/\">Zurück zur Startseite</a></p>"
-            "</section></main></body></html>";
-    const char *body_confirmed =
-            "<!doctype html>\n"
-            "<html lang=\"de\">\n"
-            "<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-            "<title>Termin bestätigt | Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>\n"
-            "<body><main class=\"page\"><section class=\"card\">"
-            "<p class=\"eyebrow\">Termin automatisch bestätigt</p><h1>Dein Termin ist eingetragen.</h1>"
-            "<p>Der ausgewählte Zeitraum wurde verbindlich reserviert. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg.</p>"
-            "<p><a class=\"button\" href=\"/\">Zurück zur Startseite</a></p>"
-            "</section></main></body></html>";
+    char booking_url[CUSTOMER_PORTAL_URL_SIZE] = {0};
+    string *body = _new_string();
+    string *response;
 
-    return build_response_text(
+    if (booking_id > 0 &&
+        customer_portal_build_url(booking_id, booking_url, sizeof(booking_url)) != 0) {
+        fprintf(stderr, "Kundenlink konnte nicht erzeugt werden: %s\n",
+                customer_portal_last_error());
+        free_str(body);
+        return handle_internal_error(true);
+    }
+
+    str_cat_cstr(body,
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\">"
+            "<title>");
+    str_cat_cstr(body, confirmed
+            ? "Termin bestätigt | Styling 4 Dogs"
+            : "Terminanfrage gesendet | Styling 4 Dogs");
+    str_cat_cstr(body,
+            "</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+            "<main class=\"page customer-portal-page\"><section class=\"card customer-portal-card\">"
+            "<p class=\"eyebrow\">");
+    str_cat_cstr(body, confirmed
+            ? "Termin automatisch bestätigt"
+            : "Termin vorläufig reserviert");
+    str_cat_cstr(body, "</p><h1>");
+    str_cat_cstr(body, confirmed
+            ? "Dein Termin ist eingetragen."
+            : "Vielen Dank!");
+    str_cat_cstr(body, "</h1><p>");
+    str_cat_cstr(body, confirmed
+            ? "Der ausgewählte Zeitraum wurde verbindlich reserviert. Der Salon meldet sich bei Bedarf über deinen gewählten Kontaktweg."
+            : "Deine Terminanfrage wurde gespeichert und der gewählte Zeitraum vorläufig reserviert. Der Termin wird verbindlich, sobald der Salon ihn annimmt.");
+    str_cat_cstr(body, "</p>");
+
+    if (booking_id > 0) {
+        str_cat_cstr(body,
+                "<div class=\"customer-portal-help\"><h2>Buchung später wieder öffnen</h2>"
+                "<p>Über deinen persönlichen Link kannst du den Status prüfen und die Buchung bei Bedarf absagen.</p>"
+                "<a class=\"button\" href=\"");
+        customer_portal_append_html(body, booking_url);
+        str_cat_cstr(body, "\">Meine Buchung öffnen</a></div>");
+    }
+
+    str_cat_cstr(body,
+            "<p><a class=\"button button-secondary\" href=\"/\">Zurück zur Startseite</a></p>"
+            "</section></main></body></html>");
+
+    response = build_response_bytes(
             "201 Created",
             "text/html; charset=utf-8",
-            "Cache-Control: no-store\r\n",
-            confirmed ? body_confirmed : body_pending,
+            "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n",
+            get_char_str(body),
+            get_length(body),
             true);
+    free_str(body);
+    return response;
 }
 
 static string *handle_booking_unavailable(void)
@@ -1170,7 +1208,7 @@ static string *handle_booking(string *request)
     if (booking_request_hits_honeypot(request)) {
         clear_request_body(request);
         /* Bots erhalten absichtlich dieselbe neutrale Antwort wie echte Anfragen. */
-        return handle_booking_created(false);
+        return handle_booking_created(false, 0);
     }
 
     if (!parse_booking_request(request, &booking)) {
@@ -1188,7 +1226,7 @@ static string *handle_booking(string *request)
             fprintf(stderr, "Buchungsbestätigung konnte nicht eingereiht werden: %s\n",
                     notification_queue_last_error());
         }
-        return handle_booking_created(false);
+        return handle_booking_created(false, booking_id);
     }
     if (result == CALENDAR_PUBLIC_CONFIRMED) {
         if (notification_queue_enqueue_booking_event(
@@ -1197,7 +1235,7 @@ static string *handle_booking(string *request)
             fprintf(stderr, "Terminbestätigung konnte nicht eingereiht werden: %s\n",
                     notification_queue_last_error());
         }
-        return handle_booking_created(true);
+        return handle_booking_created(true, booking_id);
     }
     if (result == CALENDAR_PUBLIC_UNAVAILABLE) {
         return handle_booking_unavailable();
@@ -2059,6 +2097,352 @@ static string *handle_admin_gallery_delete_post(const string *request)
     return handle_internal_error(true);
 }
 
+
+static void customer_portal_append_html_char(string *destination, char character)
+{
+    switch (character) {
+        case '&': str_cat_cstr(destination, "&amp;"); break;
+        case '<': str_cat_cstr(destination, "&lt;"); break;
+        case '>': str_cat_cstr(destination, "&gt;"); break;
+        case '"': str_cat_cstr(destination, "&quot;"); break;
+        case '\'': str_cat_cstr(destination, "&#39;"); break;
+        default: str_cat(destination, &character, 1); break;
+    }
+}
+
+static void customer_portal_append_html(string *destination, const char *source)
+{
+    size_t index;
+
+    if (destination == NULL || source == NULL) {
+        return;
+    }
+
+    for (index = 0; source[index] != '\0'; index++) {
+        customer_portal_append_html_char(destination, source[index]);
+    }
+}
+
+static bool parse_customer_portal_path(
+        const char *path,
+        int64_t *out_booking_id,
+        char out_token[CUSTOMER_PORTAL_TOKEN_HEX_SIZE],
+        bool *out_cancel_action
+)
+{
+    const char *position;
+    const char *id_start;
+    char id_text[32];
+    size_t id_length;
+    char *end = NULL;
+    long long booking_id;
+    size_t token_length = CUSTOMER_PORTAL_TOKEN_HEX_SIZE - 1;
+    size_t index;
+
+    if (path == NULL || out_booking_id == NULL || out_token == NULL ||
+        out_cancel_action == NULL || strncmp(path, "/buchung/", 9) != 0) {
+        return false;
+    }
+
+    position = path + 9;
+    id_start = position;
+    while (*position >= '0' && *position <= '9') {
+        position++;
+    }
+
+    id_length = (size_t)(position - id_start);
+    if (id_length == 0 || id_length >= sizeof(id_text) || *position != '/') {
+        return false;
+    }
+
+    memcpy(id_text, id_start, id_length);
+    id_text[id_length] = '\0';
+    errno = 0;
+    booking_id = strtoll(id_text, &end, 10);
+    if (errno != 0 || end == id_text || *end != '\0' || booking_id <= 0) {
+        return false;
+    }
+
+    position++;
+    if (strlen(position) < token_length) {
+        return false;
+    }
+    for (index = 0; index < token_length; index++) {
+        char character = position[index];
+        if (!((character >= '0' && character <= '9') ||
+              (character >= 'a' && character <= 'f'))) {
+            return false;
+        }
+        out_token[index] = character;
+    }
+    out_token[token_length] = '\0';
+    position += token_length;
+
+    if (*position == '\0') {
+        *out_cancel_action = false;
+    } else if (strcmp(position, "/cancel") == 0) {
+        *out_cancel_action = true;
+    } else {
+        return false;
+    }
+
+    *out_booking_id = (int64_t)booking_id;
+    return true;
+}
+
+static const char *customer_portal_status_label(const char *status)
+{
+    if (status == NULL) return "Unbekannt";
+    if (strcmp(status, "pending") == 0) return "Wird vom Salon geprüft";
+    if (strcmp(status, "confirmed") == 0) return "Termin bestätigt";
+    if (strcmp(status, "rejected") == 0) return "Anfrage abgelehnt";
+    if (strcmp(status, "cancelled") == 0) return "Von dir abgesagt";
+    if (strcmp(status, "expired") == 0) return "Reservierung abgelaufen";
+    return "Status unbekannt";
+}
+
+static const char *customer_portal_status_class(const char *status)
+{
+    if (status != NULL && strcmp(status, "confirmed") == 0) return "confirmed";
+    if (status != NULL && strcmp(status, "pending") == 0) return "pending";
+    if (status != NULL && strcmp(status, "cancelled") == 0) return "cancelled";
+    return "closed";
+}
+
+static const char *customer_portal_security_headers(void)
+{
+    return
+            "Cache-Control: no-store\r\n"
+            "Pragma: no-cache\r\n"
+            "Content-Security-Policy: default-src 'self'; style-src 'self'; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\n"
+            "Referrer-Policy: no-referrer\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n";
+}
+
+static string *handle_customer_portal_not_found(bool send_body)
+{
+    return build_response_text(
+            "404 Not Found",
+            "text/html; charset=utf-8",
+            customer_portal_security_headers(),
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Buchung nicht gefunden</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><main class=\"page customer-portal-page\"><section class=\"card customer-portal-card\"><p class=\"eyebrow\">Styling 4 Dogs</p><h1>Buchung nicht gefunden</h1><p>Der Link ist ungültig oder die Buchung ist nicht mehr verfügbar.</p><a class=\"button\" href=\"/kontakt\">Neue Terminanfrage</a></section></main></body></html>",
+            send_body);
+}
+
+static string *handle_customer_portal_page(
+        int64_t booking_id,
+        const char *token,
+        bool send_body,
+        bool cancelled_notice
+)
+{
+    customer_portal_booking booking;
+    customer_portal_result result;
+    char date_display[64] = "Nicht angegeben";
+    char start[6] = "--:--";
+    char end[6] = "--:--";
+    string *body;
+    string *response;
+    bool cancellable;
+
+    result = customer_portal_load_booking(booking_id, token, &booking);
+    if (result == CUSTOMER_PORTAL_NOT_FOUND) {
+        return handle_customer_portal_not_found(send_body);
+    }
+    if (result != CUSTOMER_PORTAL_OK) {
+        fprintf(stderr, "Kundenbereich konnte nicht geladen werden: %s\n", customer_portal_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    if (booking.appointment_date[0] != '\0') {
+        calendar_date_format_de(
+                booking.appointment_date,
+                true,
+                date_display,
+                sizeof(date_display));
+    }
+    if (booking.start_minute >= 0) calendar_time_format_hhmm(booking.start_minute, start);
+    if (booking.end_minute >= 0) calendar_time_format_hhmm(booking.end_minute, end);
+
+    cancellable = strcmp(booking.decision_status, "pending") == 0 ||
+                  strcmp(booking.decision_status, "confirmed") == 0;
+
+    body = _new_string();
+    str_cat_cstr(body, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Deine Buchung - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><a class=\"button button-small button-secondary\" href=\"/kontakt\">Neue Anfrage</a></div></header><main class=\"page customer-portal-page\"><section class=\"card customer-portal-card\"><p class=\"eyebrow\">Deine Buchung</p><h1>Hallo ");
+    customer_portal_append_html(body, booking.customer_name);
+    str_cat_cstr(body, "</h1><p class=\"customer-portal-security-note\">Dieser persönliche Link zeigt deine Buchungsdaten. Bitte teile ihn nicht öffentlich.</p>");
+
+    if (cancelled_notice) {
+        str_cat_cstr(body, "<p class=\"admin-success\" role=\"status\">Deine Buchung wurde abgesagt und der Zeitraum wieder freigegeben.</p>");
+    }
+
+    str_cat_cstr(body, "<div class=\"customer-portal-status customer-portal-status-");
+    str_cat_cstr(body, customer_portal_status_class(booking.decision_status));
+    str_cat_cstr(body, "\"><span>Status</span><strong>");
+    customer_portal_append_html(body, customer_portal_status_label(booking.decision_status));
+    str_cat_cstr(body, "</strong></div><dl class=\"customer-portal-details\"><div><dt>Buchungsnummer</dt><dd>#");
+    {
+        char id_text[32];
+        int written = snprintf(id_text, sizeof(id_text), "%lld", (long long)booking.id);
+        if (written > 0 && (size_t)written < sizeof(id_text)) str_cat(body, id_text, (size_t)written);
+    }
+    str_cat_cstr(body, "</dd></div><div><dt>Hund</dt><dd>");
+    customer_portal_append_html(body, booking.dog_name[0] == '\0' ? "Nicht angegeben" : booking.dog_name);
+    str_cat_cstr(body, "</dd></div><div><dt>Leistung</dt><dd>");
+    customer_portal_append_html(body, booking.service_name[0] == '\0' ? "Nicht angegeben" : booking.service_name);
+    str_cat_cstr(body, "</dd></div><div><dt>Datum</dt><dd>");
+    customer_portal_append_html(body, date_display);
+    str_cat_cstr(body, "</dd></div><div><dt>Uhrzeit</dt><dd>");
+    customer_portal_append_html(body, start);
+    str_cat_cstr(body, "–");
+    customer_portal_append_html(body, end);
+    str_cat_cstr(body, " Uhr</dd></div></dl>");
+
+    if (strcmp(booking.decision_status, "rejected") == 0 &&
+        booking.rejection_reason[0] != '\0') {
+        str_cat_cstr(body, "<div class=\"customer-portal-message\"><h2>Hinweis des Salons</h2><p>");
+        customer_portal_append_html(body, booking.rejection_reason);
+        str_cat_cstr(body, "</p></div>");
+    }
+
+    if (cancellable) {
+        str_cat_cstr(body, "<div class=\"customer-portal-cancel\"><h2>");
+        str_cat_cstr(body, strcmp(booking.decision_status, "confirmed") == 0 ? "Termin absagen" : "Anfrage zurückziehen");
+        str_cat_cstr(body, "</h2><p>Der Zeitraum wird anschließend wieder für andere Kundinnen und Kunden freigegeben.</p><form method=\"post\" action=\"/buchung/");
+        {
+            char id_text[32];
+            int written = snprintf(id_text, sizeof(id_text), "%lld", (long long)booking.id);
+            if (written > 0 && (size_t)written < sizeof(id_text)) str_cat(body, id_text, (size_t)written);
+        }
+        str_cat_cstr(body, "/");
+        customer_portal_append_html(body, token);
+        str_cat_cstr(body, "/cancel\"><label class=\"consent-field\"><input type=\"checkbox\" name=\"confirm_cancel\" value=\"1\" required><span>Ja, ich möchte diese Buchung wirklich absagen.</span></label><button class=\"button button-danger\" type=\"submit\">Buchung absagen</button></form></div>");
+    }
+
+    str_cat_cstr(body, "<div class=\"customer-portal-help\"><h2>Fragen oder Änderungswünsche?</h2><p>Bei Rückfragen kannst du dich direkt an den Salon wenden.</p><a class=\"button button-secondary\" href=\"/kontakt\">Kontakt aufnehmen</a></div></section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs.</small></div></footer></body></html>");
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            customer_portal_security_headers(),
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_customer_portal_cancel_post(
+        const string *request,
+        int64_t booking_id,
+        const char *token
+)
+{
+    char confirmation[8] = {0};
+    calendar_settings settings;
+    calendar_clock_snapshot snapshot;
+    customer_portal_result result;
+    char location[1200];
+    int written;
+
+    if (form_urlencoded_get(
+            request,
+            "confirm_cancel",
+            confirmation,
+            sizeof(confirmation)) != FORM_VALUE_OK ||
+        strcmp(confirmation, "1") != 0) {
+        return handle_bad_request(true);
+    }
+
+    if (calendar_database_get_settings(&settings) != 0 ||
+        calendar_clock_now(settings.timezone, &snapshot) != 0) {
+        return handle_internal_error(true);
+    }
+
+    result = customer_portal_cancel_booking(
+            booking_id,
+            token,
+            snapshot.now_utc);
+
+    if (result == CUSTOMER_PORTAL_NOT_FOUND) {
+        return handle_customer_portal_not_found(true);
+    }
+    if (result == CUSTOMER_PORTAL_NOT_CANCELLABLE) {
+        return handle_customer_portal_page(booking_id, token, true, false);
+    }
+    if (result != CUSTOMER_PORTAL_OK) {
+        fprintf(stderr, "Kundenabsage konnte nicht gespeichert werden: %s\n", customer_portal_last_error());
+        return handle_internal_error(true);
+    }
+
+    written = snprintf(
+            location,
+            sizeof(location),
+            "Location: /buchung/%lld/%s?cancelled=1\r\n%s",
+            (long long)booking_id,
+            token,
+            customer_portal_security_headers());
+    if (written < 0 || (size_t)written >= sizeof(location)) {
+        return handle_internal_error(true);
+    }
+
+    return build_response_text(
+            "303 See Other",
+            "text/html; charset=utf-8",
+            location,
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><title>Buchung abgesagt</title></head><body><p>Die Buchung wurde abgesagt.</p></body></html>",
+            true);
+}
+
+static string *handle_admin_dashboard_page(bool send_body)
+{
+    string *body = admin_dashboard_build_page();
+    string *response;
+
+    if (body == NULL) {
+        fprintf(stderr, "Admin-Dashboard konnte nicht erzeugt werden: %s\n", admin_dashboard_last_error());
+        return handle_internal_error(send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "text/html; charset=utf-8",
+            admin_security_headers(),
+            get_char_str(body),
+            get_length(body),
+            send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_admin_gallery_reorder_post(const string *request)
+{
+    gallery_result result;
+
+    if (!request_has_valid_admin_csrf(request)) {
+        return handle_admin_action_forbidden();
+    }
+
+    result = gallery_handle_reorder(request);
+    if (result == GALLERY_OK) {
+        return build_response_bytes(
+                "204 No Content",
+                "text/plain; charset=utf-8",
+                admin_security_headers(),
+                NULL,
+                0,
+                false);
+    }
+    if (result == GALLERY_BAD_REQUEST) {
+        return handle_admin_gallery_bad_request();
+    }
+
+    fprintf(stderr, "Galerie-Sortierung fehlgeschlagen: %s\n", gallery_last_error());
+    return handle_internal_error(true);
+}
+
 string *process(string *request)
 {
     char method[MAX_METHOD_LENGTH + 1];
@@ -2080,6 +2464,24 @@ string *process(string *request)
     }
 
     if (strcmp(method, "POST") == 0) {
+        int64_t customer_booking_id;
+        char customer_token[CUSTOMER_PORTAL_TOKEN_HEX_SIZE];
+        bool customer_cancel_action;
+
+        if (parse_customer_portal_path(
+                path,
+                &customer_booking_id,
+                customer_token,
+                &customer_cancel_action)) {
+            if (!customer_cancel_action) {
+                return handle_method_not_allowed(true);
+            }
+            return handle_customer_portal_cancel_post(
+                    request,
+                    customer_booking_id,
+                    customer_token);
+        }
+
         if (strcmp(path, "/booking") == 0) {
             return handle_booking(request);
         }
@@ -2209,6 +2611,13 @@ string *process(string *request)
             return handle_admin_gallery_delete_post(request);
         }
 
+        if (strcmp(path, "/admin/gallery/reorder") == 0) {
+            if (!request_has_valid_admin_auth(request)) {
+                return handle_unauthorized(true);
+            }
+            return handle_admin_gallery_reorder_post(request);
+        }
+
         return handle_not_found(true);
     }
 
@@ -2228,12 +2637,58 @@ string *process(string *request)
         return handle_gallery_media(path, "/media/", false, send_body);
     }
 
+    {
+        int64_t customer_booking_id;
+        char customer_token[CUSTOMER_PORTAL_TOKEN_HEX_SIZE];
+        bool customer_cancel_action;
+
+        if (parse_customer_portal_path(
+                path,
+                &customer_booking_id,
+                customer_token,
+                &customer_cancel_action)) {
+            char cancelled_text[8] = {0};
+            bool cancelled_notice = false;
+
+            if (customer_cancel_action) {
+                return handle_method_not_allowed(send_body);
+            }
+
+            if (query != NULL && query_length > 0) {
+                form_value_result result = form_urlencoded_get_from_data(
+                        query,
+                        query_length,
+                        "cancelled",
+                        cancelled_text,
+                        sizeof(cancelled_text));
+                if (result != FORM_VALUE_OK && result != FORM_VALUE_NOT_FOUND) {
+                    return handle_bad_request(send_body);
+                }
+                cancelled_notice = result == FORM_VALUE_OK &&
+                                   strcmp(cancelled_text, "1") == 0;
+            }
+
+            return handle_customer_portal_page(
+                    customer_booking_id,
+                    customer_token,
+                    send_body,
+                    cancelled_notice);
+        }
+    }
+
     /*
      * Ab hier bleiben nur noch GET und HEAD übrig.
      * Die Admin-Seite schützen wir mit Basic Auth.
      */
     if (strcmp(path, "/setup/admin") == 0) {
         return handle_admin_setup_page(send_body);
+    }
+
+    if (strcmp(path, "/admin") == 0) {
+        if (!request_has_valid_admin_auth(request)) {
+            return handle_unauthorized(send_body);
+        }
+        return handle_admin_dashboard_page(send_body);
     }
 
     if (strcmp(path, "/admin/notifications") == 0) {

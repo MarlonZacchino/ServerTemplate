@@ -11,6 +11,7 @@ SERVICE_GROUP=${STYLES4DOGS_SERVICE_GROUP:-styles4dogs}
 SKIP_SYSTEMD=${STYLES4DOGS_SKIP_SYSTEMD:-0}
 BACKUP_FILE=""
 CONFIRMED=0
+CUSTOMER_PORTAL_KEY_FILE=${STYLES4DOGS_CUSTOMER_PORTAL_KEY_FILE:-/etc/styles4dogs/secrets/customer-portal.key}
 
 usage() {
     cat <<'USAGE'
@@ -89,6 +90,11 @@ if [[ -f "$BACKUP_FILE.sha256" ]]; then
     ) || fail "backup checksum verification failed"
 fi
 
+PORTAL_KEY_BACKUP="$BACKUP_FILE.customer-portal.key"
+if [[ -f "$PORTAL_KEY_BACKUP" && "$(stat -c '%s' "$PORTAL_KEY_BACKUP")" != "32" ]]; then
+    fail "customer portal key backup has an unexpected size"
+fi
+
 INTEGRITY_RESULT=$(sqlite3 "$BACKUP_FILE" 'PRAGMA integrity_check;')
 [[ "$INTEGRITY_RESULT" == "ok" ]] || fail "backup integrity check returned: $INTEGRITY_RESULT"
 
@@ -136,9 +142,19 @@ fi
 rm -f -- "$DATABASE_FILE-wal" "$DATABASE_FILE-shm"
 mv -f -- "$TEMP_FILE" "$DATABASE_FILE"
 
+if [[ -f "$PORTAL_KEY_BACKUP" ]]; then
+    PORTAL_KEY_DIR=$(dirname -- "$CUSTOMER_PORTAL_KEY_FILE")
+    install -d -m 0700 -- "$PORTAL_KEY_DIR"
+    install -m 0600 -- "$PORTAL_KEY_BACKUP" "$CUSTOMER_PORTAL_KEY_FILE"
+fi
+
 if [[ "$SKIP_SYSTEMD" != 1 ]]; then
     chown "$SERVICE_USER:$SERVICE_GROUP" "$DATABASE_FILE"
     chmod 0600 "$DATABASE_FILE"
+    if [[ -f "$PORTAL_KEY_BACKUP" ]]; then
+        chown "$SERVICE_USER:$SERVICE_GROUP" "$CUSTOMER_PORTAL_KEY_FILE"
+        chmod 0600 "$CUSTOMER_PORTAL_KEY_FILE"
+    fi
 
     if ! systemctl start "$SERVICE_NAME" || ! systemctl is-active --quiet "$SERVICE_NAME"; then
         echo "The restored database did not start successfully; rolling back." >&2
@@ -147,6 +163,14 @@ if [[ "$SKIP_SYSTEMD" != 1 ]]; then
         if [[ -n "$SAFETY_BACKUP" && -f "$SAFETY_BACKUP" ]]; then
             install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_GROUP" -- \
                 "$SAFETY_BACKUP" "$DATABASE_FILE"
+            if [[ -f "$SAFETY_BACKUP.customer-portal.key" ]]; then
+                install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_GROUP" -- \
+                    "$(dirname -- "$CUSTOMER_PORTAL_KEY_FILE")"
+                install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_GROUP" -- \
+                    "$SAFETY_BACKUP.customer-portal.key" "$CUSTOMER_PORTAL_KEY_FILE"
+            elif [[ -f "$PORTAL_KEY_BACKUP" ]]; then
+                rm -f -- "$CUSTOMER_PORTAL_KEY_FILE"
+            fi
             rm -f -- "$DATABASE_FILE-wal" "$DATABASE_FILE-shm"
             systemctl start "$SERVICE_NAME" || true
         fi

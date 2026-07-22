@@ -6,6 +6,7 @@ DATABASE_FILE=${STYLES4DOGS_DATABASE_FILE:-/var/lib/styles4dogs/styles4dogs.db}
 BACKUP_DIR=${STYLES4DOGS_BACKUP_DIR:-/var/backups/styles4dogs}
 RETENTION_DAYS=${STYLES4DOGS_BACKUP_RETENTION_DAYS:-30}
 LOCK_FILE=${STYLES4DOGS_BACKUP_LOCK:-/run/lock/styles4dogs-backup.lock}
+CUSTOMER_PORTAL_KEY_FILE=${STYLES4DOGS_CUSTOMER_PORTAL_KEY_FILE:-/etc/styles4dogs/secrets/customer-portal.key}
 
 usage() {
     cat <<'USAGE'
@@ -75,6 +76,7 @@ TIMESTAMP=$(date -u +%Y%m%dT%H%M%S-%NZ)
 FINAL_FILE="$BACKUP_DIR/styles4dogs-$TIMESTAMP.db"
 TEMP_FILE="$BACKUP_DIR/.styles4dogs-$TIMESTAMP.$$.tmp"
 CHECKSUM_FILE="$FINAL_FILE.sha256"
+PORTAL_KEY_BACKUP="$FINAL_FILE.customer-portal.key"
 
 cleanup() {
     rm -f -- "$TEMP_FILE"
@@ -92,15 +94,26 @@ INTEGRITY_RESULT=$(sqlite3 "$TEMP_FILE" 'PRAGMA integrity_check;')
 [[ "$INTEGRITY_RESULT" == "ok" ]] || fail "backup integrity check returned: $INTEGRITY_RESULT"
 
 mv -- "$TEMP_FILE" "$FINAL_FILE"
+
+if [[ -f "$CUSTOMER_PORTAL_KEY_FILE" ]]; then
+    [[ "$(stat -c '%s' "$CUSTOMER_PORTAL_KEY_FILE")" == "32" ]] || \
+        fail "customer portal key has an unexpected size"
+    install -m 0600 -- "$CUSTOMER_PORTAL_KEY_FILE" "$PORTAL_KEY_BACKUP"
+fi
+
 (
     cd -- "$BACKUP_DIR"
     sha256sum -- "$(basename -- "$FINAL_FILE")" > "$(basename -- "$CHECKSUM_FILE")"
+    if [[ -f "$PORTAL_KEY_BACKUP" ]]; then
+        sha256sum -- "$(basename -- "$PORTAL_KEY_BACKUP")" >> "$(basename -- "$CHECKSUM_FILE")"
+    fi
 )
 chmod 0600 -- "$FINAL_FILE" "$CHECKSUM_FILE"
+[[ ! -f "$PORTAL_KEY_BACKUP" ]] || chmod 0600 -- "$PORTAL_KEY_BACKUP"
 
 if ((RETENTION_DAYS > 0)); then
     find "$BACKUP_DIR" -maxdepth 1 -type f \
-        \( -name 'styles4dogs-*.db' -o -name 'styles4dogs-*.db.sha256' \) \
+        \( -name 'styles4dogs-*.db' -o -name 'styles4dogs-*.db.sha256' -o -name 'styles4dogs-*.db.customer-portal.key' \) \
         -mtime "+$RETENTION_DAYS" -delete
 fi
 

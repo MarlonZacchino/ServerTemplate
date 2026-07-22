@@ -127,8 +127,11 @@ sudo /opt/styles4dogs/bin/styles4dogs-backup
 ```
 
 Das Skript führt `PRAGMA integrity_check` aus und legt zusätzlich eine
-SHA-256-Datei ab. Standardmäßig werden automatische Backups nach 30 Tagen
-entfernt.
+SHA-256-Datei ab. Sobald persönliche Buchungslinks verwendet werden, wird auch
+`customer-portal.key` als geprüfte Sidecar-Datei gesichert. Datenbank und
+Schlüssel müssen gemeinsam aufbewahrt werden, damit bereits versendete Links
+nach einem Restore gültig bleiben. Standardmäßig werden automatische Backups
+nach 30 Tagen entfernt.
 
 ## Restore
 
