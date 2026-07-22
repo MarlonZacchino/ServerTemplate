@@ -306,12 +306,12 @@ static void append_settings_section(
             "<input name=\"min_notice_hours\" type=\"number\" min=\"0\" max=\"8760\" required value=\"");
     append_integer(page, settings->min_notice_minutes / 60);
     str_cat_cstr(page,
-            "\"><span class=\"admin-field-help\">Stunden zwischen der Buchung und dem Termin. Bei 24 kann frühestens ab morgen gebucht werden.</span></label>\n"
+            "\"><span class=\"admin-field-help\">Wie viele Stunden vorher der Termin gebucht werden muss.</span></label>\n"
             "                    <label>Buchbar bis Tage im Voraus"
             "<input name=\"booking_horizon_days\" type=\"number\" min=\"1\" max=\"730\" required value=\"");
     append_integer(page, settings->booking_horizon_days);
     str_cat_cstr(page,
-            "\"><span class=\"admin-field-help\">Wie weit der öffentliche Kalender in die Zukunft reicht.</span></label>\n"
+            "\"><span class=\"admin-field-help\">Bis wann in der Zukunft der öffentliche Kalender Kunden buchen lässt.</span></label>\n"
             "                    <label>Zeitraster"
             "<select name=\"slot_interval_minutes\" required>\n");
 
@@ -334,12 +334,12 @@ static void append_settings_section(
     }
 
     str_cat_cstr(page,
-            "                    </select><span class=\"admin-field-help\">Abstand zwischen möglichen Startzeiten.</span></label>\n"
+            "                    </select><span class=\"admin-field-help\">Abstand zwischen möglichen Buchungszeiten.</span></label>\n"
             "                    <label>Freihaltezeit für offene Anfragen"
             "<input name=\"pending_hold_hours\" type=\"number\" min=\"1\" max=\"168\" required value=\"");
     append_integer(page, settings->pending_hold_minutes / 60);
     str_cat_cstr(page,
-            "\"><span class=\"admin-field-help\">So viele Stunden bleibt ein angefragter Termin für andere Kunden blockiert, wenn er noch nicht angenommen wurde.</span></label>\n"
+            "\"><span class=\"admin-field-help\">So viele Stunden bleibt ein angefragter Termin für andere Kunden blockiert.</span></label>\n"
             "                    <label>Erinnerung vor dem Termin"
             "<input name=\"reminder_lead_hours\" type=\"number\" min=\"1\" max=\"168\" required value=\"");
     append_integer(page, settings->reminder_lead_minutes / 60);
@@ -352,14 +352,14 @@ static void append_settings_section(
         str_cat_cstr(page, " checked");
     }
     str_cat_cstr(page,
-            "> Neue freie Termine automatisch verbindlich bestätigen</label>\n"
+            "> Freie Termine automatisch bestätigen</label>\n"
             "                <label class=\"admin-checkbox\"><input type=\"checkbox\" "
             "name=\"email_notifications_enabled\" value=\"1\"");
     if (settings->email_notifications_enabled) {
         str_cat_cstr(page, " checked");
     }
     str_cat_cstr(page,
-            "> E-Mail-Bestätigungen und Absagen in die Versandwarteschlange stellen</label>\n"
+            "><span class=\"admin-checkbox-copy\"><strong>Kunden bei Buchung, Bestätigung und Absage automatisch per E-Mail informieren</strong><small>Erzeugt Versandaufträge für Eingangsbestätigungen, verbindliche Bestätigungen und Absagen. Der Notification-Worker verschickt diese E-Mails anschließend automatisch.</small></span></label>\n"
             "                <label class=\"admin-checkbox\"><input type=\"checkbox\" "
             "name=\"reminder_enabled\" value=\"1\"");
     if (settings->reminder_enabled) {
@@ -418,17 +418,32 @@ static void append_opening_hours_fields(
             "                <div class=\"opening-day-form\">\n"
             "                    <h3>");
     append_html_text(page, weekday_name(weekday));
-    str_cat_cstr(page, "</h3>\n                    <div class=\"opening-period-grid\">\n");
+    str_cat_cstr(page,
+            "</h3>\n                    <div class=\"opening-period-grid ");
+    str_cat_cstr(
+            page,
+            count >= ADMIN_OPENING_PERIODS_PER_DAY
+                    ? "opening-period-grid-four"
+                    : "opening-period-grid-three");
+    str_cat_cstr(page, "\" data-opening-period-grid>\n");
 
     for (int index = 0; index < ADMIN_OPENING_PERIODS_PER_DAY; index++) {
         char start_name[48];
         char end_name[48];
         bool has_value = (size_t)index < count;
+        bool hide_optional_period = index == ADMIN_OPENING_PERIODS_PER_DAY - 1 &&
+                                    count < ADMIN_OPENING_PERIODS_PER_DAY;
 
         snprintf(start_name, sizeof(start_name), "day_%d_start_%d", weekday, index + 1);
         snprintf(end_name, sizeof(end_name), "day_%d_end_%d", weekday, index + 1);
 
-        str_cat_cstr(page, "                        <div class=\"opening-period\"><span>Zeitraum ");
+        str_cat_cstr(page, "                        <div class=\"opening-period");
+        if (hide_optional_period) {
+            str_cat_cstr(page, " opening-period-optional");
+        }
+        str_cat_cstr(page, "\" data-opening-period=\"");
+        append_integer(page, index + 1);
+        str_cat_cstr(page, "\"><span>Zeitraum ");
         append_integer(page, index + 1);
         str_cat_cstr(page, "</span><label>Von ");
         append_time_input(
@@ -450,10 +465,15 @@ static void append_opening_hours_fields(
                 "                        <p class=\"admin-warning\">Für diesen Tag sind mehr Zeiträume gespeichert, als diese Oberfläche bearbeiten kann. Bitte zuerst technisch bereinigen.</p>\n");
     }
 
+    str_cat_cstr(page, "                    </div>\n");
+    if (count < ADMIN_OPENING_PERIODS_PER_DAY) {
+        str_cat_cstr(page,
+                "                    <button class=\"button button-small button-secondary opening-period-add\" type=\"button\" data-opening-period-add hidden>Vierten Zeitraum hinzufügen</button>\n");
+    }
     str_cat_cstr(page,
-            "                    </div>\n"
             "                    <p class=\"admin-calendar-hint\">Leere Zeiträume werden ignoriert. Sind alle Felder leer, ist der Tag geschlossen.</p>\n"
             "                </div>\n");
+
 }
 
 static void append_opening_hours_section(string *page)
@@ -461,7 +481,7 @@ static void append_opening_hours_section(string *page)
     str_cat_cstr(page,
             "        <section class=\"card admin-calendar-section\" id=\"oeffnungszeiten\">\n"
             "            <p class=\"eyebrow\">Wochenplan</p>\n"
-            "            <h2>Regelmäßige Öffnungszeiten</h2>\n"
+            "            <h2>Öffnungszeiten</h2>\n"
             "            <p>Pro Tag sind bis zu vier getrennte Zeiträume möglich, zum Beispiel vormittags und nachmittags.</p>\n"
             "            <div class=\"opening-days\">\n");
 
@@ -508,7 +528,7 @@ static int append_service_fields(
     str_cat_cstr(page,
             "> Online buchbar</label></div>\n"
             "                    <div class=\"admin-calendar-fields service-admin-fields\">\n"
-            "                        <label>Anzeigename<input name=\"");
+            "                        <label>Name der Leistung<input name=\"");
     snprintf(field_name, sizeof(field_name), "service_%s_name", service->code);
     append_html_text(page, field_name);
     str_cat_cstr(page, "\" maxlength=\"127\" required value=\"");
@@ -518,7 +538,7 @@ static int append_service_fields(
     append_html_text(page, field_name);
     str_cat_cstr(page, "\" type=\"number\" min=\"15\" max=\"720\" step=\"5\" required value=\"");
     append_integer(page, service->duration_minutes);
-    str_cat_cstr(page, "\"></label>\n                        <label>Puffer danach in Minuten<input name=\"");
+    str_cat_cstr(page, "\"></label>\n                        <label>Pause danach in Minuten<input name=\"");
     snprintf(field_name, sizeof(field_name), "service_%s_buffer", service->code);
     append_html_text(page, field_name);
     str_cat_cstr(page, "\" type=\"number\" min=\"0\" max=\"240\" step=\"5\" required value=\"");
@@ -766,8 +786,9 @@ string *admin_calendar_build_page(
             "<a href=\"#buchungsregeln\">Buchungsregeln</a>"
             "<a href=\"#oeffnungszeiten\">Öffnungszeiten</a>"
             "<a href=\"#leistungen\">Leistungen</a>"
-            "<a href=\"#buchungsschutz\">Buchungsschutz</a>"
-            "<a href=\"#sperrzeiten\">Urlaub und Sperrzeiten</a></nav>\n"
+            "<a href=\"#sperrzeiten\">Urlaub und Sperrzeiten</a>"
+            "<a href=\"#speichern\">Änderungen übernehmen</a>"
+            "<a href=\"#buchungsschutz\">Buchungsschutz</a></nav>\n"
             "        </section>\n");
 
     str_cat_cstr(page,
@@ -780,20 +801,21 @@ string *admin_calendar_build_page(
     append_settings_section(page, &settings);
     append_opening_hours_section(page);
     (void)append_services_edit_section(page);
-    str_cat_cstr(page,
-            "            <section class=\"card admin-calendar-section admin-save-section\" id=\"speichern\">"
-            "<div><p class=\"eyebrow\">Abschluss</p><h2>Änderungen übernehmen</h2>"
-            "<p>Dieser Knopf speichert Buchungsregeln, Öffnungszeiten und alle Änderungen an vorhandenen Leistungen in einem Schritt.</p></div>"
-            "<button id=\"calendar-save-bottom\" class=\"button\" type=\"submit\">Alle Einstellungen speichern</button>"
-            "</section>\n"
-            "        </form>\n"
-            "        <div id=\"calendar-save-floating\" class=\"admin-save-floating\">"
-            "<span id=\"calendar-unsaved-label\">Noch keine ungespeicherten Änderungen</span>"
-            "<button class=\"button\" type=\"submit\" form=\"calendar-settings-form\">Alle speichern</button>"
-            "</div>\n");
+    str_cat_cstr(page, "        </form>\n");
 
     append_service_add_section(page, csrf_token);
+    (void)append_closures_section(page, csrf_token);
+
     str_cat_cstr(page,
+            "        <section class=\"card admin-calendar-section admin-save-section\" id=\"speichern\">"
+            "<div><p class=\"eyebrow\">Abschluss</p><h2>Änderungen übernehmen</h2>"
+            "<p>Speichert Buchungsregeln, Öffnungszeiten und Änderungen an vorhandenen Leistungen gemeinsam. Neue Leistungen und Sperrzeiten besitzen eigene Speicherknöpfe.</p></div>"
+            "<button id=\"calendar-save-bottom\" class=\"button\" type=\"submit\" form=\"calendar-settings-form\" disabled>Änderungen speichern</button>"
+            "</section>\n"
+            "        <div id=\"calendar-save-floating\" class=\"admin-save-floating admin-save-floating-hidden\">"
+            "<span id=\"calendar-unsaved-label\">Ungespeicherte Änderungen</span>"
+            "<button class=\"button\" type=\"submit\" form=\"calendar-settings-form\">Änderungen speichern</button>"
+            "</div>\n"
             "        <section class=\"card admin-calendar-section\" id=\"buchungsschutz\">"
             "<p class=\"eyebrow\">Sicherheit</p><h2>Schutz vor Spam und Quatschbuchungen</h2>"
             "<div class=\"booking-protection-grid\">"
@@ -801,9 +823,8 @@ string *admin_calendar_build_page(
             "<div><strong>Kontakt-Limit</strong><span>Maximal drei Anfragen pro E-Mail-Adresse oder Telefonnummer innerhalb von 24 Stunden.</span></div>"
             "<div><strong>Unsichtbare Bot-Falle</strong><span>Automatisierte Formulare, die versteckte Felder ausfüllen, werden nicht gespeichert.</span></div>"
             "<div><strong>Doppelbuchungsschutz</strong><span>Der Termin wird unmittelbar vor dem Speichern noch einmal transaktionssicher geprüft.</span></div>"
-            "</div><p class=\"admin-calendar-hint\">Ein externes CAPTCHA ist zunächst nicht nötig und würde zusätzliche Datenschutz- und Abhängigkeitsfragen verursachen. Bei echtem Missbrauch kann später eine datenschutzfreundliche Challenge ergänzt werden.</p>"
+            "</div><p class=\"admin-calendar-hint\">Diese Schutzmechanismen sind automatisch aktiv. Ein externes CAPTCHA ist derzeit nicht nötig und würde zusätzliche Datenschutz- und Abhängigkeitsfragen verursachen.</p>"
             "</section>\n");
-    (void)append_closures_section(page, csrf_token);
 
     str_cat_cstr(page,
             "    </main>\n"

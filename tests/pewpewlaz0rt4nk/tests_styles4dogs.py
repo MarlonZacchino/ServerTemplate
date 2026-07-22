@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import json
 import os
 import re
@@ -1335,20 +1336,39 @@ def run_stateful_tests() -> int:
         for expected in (
             "Kalender verwalten",
             "Buchungsregeln",
-            "Regelmäßige Öffnungszeiten",
+            'id="oeffnungszeiten"',
             "Leistungen und Dauer",
             "Urlaub und Sperrzeiten",
             "Leistung hinzufügen",
-            "automatisch verbindlich bestätigen",
+            'name="auto_confirm_bookings"',
             "Frühester buchbarer Termin",
             "Freihaltezeit für offene Anfragen",
-            "Alle Einstellungen speichern",
+            "Änderungen speichern",
             "/admin/calendar/save-all",
             "/admin-calendar.js",
+            "opening-period-grid-three",
+            "opening-period-optional",
+            "Vierten Zeitraum hinzufügen",
+            "calendar-save-floating",
             "Buchungsschutz",
         ):
             if expected.encode("utf-8") not in page_body:
                 raise AssertionError(f"Admin-Kalender enthält {expected!r} nicht")
+
+        page_text = page_body.decode("utf-8")
+        closures_position = page_text.find('id="sperrzeiten"')
+        save_position = page_text.find('id="speichern"')
+        protection_position = page_text.find('id="buchungsschutz"')
+        if not (0 <= closures_position < save_position < protection_position):
+            raise AssertionError(
+                "Reihenfolge aus Sperrzeiten, Änderungen übernehmen und Buchungsschutz ist falsch"
+            )
+        save_button_match = re.search(
+            r'<button id="calendar-save-bottom"[^>]*disabled',
+            page_text,
+        )
+        if save_button_match is None:
+            raise AssertionError("Unterer Speicherknopf startet nicht deaktiviert")
 
         csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', page_body)
         if csrf_match is None:
@@ -2063,6 +2083,16 @@ def run_stateful_tests() -> int:
 
         response = raw_request(request_text("GET", "/admin/notifications", auth_headers).encode())
         _, body = assert_status(response, "200 OK")
+        for expected in (
+            b"/admin-notifications.js",
+            b"Vordefinierte Textbausteine",
+            b"Abwesenheitsnotiz einsetzen",
+            b'data-notification-template="booking_received"',
+        ):
+            if expected not in body:
+                raise AssertionError(
+                    f"E-Mail-Adminseite enthält {expected!r} nicht"
+                )
         match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
         if match is None:
             raise AssertionError("CSRF-Token für Vorlagen fehlt")
@@ -2263,9 +2293,41 @@ def run_stateful_tests() -> int:
         ).encode())
         _, month_body = assert_status(month_response, "200 OK")
         month_page = month_body.decode("utf-8")
-        for expected in ("30 Tage", "Bestätigter Termin", "Sperrzeit oder Urlaub"):
+        parsed_month_date = datetime.strptime(row[0], "%Y-%m-%d")
+        month_names = (
+            "Januar", "Februar", "März", "April", "Mai", "Juni",
+            "Juli", "August", "September", "Oktober", "November", "Dezember",
+        )
+        expected_month_label = (
+            f"{month_names[parsed_month_date.month - 1]} {parsed_month_date.year}"
+        )
+        expected_day_count = calendar.monthrange(
+            parsed_month_date.year,
+            parsed_month_date.month,
+        )[1]
+
+        for expected in (
+            "Monat",
+            expected_month_label,
+            "appointment-month",
+            "Details anzeigen",
+            "Termin vorhanden",
+            "Bestätigter Termin",
+            "Sperrzeit oder Urlaub",
+        ):
             if expected not in month_page:
-                raise AssertionError(f"30-Tage-Ansicht enthält {expected!r} nicht")
+                raise AssertionError(f"Monatsansicht enthält {expected!r} nicht")
+
+        rendered_days = len(re.findall(
+            r'<(?:article|details) class="appointment-month-day',
+            month_page,
+        ))
+        if rendered_days != expected_day_count:
+            raise AssertionError(
+                f"Monatsansicht zeigt {rendered_days} statt {expected_day_count} Kalendertage"
+            )
+        if "30 Tage" in month_page:
+            raise AssertionError("Alte 30-Tage-Bezeichnung ist noch sichtbar")
 
 
 
@@ -2458,7 +2520,7 @@ def run_stateful_tests() -> int:
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
     check("Admin individualisiert Bestätigungen, Absagen und bereinigt die Queue", admin_message_templates)
     check("Kunden sehen und stornieren ihre Buchung über einen sicheren Link", customer_portal_cancellation)
-    check("Admin sieht Termine in Tages-, Wochen- und 30-Tage-Ansicht", admin_appointments_workflow)
+    check("Admin sieht Termine in Tages-, Wochen- und Monatsansicht", admin_appointments_workflow)
     check("Rate-Limits schützen PLZ-Abfrage, Buchung und Adminzugang", rate_limiting)
 
     return failures
@@ -2479,6 +2541,7 @@ def main() -> int:
         ("PLZ-JavaScript", "/postal-code.js"),
         ("Kalender-JavaScript", "/calendar.js"),
         ("Admin-Kalender-JavaScript", "/admin-calendar.js"),
+        ("Admin-E-Mail-JavaScript", "/admin-notifications.js"),
         ("Galerie-JavaScript", "/gallery.js"),
         ("Logo", "/logo.jpg"),
     ]

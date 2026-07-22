@@ -82,6 +82,82 @@ static void append_display_date(string *page, const char *date)
     append_html_text(page, display);
 }
 
+static void append_size_value(string *page, size_t value)
+{
+    char text[32];
+
+    snprintf(text, sizeof(text), "%zu", value);
+    append_html_text(page, text);
+}
+
+static bool month_start_for_date(const char *date, char out_start[11])
+{
+    int year;
+    int month;
+    int day;
+
+    if (date == NULL || out_start == NULL ||
+        sscanf(date, "%4d-%2d-%2d", &year, &month, &day) != 3 ||
+        !calendar_date_is_valid(date)) {
+        return false;
+    }
+
+    return snprintf(out_start, 11, "%04d-%02d-01", year, month) == 10;
+}
+
+static bool shift_month(const char *date, int offset, char out_date[11])
+{
+    int year;
+    int month;
+    int day;
+    int shifted;
+
+    if (date == NULL || out_date == NULL || offset < -1200 || offset > 1200 ||
+        sscanf(date, "%4d-%2d-%2d", &year, &month, &day) != 3 ||
+        !calendar_date_is_valid(date)) {
+        return false;
+    }
+
+    shifted = year * 12 + (month - 1) + offset;
+    if (shifted < 1970 * 12 || shifted > 9999 * 12 + 11) {
+        return false;
+    }
+
+    year = shifted / 12;
+    month = shifted % 12 + 1;
+    return snprintf(out_date, 11, "%04d-%02d-01", year, month) == 10;
+}
+
+static const char *month_name(int month)
+{
+    static const char *names[] = {
+        "Januar", "Februar", "März", "April", "Mai", "Juni",
+        "Juli", "August", "September", "Oktober", "November", "Dezember"
+    };
+
+    return month >= 1 && month <= 12 ? names[month - 1] : "Monat";
+}
+
+static void append_month_label(string *page, const char *month_start)
+{
+    int year;
+    int month;
+    int day;
+
+    if (sscanf(month_start, "%4d-%2d-%2d", &year, &month, &day) != 3) {
+        append_html_text(page, month_start);
+        return;
+    }
+
+    append_html_text(page, month_name(month));
+    str_cat_cstr(page, " ");
+    {
+        char year_text[8];
+        snprintf(year_text, sizeof(year_text), "%d", year);
+        append_html_text(page, year_text);
+    }
+}
+
 static const char *decision_label(const char *status)
 {
     if (status != NULL && strcmp(status, "confirmed") == 0) {
@@ -312,13 +388,19 @@ static void append_navigation(
 {
     char previous[11];
     char next[11];
-    int step = strcmp(view, "day") == 0
-            ? 1
-            : (strcmp(view, "month") == 0 ? 30 : 7);
+    int step;
 
-    if (calendar_date_add_days(range_start, -step, previous) != 0 ||
-        calendar_date_add_days(range_start, step, next) != 0) {
-        return;
+    if (strcmp(view, "month") == 0) {
+        if (!shift_month(range_start, -1, previous) ||
+            !shift_month(range_start, 1, next)) {
+            return;
+        }
+    } else {
+        step = strcmp(view, "day") == 0 ? 1 : 7;
+        if (calendar_date_add_days(range_start, -step, previous) != 0 ||
+            calendar_date_add_days(range_start, step, next) != 0) {
+            return;
+        }
     }
 
     str_cat_cstr(page, "<nav class=\"appointment-navigation\" aria-label=\"Kalendernavigation\"><a class=\"button button-small button-secondary\" href=\"/admin/appointments?view=");
@@ -348,6 +430,7 @@ string *admin_appointments_build_page(
     char view[16];
     char selected_date[11];
     char range_start[11];
+    char next_month[11];
     int weekday;
     int day_count;
     string *page;
@@ -362,12 +445,18 @@ string *admin_appointments_build_page(
     }
 
     snprintf(range_start, sizeof(range_start), "%s", selected_date);
-    day_count = strcmp(view, "day") == 0
-            ? 1
-            : (strcmp(view, "month") == 0 ? 30 : 7);
-    if (day_count == 7) {
-        if (calendar_date_iso_weekday(selected_date, &weekday) != 0 ||
-            calendar_date_add_days(selected_date, -(weekday - 1), range_start) != 0) {
+    if (strcmp(view, "month") == 0) {
+        if (!month_start_for_date(selected_date, range_start) ||
+            !shift_month(range_start, 1, next_month) ||
+            calendar_date_days_between(range_start, next_month, &day_count) != 0) {
+            set_error("Monatsansicht konnte nicht berechnet werden");
+            return NULL;
+        }
+    } else {
+        day_count = strcmp(view, "day") == 0 ? 1 : 7;
+        if (day_count == 7 &&
+            (calendar_date_iso_weekday(selected_date, &weekday) != 0 ||
+             calendar_date_add_days(selected_date, -(weekday - 1), range_start) != 0)) {
             set_error("Wochenbeginn konnte nicht berechnet werden");
             return NULL;
         }
@@ -410,8 +499,13 @@ string *admin_appointments_build_page(
     str_cat_cstr(page, strcmp(view, "month") == 0 ? "" : "button-secondary");
     str_cat_cstr(page, "\" href=\"/admin/appointments?view=month&amp;date=");
     append_html_text(page, selected_date);
-    str_cat_cstr(page, "\">30 Tage</a></div>");
+    str_cat_cstr(page, "\">Monat</a></div>");
     append_navigation(page, view, range_start, snapshot.local_date);
+    if (strcmp(view, "month") == 0) {
+        str_cat_cstr(page, "<p class=\"appointment-range-title\">");
+        append_month_label(page, range_start);
+        str_cat_cstr(page, "</p>");
+    }
 
     str_cat_cstr(page,
             "<div class=\"appointment-legend\" aria-label=\"Legende\">"
@@ -432,50 +526,133 @@ string *admin_appointments_build_page(
         snprintf(count, sizeof(count), "%zu", queue_counts.failed);
         append_html_text(page, count);
     }
-    str_cat_cstr(page, "</strong></span></div></section><section class=\"appointment-days ");
+    str_cat_cstr(page, "</strong></span></div></section>");
+
     if (strcmp(view, "month") == 0) {
-        str_cat_cstr(page, "appointment-days-month");
-    }
-    str_cat_cstr(page, "\">");
+        static const char *weekday_labels[] = {"Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"};
+        int first_weekday;
 
-    for (int index = 0; index < day_count; index++) {
-        char date[11];
-        appointment_day_context context = {
-                .page = page,
-                .csrf_token = csrf_token,
-                .date = date,
-                .booking_count = 0,
-                .closure_count = 0
-        };
-
-        if (calendar_date_add_days(range_start, index, date) != 0) {
+        if (calendar_date_iso_weekday(range_start, &first_weekday) != 0) {
             free_str(page);
-            set_error("Kalendertag konnte nicht berechnet werden");
+            set_error("Monatsraster konnte nicht berechnet werden");
             return NULL;
         }
 
-        str_cat_cstr(page, "<section class=\"card appointment-day\"><h2>");
-        append_display_date(page, date);
-        str_cat_cstr(page, "</h2><div class=\"appointment-day-list\">");
-
-        if (calendar_database_for_each_closure_in_range(
-                date, date, append_closure_record, &context) < 0 ||
-            booking_database_for_each_appointment(
-                date, date, append_appointment_record, &context) != 0) {
-            free_str(page);
-            set_error("Termine oder Sperrzeiten konnten nicht geladen werden");
-            return NULL;
+        str_cat_cstr(page, "<section class=\"appointment-month-scroll\"><div class=\"appointment-month\">");
+        for (size_t index = 0; index < sizeof(weekday_labels) / sizeof(weekday_labels[0]); index++) {
+            str_cat_cstr(page, "<div class=\"appointment-month-weekday\">");
+            append_html_text(page, weekday_labels[index]);
+            str_cat_cstr(page, "</div>");
+        }
+        for (int spacer = 1; spacer < first_weekday; spacer++) {
+            str_cat_cstr(page, "<div class=\"appointment-month-spacer\" aria-hidden=\"true\"></div>");
         }
 
-        if (context.booking_count == 0 && context.closure_count == 0) {
-            str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine.</p>");
+        for (int index = 0; index < day_count; index++) {
+            char date[11];
+            int day_number = 0;
+            string *entries = _new_string();
+            appointment_day_context context = {
+                    .page = entries,
+                    .csrf_token = csrf_token,
+                    .date = date,
+                    .booking_count = 0,
+                    .closure_count = 0
+            };
+
+            if (entries == NULL || calendar_date_add_days(range_start, index, date) != 0 ||
+                sscanf(date + 8, "%2d", &day_number) != 1) {
+                free_str(entries);
+                free_str(page);
+                set_error("Kalendertag konnte nicht vorbereitet werden");
+                return NULL;
+            }
+
+            if (calendar_database_for_each_closure_in_range(
+                    date, date, append_closure_record, &context) < 0 ||
+                booking_database_for_each_appointment(
+                    date, date, append_appointment_record, &context) != 0) {
+                free_str(entries);
+                free_str(page);
+                set_error("Termine oder Sperrzeiten konnten nicht geladen werden");
+                return NULL;
+            }
+
+            if (context.booking_count == 0 && context.closure_count == 0) {
+                str_cat_cstr(page, "<article class=\"appointment-month-day appointment-month-day-empty\"><div class=\"appointment-month-day-number\">");
+                append_size_value(page, (size_t)day_number);
+                str_cat_cstr(page, "</div><span>Keine Termine</span></article>");
+                free_str(entries);
+                continue;
+            }
+
+            str_cat_cstr(page, "<details class=\"appointment-month-day\"><summary><span class=\"appointment-month-day-number\">");
+            append_size_value(page, (size_t)day_number);
+            str_cat_cstr(page, "</span><strong>");
+            if (context.booking_count == 0) {
+                str_cat_cstr(page, "Keine Termine vorhanden");
+            } else {
+                append_size_value(page, context.booking_count);
+                str_cat_cstr(page, context.booking_count == 1 ? " Termin vorhanden!" : " Termine vorhanden!");
+            }
+            str_cat_cstr(page, "</strong>");
+            if (context.closure_count > 0) {
+                str_cat_cstr(page, "<small>");
+                append_size_value(page, context.closure_count);
+                str_cat_cstr(page, context.closure_count == 1 ? " Sperrzeit" : " Sperrzeiten");
+                str_cat_cstr(page, "</small>");
+            }
+            str_cat_cstr(page, "<span class=\"appointment-month-toggle\">Details anzeigen</span></summary><div class=\"appointment-month-expanded\"><h2>");
+            append_display_date(page, date);
+            str_cat_cstr(page, "</h2><div class=\"appointment-day-list\">");
+            str_cat(page, entries->str, entries->len);
+            str_cat_cstr(page, "</div></div></details>");
+            free_str(entries);
         }
 
         str_cat_cstr(page, "</div></section>");
+    } else {
+        str_cat_cstr(page, "<section class=\"appointment-days\">");
+        for (int index = 0; index < day_count; index++) {
+            char date[11];
+            appointment_day_context context = {
+                    .page = page,
+                    .csrf_token = csrf_token,
+                    .date = date,
+                    .booking_count = 0,
+                    .closure_count = 0
+            };
+
+            if (calendar_date_add_days(range_start, index, date) != 0) {
+                free_str(page);
+                set_error("Kalendertag konnte nicht berechnet werden");
+                return NULL;
+            }
+
+            str_cat_cstr(page, "<section class=\"card appointment-day\"><h2>");
+            append_display_date(page, date);
+            str_cat_cstr(page, "</h2><div class=\"appointment-day-list\">");
+
+            if (calendar_database_for_each_closure_in_range(
+                    date, date, append_closure_record, &context) < 0 ||
+                booking_database_for_each_appointment(
+                    date, date, append_appointment_record, &context) != 0) {
+                free_str(page);
+                set_error("Termine oder Sperrzeiten konnten nicht geladen werden");
+                return NULL;
+            }
+
+            if (context.booking_count == 0 && context.closure_count == 0) {
+                str_cat_cstr(page, "<p class=\"appointment-empty\">Keine Termine.</p>");
+            }
+
+            str_cat_cstr(page, "</div></section>");
+        }
+        str_cat_cstr(page, "</section>");
     }
 
     str_cat_cstr(page,
-            "</section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\">"
+            "</main><footer class=\"site-footer\"><div class=\"container footer-bottom\">"
             "<small>&copy; 2026 Styling 4 Dogs Admin.</small></div></footer></body></html>");
     return page;
 }

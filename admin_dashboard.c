@@ -168,21 +168,132 @@ string *admin_dashboard_build_page(void)
     appointment_context.confirmed = 0;
 
     str_cat_cstr(
-            page,
-            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Dashboard - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/admin\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs Admin</span></a><nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/admin\" aria-current=\"page\">Übersicht</a><a href=\"/admin/bookings\">Buchungsanfragen</a><a href=\"/admin/appointments\">Termine</a><a href=\"/admin/calendar\">Einstellungen</a><a href=\"/admin/gallery\">Fotos</a><a href=\"/admin/notifications\">E-Mail</a></nav></div></header><main class=\"page admin-page admin-dashboard-page\"><section class=\"card admin-card dashboard-intro\"><p class=\"eyebrow\">Salonübersicht</p><h1>Guten Überblick behalten.</h1><p>Die wichtigsten Aufgaben, Termine und Hinweise auf einen Blick.</p></section><section class=\"dashboard-summary-grid\"><a class=\"dashboard-summary-card\" href=\"/admin/bookings\"><span>Buchungen insgesamt</span><strong>");
-    append_size(page, booking_counts.total);
-    str_cat_cstr(page, "</strong><small>Anfragen verwalten</small></a><a class=\"dashboard-summary-card\" href=\"/admin/bookings?status=neu\"><span>Neue Buchungen</span><strong>");
-    append_size(page, booking_counts.new_count);
-    str_cat_cstr(page, "</strong><small>Noch nicht bearbeitet</small></a><a class=\"dashboard-summary-card\" href=\"/admin/notifications\"><span>Fehlgeschlagene E-Mails</span><strong>");
-    append_size(page, notification_counts.failed);
-    str_cat_cstr(page, "</strong><small>Versand prüfen</small></a><a class=\"dashboard-summary-card\" href=\"/admin/notifications\"><span>Ausstehende E-Mails</span><strong>");
-    append_size(page, notification_counts.pending);
-    str_cat_cstr(page, "</strong><small>Warteschlange öffnen</small></a></section><section class=\"card admin-card dashboard-today\"><div class=\"dashboard-section-heading\"><div><p class=\"eyebrow\">Heute</p><h2>");
-    append_html(page, date_display);
-    str_cat_cstr(page, "</h2></div><a class=\"button button-small button-secondary\" href=\"/admin/appointments?view=day&amp;date=");
-    append_html(page, snapshot.local_date);
-    str_cat_cstr(page, "\">Kalender öffnen</a></div><div class=\"dashboard-appointment-list\">");
+    page,
+    "<!doctype html>"
+    "<html lang=\"de\">"
+    "<head>"
+        "<meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<meta name=\"robots\" content=\"noindex,nofollow\">"
+        "<title>Dashboard - Styling 4 Dogs</title>"
+        "<link rel=\"stylesheet\" href=\"/style.css\">"
+    "</head>"
+    "<body>"
+        "<header class=\"site-header\">"
+            "<div class=\"container nav-wrap\">"
+                "<a class=\"brand\" href=\"/admin\">"
+                    "<span class=\"brand-mark brand-mark-logo\">"
+                        "<img src=\"/logo.jpg\" alt=\"\">"
+                    "</span>"
+                    "<span>Styling 4 Dogs Admin</span>"
+                "</a>"
 
+                "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
+                    "<a href=\"/admin\" aria-current=\"page\">Übersicht</a>"
+                    "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
+                    "<a href=\"/admin/appointments\">Termine</a>"
+                    "<a href=\"/admin/calendar\">Einstellungen</a>"
+                    "<a href=\"/admin/gallery\">Fotos</a>"
+                    "<a href=\"/admin/notifications\">E-Mail</a>"
+                "</nav>"
+            "</div>"
+        "</header>"
+
+        "<main class=\"page admin-page admin-dashboard-page\">"
+            "<section class=\"card admin-card dashboard-intro\">"
+                "<p class=\"eyebrow\">Salonübersicht</p>"
+                "<h1>Dein Dashboard</h1>"
+                "<p>"
+                    "Hier verwaltest du Buchungen, Termine, Fotos und E-Mails."
+                "</p>"
+            "</section>"
+
+            "<section class=\"dashboard-summary-grid\">"
+                "<a class=\"dashboard-summary-card\" href=\"/admin/bookings\">"
+                    "<span>Buchungen insgesamt</span>"
+                    "<strong>"
+);
+
+append_size(page, booking_counts.total);
+
+str_cat_cstr(
+    page,
+                    "</strong>"
+                    "<small>Anfragen verwalten</small>"
+                "</a>"
+
+                "<a class=\"dashboard-summary-card\" "
+                   "href=\"/admin/bookings?status=neu\">"
+                    "<span>Neue Buchungen</span>"
+                    "<strong>"
+);
+
+append_size(page, booking_counts.new_count);
+
+str_cat_cstr(
+    page,
+                    "</strong>"
+                    "<small>Noch nicht bearbeitet</small>"
+                "</a>"
+
+                "<a class=\"dashboard-summary-card\" "
+                   "href=\"/admin/notifications\">"
+                    "<span>Fehlgeschlagene E-Mails</span>"
+                    "<strong>"
+);
+
+append_size(page, notification_counts.failed);
+
+str_cat_cstr(
+    page,
+                    "</strong>"
+                    "<small>Versand prüfen</small>"
+                "</a>"
+
+                "<a class=\"dashboard-summary-card\" "
+                   "href=\"/admin/notifications\">"
+                    "<span>Ausstehende E-Mails</span>"
+                    "<strong>"
+);
+
+append_size(page, notification_counts.pending);
+
+str_cat_cstr(
+    page,
+                    "</strong>"
+                    "<small>Warteschlange öffnen</small>"
+                "</a>"
+            "</section>"
+
+            "<section class=\"card admin-card dashboard-today\">"
+                "<div class=\"dashboard-section-heading\">"
+                    "<div>"
+                        "<p class=\"eyebrow\">Heute</p>"
+                        "<h2>"
+);
+
+append_html(page, date_display);
+
+str_cat_cstr(
+    page,
+                        "</h2>"
+                    "</div>"
+
+                    "<a class=\"button button-small button-secondary\" "
+                       "href=\"/admin/appointments?view=day&amp;date="
+);
+
+append_html(page, snapshot.local_date);
+
+str_cat_cstr(
+    page,
+                    "\">"
+                        "Kalender öffnen"
+                    "</a>"
+                "</div>"
+
+                "<div class=\"dashboard-appointment-list\">"
+);
     if (booking_database_for_each_appointment(
             snapshot.local_date,
             snapshot.local_date,
