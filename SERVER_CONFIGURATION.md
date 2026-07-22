@@ -26,6 +26,7 @@ ein Netzwerk-Socket erstellt wird.
 | `STYLES4DOGS_SALON_PHONE` | leer | Salontelefonnummer in E-Mails |
 | `STYLES4DOGS_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | öffentliche Basis-URL für spätere Kundenlinks |
 | `STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE` | `49` | Landesvorwahl für lokale Telefon-/WhatsApp-Links |
+| `STYLES4DOGS_POSTAL_LOOKUP_BASE_URL` | `https://openplzapi.org/de/Localities` | fester Endpoint für die serverseitige PLZ-Ort-Abfrage; keine Query anhängen |
 
 `STYLES4DOGS_BOOKING_FILE` wird vorläufig als rückwärtskompatibler Alias für
 `STYLES4DOGS_LEGACY_BOOKING_FILE` akzeptiert. Neue Konfigurationen sollen nur
@@ -89,6 +90,11 @@ Der öffentliche Webverkehr soll nicht direkt auf den C-Server treffen. Der
 Standard bleibt deshalb `127.0.0.1`; Caddy oder nginx übernimmt davor HTTPS und
 Proxy-Schutz. Eine abweichende Bind-Adresse muss bewusst gesetzt werden.
 
+Im produktiven systemd-Dienst darf der C-Server nur localhost erreichen. Die
+Installationsvorlage setzt die PLZ-Abfrage deshalb auf den lokalen Caddy-Proxy
+`http://127.0.0.1:31339/de/Localities`. Details stehen in
+`ADDRESS_PHASE10.md` und `CADDY_DEPLOYMENT.md`.
+
 ## Validierung
 
 Der Start wird unter anderem abgebrochen bei:
@@ -97,7 +103,8 @@ Der Start wird unter anderem abgebrochen bei:
 - Port `0` oder größer als `65535`,
 - fehlendem oder nicht lesbarem Document Root,
 - leeren oder zu langen Pfaden,
-- bereits vorhandenen Daten-/Secret-Pfaden, die keine Verzeichnisse sind.
+- bereits vorhandenen Daten-/Secret-Pfaden, die keine Verzeichnisse sind,
+- einer PLZ-Abfrage-URL ohne `http://` oder `https://` beziehungsweise mit bereits enthaltener Query oder Fragment.
 
 Passwörter und CSRF-Token gehören nicht in Umgebungsvariablen. Die
 Admin-Anmeldedaten bleiben ausschließlich in der geschützten `admin.auth`. Das

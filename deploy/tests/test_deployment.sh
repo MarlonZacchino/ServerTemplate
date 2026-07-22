@@ -29,6 +29,7 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/index.html" ]]
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/galerie.html" ]]
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/gallery.js" ]]
+[[ -f "$STAGING_ROOT/var/www/styles4dogs/postal-code.js" ]]
 [[ -f "$STAGING_ROOT/var/www/styles4dogs/logo.jpg" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/server.env" ]]
 [[ -f "$STAGING_ROOT/etc/styles4dogs/notification.env" ]]
@@ -43,6 +44,7 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CALENDAR_PHASE6.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/GALLERY_PHASE8.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/CUSTOMER_PORTAL_PHASE9.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/ADDRESS_PHASE10.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
@@ -52,6 +54,8 @@ grep -Eq '^STYLES4DOGS_TRUSTED_PROXY_TOKEN=[A-Za-z0-9_-]{32,128}$' \
 grep -Fq 'STYLES4DOGS_SALON_NAME=Styling 4 Dogs' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Fq 'STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49' \
+    "$STAGING_ROOT/etc/styles4dogs/server.env"
+grep -Fq 'STYLES4DOGS_POSTAL_LOOKUP_BASE_URL=http://127.0.0.1:31339/de/Localities' \
     "$STAGING_ROOT/etc/styles4dogs/server.env"
 grep -Fq 'STYLES4DOGS_SMTP_FROM_NAME=Styling 4 Dogs' \
     "$STAGING_ROOT/etc/styles4dogs/notification.env"
@@ -100,9 +104,15 @@ grep -Fq '@gallery_upload_body path /admin/gallery/upload' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 grep -Fq 'log_skip /buchung/*' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq 'replace postal_code REDACTED' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 grep -Fq '>Referrer-Policy "no-referrer"' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 grep -Fq 'max_size 9MiB' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq 'http://127.0.0.1:31339' \
+    "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
+grep -Fq 'reverse_proxy https://openplzapi.org' \
     "$STAGING_ROOT/etc/caddy/conf.d/styles4dogs.caddy"
 
 if command -v systemd-analyze >/dev/null 2>&1; then

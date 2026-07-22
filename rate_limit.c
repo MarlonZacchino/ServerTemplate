@@ -13,6 +13,11 @@
 #define BOOKING_GLOBAL_LIMIT 120U
 #define BOOKING_GLOBAL_WINDOW_SECONDS 60U
 
+#define POSTAL_CLIENT_LIMIT 30U
+#define POSTAL_CLIENT_WINDOW_SECONDS 60U
+#define POSTAL_GLOBAL_LIMIT 300U
+#define POSTAL_GLOBAL_WINDOW_SECONDS 60U
+
 #define ADMIN_FAILURE_LIMIT 10U
 #define ADMIN_FAILURE_WINDOW_SECONDS 600U
 
@@ -26,9 +31,12 @@ typedef struct rate_limit_entry {
 } rate_limit_entry;
 
 static rate_limit_entry booking_clients[RATE_LIMIT_CLIENT_CAPACITY];
+static rate_limit_entry postal_clients[RATE_LIMIT_CLIENT_CAPACITY];
 static rate_limit_entry admin_clients[RATE_LIMIT_CLIENT_CAPACITY];
 static uint64_t booking_global_window_started;
 static unsigned int booking_global_attempts;
+static uint64_t postal_global_window_started;
+static unsigned int postal_global_attempts;
 
 static uint64_t monotonic_seconds(void)
 {
@@ -205,6 +213,62 @@ bool rate_limit_allow_booking(
     return true;
 }
 
+bool rate_limit_allow_postal_lookup(
+        const char *client_ip,
+        unsigned int *retry_after_seconds
+)
+{
+    uint64_t now;
+    rate_limit_entry *entry;
+
+    if (retry_after_seconds != NULL) {
+        *retry_after_seconds = 1;
+    }
+
+    if (!valid_client_ip(client_ip)) {
+        return false;
+    }
+
+    now = monotonic_seconds();
+
+    if (postal_global_window_started == 0 ||
+        now < postal_global_window_started ||
+        now - postal_global_window_started >= POSTAL_GLOBAL_WINDOW_SECONDS) {
+        postal_global_window_started = now;
+        postal_global_attempts = 0;
+    }
+
+    if (postal_global_attempts >= POSTAL_GLOBAL_LIMIT) {
+        if (retry_after_seconds != NULL) {
+            *retry_after_seconds = retry_after(
+                    now,
+                    postal_global_window_started,
+                    POSTAL_GLOBAL_WINDOW_SECONDS);
+        }
+        return false;
+    }
+
+    entry = find_or_allocate(postal_clients, client_ip, now);
+    if (entry == NULL) {
+        return false;
+    }
+
+    reset_expired_window(entry, now, POSTAL_CLIENT_WINDOW_SECONDS);
+    if (entry->attempts >= POSTAL_CLIENT_LIMIT) {
+        if (retry_after_seconds != NULL) {
+            *retry_after_seconds = retry_after(
+                    now,
+                    entry->window_started,
+                    POSTAL_CLIENT_WINDOW_SECONDS);
+        }
+        return false;
+    }
+
+    entry->attempts++;
+    postal_global_attempts++;
+    return true;
+}
+
 bool rate_limit_admin_is_blocked(
         const char *client_ip,
         unsigned int *retry_after_seconds
@@ -286,7 +350,10 @@ void rate_limit_clear_admin_failures(const char *client_ip)
 void rate_limit_reset(void)
 {
     memset(booking_clients, 0, sizeof(booking_clients));
+    memset(postal_clients, 0, sizeof(postal_clients));
     memset(admin_clients, 0, sizeof(admin_clients));
     booking_global_window_started = 0;
     booking_global_attempts = 0;
+    postal_global_window_started = 0;
+    postal_global_attempts = 0;
 }

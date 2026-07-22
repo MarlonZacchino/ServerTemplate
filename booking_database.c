@@ -196,6 +196,9 @@ static int create_schema(void)
             "    status TEXT NOT NULL DEFAULT 'neu',"
             "    customer_name TEXT NOT NULL,"
             "    contact TEXT NOT NULL,"
+            "    street_address TEXT NOT NULL DEFAULT '',"
+            "    postal_code TEXT NOT NULL DEFAULT '',"
+            "    city TEXT NOT NULL DEFAULT '',"
             "    dog_name TEXT NOT NULL DEFAULT '',"
             "    dog_size TEXT NOT NULL DEFAULT '',"
             "    service TEXT NOT NULL DEFAULT '',"
@@ -782,16 +785,16 @@ int booking_database_insert(const booking_request *booking)
 
     const char *insert_sql = booking_calendar_columns_exist()
             ? "INSERT INTO bookings("
-              "created_at, status, customer_name, contact, dog_name, dog_size, "
-              "service, preferred_date, message, legacy, service_id, decision_status"
+              "created_at, status, customer_name, contact, street_address, postal_code, city, "
+              "dog_name, dog_size, service, preferred_date, message, legacy, service_id, decision_status"
               ") VALUES("
-              "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, "
-              "(SELECT id FROM services WHERE code = ?7), 'legacy'"
+              "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, "
+              "(SELECT id FROM services WHERE code = ?10), 'legacy'"
               ");"
             : "INSERT INTO bookings("
-              "created_at, status, customer_name, contact, dog_name, dog_size, "
-              "service, preferred_date, message, legacy"
-              ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0);";
+              "created_at, status, customer_name, contact, street_address, postal_code, city, "
+              "dog_name, dog_size, service, preferred_date, message, legacy"
+              ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0);";
 
     if (sqlite3_prepare_v2(
             database,
@@ -807,11 +810,14 @@ int booking_database_insert(const booking_request *booking)
         bind_text(statement, 2, BOOKING_STATUS_NEW) != 0 ||
         bind_text(statement, 3, booking->name) != 0 ||
         bind_text(statement, 4, booking->contact) != 0 ||
-        bind_text(statement, 5, booking->dog_name) != 0 ||
-        bind_text(statement, 6, booking->dog_size) != 0 ||
-        bind_text(statement, 7, booking->service) != 0 ||
-        bind_text(statement, 8, booking->preferred_date) != 0 ||
-        bind_text(statement, 9, booking->message) != 0) {
+        bind_text(statement, 5, booking->street_address) != 0 ||
+        bind_text(statement, 6, booking->postal_code) != 0 ||
+        bind_text(statement, 7, booking->city) != 0 ||
+        bind_text(statement, 8, booking->dog_name) != 0 ||
+        bind_text(statement, 9, booking->dog_size) != 0 ||
+        bind_text(statement, 10, booking->service) != 0 ||
+        bind_text(statement, 11, booking->preferred_date) != 0 ||
+        bind_text(statement, 12, booking->message) != 0) {
         set_sqlite_error("Buchungswerte konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -901,7 +907,7 @@ int booking_database_for_each_filtered(
 
     if (sqlite3_prepare_v2(
             database,
-            "SELECT id, created_at, status, customer_name, contact, dog_name, "
+            "SELECT id, created_at, status, customer_name, contact, street_address, postal_code, city, dog_name, "
             "       dog_size, service, preferred_date, message, legacy, "
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
@@ -913,6 +919,9 @@ int booking_database_for_each_filtered(
             "       OR contact LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR email LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR phone_number LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR street_address LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR postal_code LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
+            "       OR city LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR dog_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
             "       OR CAST(id AS TEXT) LIKE ?2 ESCAPE '\\') "
             "ORDER BY created_at DESC, id DESC;",
@@ -947,31 +956,34 @@ int booking_database_for_each_filtered(
                 .status = column_text_or_empty(statement, 2),
                 .name = column_text_or_empty(statement, 3),
                 .contact = column_text_or_empty(statement, 4),
-                .dog_name = column_text_or_empty(statement, 5),
-                .dog_size = column_text_or_empty(statement, 6),
-                .service = column_text_or_empty(statement, 7),
-                .preferred_date = column_text_or_empty(statement, 8),
-                .message = column_text_or_empty(statement, 9),
-                .legacy = sqlite3_column_int(statement, 10) != 0,
-                .appointment_date = column_text_or_empty(statement, 11),
-                .start_minute = sqlite3_column_type(statement, 12) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 12),
-                .end_minute = sqlite3_column_type(statement, 13) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 13),
-                .decision_status = column_text_or_empty(statement, 14),
-                .hold_expires_at = column_text_or_empty(statement, 15),
-                .contact_channel = column_text_or_empty(statement, 16),
-                .email = column_text_or_empty(statement, 17),
-                .phone_number = column_text_or_empty(statement, 18),
-                .phone_kind = column_text_or_empty(statement, 19),
-                .contact_preference = column_text_or_empty(statement, 20),
-                .decision_at = column_text_or_empty(statement, 21),
-                .rejection_reason = column_text_or_empty(statement, 22),
-                .service_name_snapshot = column_text_or_empty(statement, 23),
-                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 24) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 24),
-                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 25) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 25)
+                .street_address = column_text_or_empty(statement, 5),
+                .postal_code = column_text_or_empty(statement, 6),
+                .city = column_text_or_empty(statement, 7),
+                .dog_name = column_text_or_empty(statement, 8),
+                .dog_size = column_text_or_empty(statement, 9),
+                .service = column_text_or_empty(statement, 10),
+                .preferred_date = column_text_or_empty(statement, 11),
+                .message = column_text_or_empty(statement, 12),
+                .legacy = sqlite3_column_int(statement, 13) != 0,
+                .appointment_date = column_text_or_empty(statement, 14),
+                .start_minute = sqlite3_column_type(statement, 15) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 15),
+                .end_minute = sqlite3_column_type(statement, 16) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 16),
+                .decision_status = column_text_or_empty(statement, 17),
+                .hold_expires_at = column_text_or_empty(statement, 18),
+                .contact_channel = column_text_or_empty(statement, 19),
+                .email = column_text_or_empty(statement, 20),
+                .phone_number = column_text_or_empty(statement, 21),
+                .phone_kind = column_text_or_empty(statement, 22),
+                .contact_preference = column_text_or_empty(statement, 23),
+                .decision_at = column_text_or_empty(statement, 24),
+                .rejection_reason = column_text_or_empty(statement, 25),
+                .service_name_snapshot = column_text_or_empty(statement, 26),
+                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 27) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 27),
+                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 28) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 28)
         };
 
         callback(&record, context);
@@ -1007,7 +1019,7 @@ int booking_database_for_each_appointment(
 
     if (sqlite3_prepare_v2(
             database,
-            "SELECT id, created_at, status, customer_name, contact, dog_name, "
+            "SELECT id, created_at, status, customer_name, contact, street_address, postal_code, city, dog_name, "
             "       dog_size, service, preferred_date, message, legacy, "
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
@@ -1034,31 +1046,34 @@ int booking_database_for_each_appointment(
                 .status = column_text_or_empty(statement, 2),
                 .name = column_text_or_empty(statement, 3),
                 .contact = column_text_or_empty(statement, 4),
-                .dog_name = column_text_or_empty(statement, 5),
-                .dog_size = column_text_or_empty(statement, 6),
-                .service = column_text_or_empty(statement, 7),
-                .preferred_date = column_text_or_empty(statement, 8),
-                .message = column_text_or_empty(statement, 9),
-                .legacy = sqlite3_column_int(statement, 10) != 0,
-                .appointment_date = column_text_or_empty(statement, 11),
-                .start_minute = sqlite3_column_type(statement, 12) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 12),
-                .end_minute = sqlite3_column_type(statement, 13) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 13),
-                .decision_status = column_text_or_empty(statement, 14),
-                .hold_expires_at = column_text_or_empty(statement, 15),
-                .contact_channel = column_text_or_empty(statement, 16),
-                .email = column_text_or_empty(statement, 17),
-                .phone_number = column_text_or_empty(statement, 18),
-                .phone_kind = column_text_or_empty(statement, 19),
-                .contact_preference = column_text_or_empty(statement, 20),
-                .decision_at = column_text_or_empty(statement, 21),
-                .rejection_reason = column_text_or_empty(statement, 22),
-                .service_name_snapshot = column_text_or_empty(statement, 23),
-                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 24) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 24),
-                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 25) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 25)
+                .street_address = column_text_or_empty(statement, 5),
+                .postal_code = column_text_or_empty(statement, 6),
+                .city = column_text_or_empty(statement, 7),
+                .dog_name = column_text_or_empty(statement, 8),
+                .dog_size = column_text_or_empty(statement, 9),
+                .service = column_text_or_empty(statement, 10),
+                .preferred_date = column_text_or_empty(statement, 11),
+                .message = column_text_or_empty(statement, 12),
+                .legacy = sqlite3_column_int(statement, 13) != 0,
+                .appointment_date = column_text_or_empty(statement, 14),
+                .start_minute = sqlite3_column_type(statement, 15) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 15),
+                .end_minute = sqlite3_column_type(statement, 16) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 16),
+                .decision_status = column_text_or_empty(statement, 17),
+                .hold_expires_at = column_text_or_empty(statement, 18),
+                .contact_channel = column_text_or_empty(statement, 19),
+                .email = column_text_or_empty(statement, 20),
+                .phone_number = column_text_or_empty(statement, 21),
+                .phone_kind = column_text_or_empty(statement, 22),
+                .contact_preference = column_text_or_empty(statement, 23),
+                .decision_at = column_text_or_empty(statement, 24),
+                .rejection_reason = column_text_or_empty(statement, 25),
+                .service_name_snapshot = column_text_or_empty(statement, 26),
+                .service_duration_minutes_snapshot = sqlite3_column_type(statement, 27) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 27),
+                .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 28) == SQLITE_NULL
+                        ? -1 : sqlite3_column_int(statement, 28)
         };
 
         callback(&record, context);

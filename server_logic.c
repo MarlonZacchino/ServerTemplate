@@ -21,6 +21,7 @@
 #include "calendar_database.h"
 #include "http_lib.h"
 #include "process.h"
+#include "postal_lookup.h"
 #include "rate_limit.h"
 #include "server_config.h"
 
@@ -43,6 +44,7 @@
 typedef enum request_kind {
     REQUEST_KIND_OTHER = 0,
     REQUEST_KIND_BOOKING,
+    REQUEST_KIND_POSTAL_LOOKUP,
     REQUEST_KIND_ADMIN
 } request_kind;
 
@@ -508,6 +510,11 @@ static request_kind classify_request(
         return REQUEST_KIND_BOOKING;
     }
 
+    if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0) &&
+        strcmp(path, "/api/postal-code") == 0) {
+        return REQUEST_KIND_POSTAL_LOOKUP;
+    }
+
     if ((strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0 ||
          strcmp(method, "POST") == 0) &&
         strncmp(path, "/admin/", strlen("/admin/")) == 0) {
@@ -733,6 +740,9 @@ static int handle_raw_request(
 
     if (kind == REQUEST_KIND_BOOKING &&
         !rate_limit_allow_booking(client_ip, &retry_after_seconds)) {
+        response = make_too_many_requests_response(retry_after_seconds);
+    } else if (kind == REQUEST_KIND_POSTAL_LOOKUP &&
+               !rate_limit_allow_postal_lookup(client_ip, &retry_after_seconds)) {
         response = make_too_many_requests_response(retry_after_seconds);
     } else if (kind == REQUEST_KIND_ADMIN &&
                rate_limit_admin_is_blocked(client_ip, &retry_after_seconds)) {
@@ -1011,5 +1021,6 @@ int main(int argc, char *argv[])
 
     calendar_database_shutdown();
     booking_database_shutdown();
+    postal_lookup_shutdown();
     return EXIT_SUCCESS;
 }

@@ -35,4 +35,7 @@ const char *server_config_salon_phone(void);
 const char *server_config_public_base_url(void);
 const char *server_config_default_phone_country_code(void);
 
+/* Festes Upstream-Ziel für die serverseitige PLZ-Ort-Abfrage. */
+const char *server_config_postal_lookup_base_url(void);
+
 #endif

@@ -21,6 +21,7 @@
         format filter {
             request>uri query {
                 replace q REDACTED
+                replace postal_code REDACTED
             }
             request>remote_ip ip_mask 24 48
             request>client_ip ip_mask 24 48
@@ -77,6 +78,29 @@
                 dial_timeout 2s
                 response_header_timeout 30s
             }
+        }
+    }
+}
+
+# Interner, ausschließlich an localhost gebundener Upstream für die
+# PLZ-Ort-Abfrage. Der C-Server darf durch systemd nur localhost erreichen;
+# Caddy übernimmt TLS und DNS zum fest vorgegebenen OpenPLZ-Dienst.
+http://127.0.0.1:31339 {
+    bind 127.0.0.1
+
+    log {
+        output discard
+    }
+
+    header -Server
+
+    reverse_proxy https://openplzapi.org {
+        header_up Host openplzapi.org
+
+        transport http {
+            tls_server_name openplzapi.org
+            dial_timeout 2s
+            response_header_timeout 3s
         }
     }
 }

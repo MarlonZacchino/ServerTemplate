@@ -15,7 +15,7 @@ HTTPS-Verkehr wird über Caddy weitergeleitet.
 /etc/styles4dogs/notification.env       optionaler SMTP-Migrations-Fallback
 /etc/styles4dogs/secrets/admin.auth     vom Server erzeugtes Admin-Secret
 /etc/styles4dogs/secrets/notification.* verschlüsselte SMTP-Verbindung
-/var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank inklusive Galerie
+/var/lib/styles4dogs/styles4dogs.db     SQLite-Datenbank inklusive Galerie und Kundenanschriften
 /var/backups/styles4dogs/               geprüfte Online-Backups
 ```
 
@@ -80,7 +80,10 @@ Der lokale Test ist danach unter `http://127.0.0.1:8080` erreichbar. Für eine
 ausgeführt. Vollständige Hinweise zu DNS, HTTPS, Sicherheitsheadern und Logs
 stehen in `CADDY_DEPLOYMENT.md`. Caddy und Backend erhalten dabei automatisch
 dasselbe Proxy-Token, damit nur die eigene Proxy-Instanz Client-IP-Angaben
-weitergeben darf. Die internen Limits sind in `RATE_LIMITING.md` beschrieben.
+weitergeben darf. Die internen Limits sind in `RATE_LIMITING.md` beschrieben. Caddy stellt
+zusätzlich einen ausschließlich auf localhost gebundenen Upstream für die
+PLZ-Ort-Abfrage bereit; dessen Konfiguration ist Voraussetzung für die
+Adress-Autovervollständigung im gehärteten Produktivdienst.
 
 ## Ersteinrichtung des Adminzugangs
 

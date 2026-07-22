@@ -12,8 +12,10 @@ LEGACY_BOOKING_FILE="$DATA_DIR/bookings.txt"
 SERVER_LOG="$BUILD_DIR/server.log"
 NOTIFICATION_OUTPUT_DIR="$BUILD_DIR/notification-out"
 SERVER_PID=""
+POSTAL_MOCK_PID=""
 TEST_HOST=127.0.0.1
 TEST_PORT=31338
+POSTAL_MOCK_PORT=31339
 TEST_PROXY_TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 SERVER_ENV=(
@@ -23,12 +25,17 @@ SERVER_ENV=(
     "STYLES4DOGS_SECRETS_DIR=$SECRETS_DIR"
     "STYLES4DOGS_DATA_DIR=$DATA_DIR"
     "STYLES4DOGS_TRUSTED_PROXY_TOKEN=$TEST_PROXY_TOKEN"
+    "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL=http://$TEST_HOST:$POSTAL_MOCK_PORT/de/Localities"
 )
 
 cleanup() {
     if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$POSTAL_MOCK_PID" ]] && kill -0 "$POSTAL_MOCK_PID" 2>/dev/null; then
+        kill "$POSTAL_MOCK_PID" 2>/dev/null || true
+        wait "$POSTAL_MOCK_PID" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -86,6 +93,77 @@ env \
     "$BUILD_DIR/calendar_engine_tests"
 
 : > "$SERVER_LOG"
+
+python3 - "$TEST_HOST" "$POSTAL_MOCK_PORT" <<'PY' &
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
+        parsed = urlparse(self.path)
+        postal_code = parse_qs(parsed.query).get("postalCode", [""])[0]
+
+        if parsed.path != "/de/Localities":
+            self.send_error(404)
+            return
+
+        payload = []
+        if postal_code == "26121":
+            payload = [{"name": "Oldenburg", "postalCode": postal_code}]
+        elif postal_code == "12345":
+            payload = [
+                {"name": "Beispielstadt", "postalCode": postal_code},
+                {"name": "Beispieldorf", "postalCode": postal_code},
+            ]
+
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):  # noqa: A002 - inherited name
+        return
+
+
+ThreadingHTTPServer((host, port), Handler).serve_forever()
+PY
+POSTAL_MOCK_PID=$!
+
+python3 - "$POSTAL_MOCK_PID" "$TEST_HOST" "$POSTAL_MOCK_PORT" <<'PY'
+import socket
+import sys
+import time
+
+pid = int(sys.argv[1])
+host = sys.argv[2]
+port = int(sys.argv[3])
+last_error = None
+
+for _ in range(50):
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            raise SystemExit(0)
+    except OSError as error:
+        last_error = error
+        time.sleep(0.1)
+
+print(f"PLZ-Mockdienst wurde nicht erreichbar (PID {pid}): {last_error}", file=sys.stderr)
+raise SystemExit(1)
+PY
+
+if ! kill -0 "$POSTAL_MOCK_PID" 2>/dev/null; then
+    echo "Der PLZ-Mockdienst wurde unerwartet beendet." >&2
+    exit 1
+fi
+
 env "${SERVER_ENV[@]}" \
     "$BUILD_DIR/Server" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
@@ -205,3 +283,7 @@ assert_configuration_rejected \
     "Ungültige Telefon-Landesvorwahl" \
     "STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE darf nicht mit 0 beginnen" \
     "STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=049"
+assert_configuration_rejected \
+    "Ungültige PLZ-Abfrage-URL" \
+    "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL muss mit http:// oder https:// beginnen" \
+    "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL=ftp://example.invalid/de/Localities"

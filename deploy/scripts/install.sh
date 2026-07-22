@@ -210,6 +210,7 @@ install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE5.md" "$APP_PATH/share/
 install_file 0644 root root "$PROJECT_ROOT/CALENDAR_PHASE6.md" "$APP_PATH/share/CALENDAR_PHASE6.md"
 install_file 0644 root root "$PROJECT_ROOT/GALLERY_PHASE8.md" "$APP_PATH/share/GALLERY_PHASE8.md"
 install_file 0644 root root "$PROJECT_ROOT/CUSTOMER_PORTAL_PHASE9.md" "$APP_PATH/share/CUSTOMER_PORTAL_PHASE9.md"
+install_file 0644 root root "$PROJECT_ROOT/ADDRESS_PHASE10.md" "$APP_PATH/share/ADDRESS_PHASE10.md"
 install_file 0644 root root "$PROJECT_ROOT/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
 
 case "$WEB_PATH" in
@@ -269,6 +270,7 @@ STYLES4DOGS_SALON_ADDRESS=
 STYLES4DOGS_SALON_PHONE=
 STYLES4DOGS_PUBLIC_BASE_URL=http://127.0.0.1:8080
 STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE=49
+STYLES4DOGS_POSTAL_LOOKUP_BASE_URL=http://127.0.0.1:31339/de/Localities
 EOF_ENV
 fi
 
@@ -290,6 +292,7 @@ ensure_env_setting STYLES4DOGS_SALON_ADDRESS ''
 ensure_env_setting STYLES4DOGS_SALON_PHONE ''
 ensure_env_setting STYLES4DOGS_PUBLIC_BASE_URL 'http://127.0.0.1:8080'
 ensure_env_setting STYLES4DOGS_DEFAULT_PHONE_COUNTRY_CODE '49'
+ensure_env_setting STYLES4DOGS_POSTAL_LOOKUP_BASE_URL 'http://127.0.0.1:31339/de/Localities'
 
 # Migrate only the former built-in brand value. Custom salon names remain untouched.
 if grep -Fxq 'STYLES4DOGS_SALON_NAME=Styles 4 Dogs' "$ENV_PATH"; then

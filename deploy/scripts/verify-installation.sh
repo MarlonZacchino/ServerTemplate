@@ -56,6 +56,9 @@ check_mode() {
 [[ -r "$WEB_ROOT/galerie.html" && -r "$WEB_ROOT/gallery.js" && -r "$WEB_ROOT/logo.jpg" ]] \
     && ok "gallery and logo files exist" \
     || bad "gallery or logo files are missing"
+[[ -r "$WEB_ROOT/postal-code.js" ]] \
+    && ok "postal-code helper exists" \
+    || bad "postal-code helper is missing"
 [[ -r "$ENV_FILE" ]] && ok "server.env exists" || bad "missing server.env"
 [[ -r "$NOTIFICATION_ENV_FILE" ]] \
     && ok "notification.env exists" \
@@ -88,9 +91,9 @@ fi
 
 if [[ -f "$STATE_DIR/styles4dogs.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
     SCHEMA_VERSION=$(sqlite3 "$STATE_DIR/styles4dogs.db" 'PRAGMA user_version;' || true)
-    [[ "$SCHEMA_VERSION" == "7" ]] \
-        && ok "database schema version is 7" \
-        || bad "database schema version is ${SCHEMA_VERSION:-unknown}, expected 7"
+    [[ "$SCHEMA_VERSION" == "8" ]] \
+        && ok "database schema version is 8" \
+        || bad "database schema version is ${SCHEMA_VERSION:-unknown}, expected 8"
 
     GALLERY_TABLE=$(sqlite3 "$STATE_DIR/styles4dogs.db" \
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='gallery_images';" || true)
@@ -123,6 +126,10 @@ if [[ "$SKIP_SYSTEMD" != 1 ]]; then
 fi
 
 if [[ -r "$ENV_FILE" ]]; then
+    POSTAL_LOOKUP_BASE_URL=$(read_env_value STYLES4DOGS_POSTAL_LOOKUP_BASE_URL)
+    [[ "$POSTAL_LOOKUP_BASE_URL" == "http://127.0.0.1:31339/de/Localities" ]] \
+        && ok "postal-code lookup uses the localhost Caddy proxy" \
+        || bad "postal-code lookup URL is missing or unexpected"
     PROXY_TOKEN=$(read_env_value STYLES4DOGS_TRUSTED_PROXY_TOKEN || true)
     if [[ "$PROXY_TOKEN" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
         ok "trusted proxy token is configured"

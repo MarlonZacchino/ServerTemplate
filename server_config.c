@@ -54,6 +54,7 @@
 #define CONFIG_SALON_PHONE_SIZE 64
 #define CONFIG_PUBLIC_BASE_URL_SIZE 256
 #define CONFIG_COUNTRY_CODE_SIZE 5
+#define CONFIG_POSTAL_LOOKUP_BASE_URL_SIZE 512
 
 typedef struct server_config_state {
     bool initialized;
@@ -71,6 +72,7 @@ typedef struct server_config_state {
     char salon_phone[CONFIG_SALON_PHONE_SIZE];
     char public_base_url[CONFIG_PUBLIC_BASE_URL_SIZE];
     char default_phone_country_code[CONFIG_COUNTRY_CODE_SIZE];
+    char postal_lookup_base_url[CONFIG_POSTAL_LOOKUP_BASE_URL_SIZE];
 } server_config_state;
 
 static server_config_state config;
@@ -406,6 +408,13 @@ static bool public_url_is_valid(const char *url)
            strncmp(url, "http://", strlen("http://")) == 0;
 }
 
+static bool postal_lookup_url_is_valid(const char *url)
+{
+    return public_url_is_valid(url) &&
+           strchr(url, '?') == NULL &&
+           strchr(url, '#') == NULL;
+}
+
 static int load_public_identity(void)
 {
     const char *country_code = environment_or_default(
@@ -464,6 +473,30 @@ static int load_public_identity(void)
     }
 
     memcpy(config.default_phone_country_code, country_code, country_length + 1);
+    return 0;
+}
+
+static int load_postal_lookup_configuration(void)
+{
+    const char *value = environment_or_default(
+            "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL",
+            "https://openplzapi.org/de/Localities",
+            NULL);
+
+    if (copy_nonempty_value(
+            config.postal_lookup_base_url,
+            sizeof(config.postal_lookup_base_url),
+            value,
+            "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL") != 0) {
+        return -1;
+    }
+
+    if (!postal_lookup_url_is_valid(config.postal_lookup_base_url)) {
+        set_error(
+                "STYLES4DOGS_POSTAL_LOOKUP_BASE_URL muss mit http:// oder https:// beginnen und darf keine Query oder kein Fragment enthalten");
+        return -1;
+    }
+
     return 0;
 }
 
@@ -558,6 +591,7 @@ int server_config_initialize(void)
             sizeof(config.document_root)) != 0 ||
         load_trusted_proxy_token() != 0 ||
         load_public_identity() != 0 ||
+        load_postal_lookup_configuration() != 0 ||
         copy_nonempty_value(
             config.secrets_dir,
             sizeof(config.secrets_dir),
@@ -712,4 +746,9 @@ const char *server_config_public_base_url(void)
 const char *server_config_default_phone_country_code(void)
 {
     return config.default_phone_country_code;
+}
+
+const char *server_config_postal_lookup_base_url(void)
+{
+    return config.postal_lookup_base_url;
 }

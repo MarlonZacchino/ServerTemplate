@@ -69,9 +69,10 @@ Die installierte Konfiguration:
 - komprimiert geeignete Antworten mit Zstandard oder gzip,
 - begrenzt Formulargrößen vor dem C-Server,
 - maskiert IP-Adressen in Zugriffslogs,
-- ersetzt den Admin-Suchparameter `q` im Log durch `REDACTED`,
+- ersetzt den Admin-Suchparameter `q` und den PLZ-Parameter `postal_code` im Log durch `REDACTED`,
 - protokolliert Zugangsdaten nicht im Klartext,
-- überschreibt den internen Proxy-Token-Header vor der Weiterleitung.
+- überschreibt den internen Proxy-Token-Header vor der Weiterleitung,
+- stellt auf `127.0.0.1:31339` einen nicht öffentlichen, ungeloggten HTTPS-Proxy zum festen OpenPLZ-Host bereit.
 
 Die HSTS-Antwort wird auch im lokalen HTTP-Test konfiguriert, von Browsern aber
 nur über eine sichere HTTPS-Verbindung berücksichtigt.
@@ -92,6 +93,19 @@ Nur wenn kein passender Import existiert, ergänzt der Installer einen markierte
 Block. Außerdem legt er die Access-Logdatei vor der Validierung mit Besitzer
 `caddy:caddy` und Modus `0640` an. Vor Änderungen wird ein zeitgestempeltes
 Backup des Caddyfile erstellt.
+
+## Interner PLZ-Upstream
+
+Der C-Server ist durch systemd auf localhost-Netzwerkzugriff beschränkt. Für
+die automatische Ortsergänzung verbindet er sich daher mit
+`127.0.0.1:31339`; Caddy übernimmt dort TLS und DNS für den fest eingetragenen
+OpenPLZ-Host. An diesen Dienst wird ausschließlich die eingegebene fünfstellige
+Postleitzahl übertragen. Der interne Caddy-Site-Block bindet nur Loopback und
+verwirft seine Access-Logs.
+
+Dieser Port ist kein öffentlicher Website-Port und darf weder in der Firewall
+noch durch einen weiteren Reverse Proxy veröffentlicht werden. Fällt der
+Upstream aus, bleibt die manuelle Eingabe des Wohnorts möglich.
 
 ## Prüfung
 

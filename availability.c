@@ -344,6 +344,9 @@ static bool reservation_request_is_valid(
           strcmp(request->created_at_utc, request->hold_expires_at_utc) >= 0)) ||
         request->customer_name == NULL || request->customer_name[0] == '\0' ||
         request->contact == NULL || request->contact[0] == '\0' ||
+        request->street_address == NULL || request->street_address[0] == '\0' ||
+        request->postal_code == NULL || strlen(request->postal_code) != 5 ||
+        request->city == NULL || request->city[0] == '\0' ||
         !contact_fields_are_valid(
                 request->contact_channel,
                 request->email,
@@ -464,6 +467,9 @@ availability_reservation_result availability_reserve_pending(
             .phone_number = request->phone_number,
             .phone_kind = request->phone_kind,
             .contact_preference = request->contact_preference,
+            .street_address = request->street_address,
+            .postal_code = request->postal_code,
+            .city = request->city,
             .dog_name = request->dog_name,
             .dog_size = request->dog_size,
             .service_code = request->query.service_code,

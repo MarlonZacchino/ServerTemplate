@@ -79,6 +79,36 @@ static bool is_optional_single_line(const char *text)
            (text[0] == '\0' || is_nonempty_single_line(text));
 }
 
+static bool postal_code_is_valid(const char *postal_code)
+{
+    if (postal_code == NULL || strlen(postal_code) != 5) {
+        return false;
+    }
+
+    for (size_t index = 0; index < 5; index++) {
+        if (postal_code[index] < '0' || postal_code[index] > '9') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool street_address_has_house_number(const char *street_address)
+{
+    if (!is_nonempty_single_line(street_address)) {
+        return false;
+    }
+
+    for (size_t index = 0; street_address[index] != '\0'; index++) {
+        if (street_address[index] >= '0' && street_address[index] <= '9') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool get_required_field(
         const string *request,
         const char *field_name,
@@ -325,6 +355,21 @@ bool parse_booking_request(const string *request, booking_request *booking)
 
     if (!parse_customer_name(request, booking) ||
         !parse_contact_fields(request, booking) ||
+        !get_required_field(
+            request,
+            "street_address",
+            booking->street_address,
+            sizeof(booking->street_address)) ||
+        !get_required_field(
+            request,
+            "postal_code",
+            booking->postal_code,
+            sizeof(booking->postal_code)) ||
+        !get_required_field(
+            request,
+            "city",
+            booking->city,
+            sizeof(booking->city)) ||
         !get_optional_single_line_field(
             request,
             "dog_name",
@@ -366,6 +411,8 @@ bool parse_booking_request(const string *request, booking_request *booking)
             booking->dog_size,
             allowed_dog_sizes,
             sizeof(allowed_dog_sizes) / sizeof(allowed_dog_sizes[0])) ||
+        !street_address_has_house_number(booking->street_address) ||
+        !postal_code_is_valid(booking->postal_code) ||
         !calendar_date_is_valid(booking->appointment_date) ||
         calendar_time_parse_hhmm(booking->appointment_start, &appointment_start_minute) != 0 ||
         strcmp(privacy_consent, PRIVACY_CONSENT_VALUE) != 0) {
@@ -1056,6 +1103,22 @@ static void append_booking_card(
             "                <div class=\"booking-details\">\n");
 
     append_contact_details(page, record);
+    append_booking_detail(page, "Straße und Hausnummer", record->street_address, "Nicht angegeben");
+    {
+        char locality[BOOKING_POSTAL_CODE_SIZE + BOOKING_CITY_SIZE + 2];
+        int written = snprintf(
+                locality,
+                sizeof(locality),
+                "%s %s",
+                record->postal_code == NULL ? "" : record->postal_code,
+                record->city == NULL ? "" : record->city);
+
+        append_booking_detail(
+                page,
+                "Wohnort",
+                written > 0 && (size_t)written < sizeof(locality) ? locality : "",
+                "Nicht angegeben");
+    }
     append_booking_detail(page, "Hund", record->dog_name, "Nicht angegeben");
     append_booking_detail(page, "Größe", dog_size_label(record->dog_size), "Nicht angegeben");
     append_booking_detail(

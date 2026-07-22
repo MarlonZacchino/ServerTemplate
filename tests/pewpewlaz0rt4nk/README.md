@@ -18,11 +18,12 @@ Der Ablauf:
 1. konfiguriert `cmake-build-pewpew/`,
 2. setzt isolierte `secrets/`- und `data/`-Ordner über die Runtime-Konfiguration,
 3. führt den isolierten C-Test der Kalender- und Verfügbarkeitsengine aus,
-4. startet den Server auf `127.0.0.1:31338`,
-5. führt die HTTP-Regressions- und Zustandsprüfungen aus,
-6. beendet den Testserver automatisch.
+4. startet einen lokalen PLZ-Mockdienst auf `127.0.0.1:31339`,
+5. startet den Server auf `127.0.0.1:31338`,
+6. führt die HTTP-Regressions- und Zustandsprüfungen aus,
+7. beendet beide Testprozesse automatisch.
 
-Vor dem Start darf kein anderer Prozess Port `31338` belegen.
+Vor dem Start darf kein anderer Prozess Port `31338` oder `31339` belegen.
 
 ## Abgedeckte Bereiche
 
@@ -47,14 +48,15 @@ Vor dem Start darf kein anderer Prozess Port `31338` belegen.
 - Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
 - Runtime-Overrides für Port und Pfade,
 - kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root,
-- Kalenderschema Version 7 und Migration bestehender Buchungen zu `legacy`,
+- Datenbankschema Version 8, Pflichtanschrift und Migration bestehender Buchungen zu `legacy`,
 - Leistungen mit Dauer und Puffer, Wochenöffnungszeiten und Sperrzeiten,
 - Mindestvorlauf, Buchungshorizont und deaktivierbare Leistungen,
 - ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz,
 - Annahme, Ablehnung und optionale automatische Bestätigung von Terminen,
 - strukturierte E-Mail-, Telefon- und WhatsApp-Kontaktwünsche,
 - Hinzufügen, Bearbeiten, Archivieren und Löschen von Leistungen,
-- geschützten Foto-Upload, SQLite-Speicherung, öffentliche Galerie und Löschen.
+- geschützten Foto-Upload, SQLite-Speicherung, öffentliche Galerie und Löschen,
+- PLZ-Ort-Abfrage über einen isolierten lokalen Mockdienst ohne Internetzugriff.
 
 Bei einem Fehler liefert das Skript einen Exit-Code ungleich null und eignet
 sich damit später auch für CI.
@@ -68,7 +70,8 @@ Der isolierte Lauf setzt ein eigenes Proxy-Token und prüft:
 - gefälschte `X-Forwarded-For`-Werte ohne korrektes Token umgehen das Limit nicht,
 - zehn fehlgeschlagene Admin-Anmeldungen führen zur Sperre,
 - erfolgreiche Admin-Anmeldung löscht vorherige Fehlversuche,
-- die globale Buchungs-Notbremse greift auch bei rotierenden IP-Adressen.
+- die globale Buchungs-Notbremse greift auch bei rotierenden IP-Adressen,
+- die PLZ-Abfrage hat getrennte Client- und Global-Limits.
 
 
 ## Kalender-Tests

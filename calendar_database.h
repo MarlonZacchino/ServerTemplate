@@ -70,6 +70,9 @@ typedef struct calendar_pending_booking {
     const char *phone_number;
     const char *phone_kind;
     const char *contact_preference;
+    const char *street_address;
+    const char *postal_code;
+    const char *city;
     const char *dog_name;
     const char *dog_size;
     const char *service_code;

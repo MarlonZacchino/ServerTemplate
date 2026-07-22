@@ -61,6 +61,18 @@ def phone_contact(number: str, kind: str = "mobile", preference: str = "call") -
     }
 
 
+def address_fields(
+    street_address: str = "Teststraße 12a",
+    postal_code: str = "26121",
+    city: str = "Oldenburg",
+) -> dict[str, str]:
+    return {
+        "street_address": street_address,
+        "postal_code": postal_code,
+        "city": city,
+    }
+
+
 def add_status(cannon: Laz0rCannon, description: str, request: str, status: str) -> None:
     cannon += Beam(
         description=description,
@@ -149,8 +161,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 7:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 7, erhalten {schema_version}")
+            if schema_version != 8:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 8, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -176,7 +188,7 @@ def run_stateful_tests() -> int:
             ).fetchone()[0]
 
             legacy_row = connection.execute(
-                "SELECT status, customer_name, contact, dog_name, message, legacy, "
+                "SELECT status, customer_name, contact, street_address, postal_code, city, dog_name, message, legacy, "
                 "       decision_status, appointment_date "
                 "FROM bookings WHERE customer_name = ?",
                 ("Legacy Test",),
@@ -186,6 +198,9 @@ def run_stateful_tests() -> int:
                 "altbestand",
                 "Legacy Test",
                 "legacy@example.invalid",
+                "",
+                "",
+                "",
                 "Waldi",
                 "Frühere Anfrage",
                 1,
@@ -228,17 +243,90 @@ def run_stateful_tests() -> int:
         contact_position = page.find("Wie dürfen wir dich kontaktieren?")
         first_name_position = page.find('name="first_name"')
         last_name_position = page.find('name="last_name"')
+        street_position = page.find('name="street_address"')
+        postal_position = page.find('name="postal_code"')
+        city_position = page.find('name="city"')
         dog_name_position = page.find('name="dog_name"')
 
-        if min(contact_position, first_name_position, last_name_position, dog_name_position) < 0:
+        if min(
+            contact_position,
+            first_name_position,
+            last_name_position,
+            street_position,
+            postal_position,
+            city_position,
+            dog_name_position,
+        ) < 0:
             raise AssertionError("Kontaktformular enthält nicht alle erwarteten Felder")
-        if not contact_position < first_name_position < last_name_position < dog_name_position:
-            raise AssertionError("Vor- und Nachname stehen nicht unter der Kontaktwahl")
+        if not (
+            contact_position
+            < first_name_position
+            < last_name_position
+            < street_position
+            < postal_position
+            < city_position
+            < dog_name_position
+        ):
+            raise AssertionError("Name und Pflichtadresse stehen nicht in der erwarteten Reihenfolge")
+        for field_name in ("street_address", "postal_code", "city"):
+            if re.search(
+                rf'<input[^>]+name="{field_name}"[^>]+required',
+                page,
+            ) is None:
+                raise AssertionError(f"Adressfeld {field_name!r} ist nicht verpflichtend")
+        if 'pattern="[0-9]{5}"' not in page:
+            raise AssertionError("PLZ-Formatprüfung fehlt")
+        if '<script src="/postal-code.js" defer></script>' not in page:
+            raise AssertionError("PLZ-Autovervollständigung wird nicht geladen")
         if ('class="contact-channel-option"' not in page or
             'contact-channel-option-text-nowrap">E-Mail</span>' not in page):
             raise AssertionError("Kontaktarten verwenden nicht die bruchsichere Darstellung")
         if 'name="name"' in page:
             raise AssertionError("Das alte gemeinsame Namensfeld wird noch ausgeliefert")
+
+    def postal_code_lookup() -> None:
+        response = raw_request(request_text(
+            "GET",
+            "/api/postal-code?postal_code=26121",
+        ).encode())
+        headers, body = assert_status(response, "200 OK")
+        if headers.get("content-type") != "application/json; charset=utf-8":
+            raise AssertionError("PLZ-API liefert keinen JSON-Content-Type")
+        payload = json.loads(body)
+        if payload != [{"name": "Oldenburg", "postalCode": "26121"}]:
+            raise AssertionError(f"PLZ-API liefert unerwartete Daten: {payload!r}")
+
+        multiple = raw_request(request_text(
+            "GET",
+            "/api/postal-code?postal_code=12345",
+        ).encode())
+        _, multiple_body = assert_status(multiple, "200 OK")
+        multiple_payload = json.loads(multiple_body)
+        if [item["name"] for item in multiple_payload] != [
+            "Beispielstadt",
+            "Beispieldorf",
+        ]:
+            raise AssertionError("PLZ-API liefert Mehrort-Ergebnisse nicht vollständig")
+
+        invalid = raw_request(request_text(
+            "GET",
+            "/api/postal-code?postal_code=1234",
+        ).encode())
+        assert_status(invalid, "400 Bad Request")
+
+        duplicate = raw_request(request_text(
+            "GET",
+            "/api/postal-code?postal_code=26121&postal_code=12345",
+        ).encode())
+        assert_status(duplicate, "400 Bad Request")
+
+        head = raw_request(request_text(
+            "HEAD",
+            "/api/postal-code?postal_code=26121",
+        ).encode())
+        head_headers, head_body = assert_status(head, "200 OK")
+        if head_body != b"" or int(head_headers["content-length"]) <= 0:
+            raise AssertionError("HEAD der PLZ-API enthält einen Body oder keine Länge")
 
     def public_calendar_and_pending_booking() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
@@ -307,6 +395,7 @@ def run_stateful_tests() -> int:
             "first_name": "Pew Pew",
             "last_name": "Test",
             **email_contact("test@example.invalid"),
+            **address_fields(),
             "dog_name": "Bello",
             "dog_size": "medium",
             "service": "full_groom",
@@ -332,7 +421,7 @@ def run_stateful_tests() -> int:
         with sqlite3.connect(database_file) as connection:
             after_count = connection.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
             row = connection.execute(
-                "SELECT status, customer_name, contact, dog_name, dog_size, service, "
+                "SELECT status, customer_name, contact, street_address, postal_code, city, dog_name, dog_size, service, "
                 "       preferred_date, message, legacy, decision_status, appointment_date, "
                 "       start_minute, end_minute, blocked_until_minute, hold_expires_at, "
                 "       service_id IS NOT NULL, contact_channel, email, phone_number, "
@@ -344,10 +433,13 @@ def run_stateful_tests() -> int:
         if after_count != before_count + 1:
             raise AssertionError("Terminanfrage wurde nicht genau einmal gespeichert")
 
-        if row[:11] != (
+        if row[:14] != (
             "neu",
             "Pew Pew Test",
             "test@example.invalid",
+            "Teststraße 12a",
+            "26121",
+            "Oldenburg",
             "Bello",
             "medium",
             "full_groom",
@@ -359,11 +451,11 @@ def run_stateful_tests() -> int:
         ):
             raise AssertionError(f"Pending-Termin wurde nicht korrekt gespeichert: {row!r}")
 
-        if row[11] < 0 or row[12] <= row[11] or row[13] < row[12] or not row[14] or row[15] != 1:
+        if row[14] < 0 or row[15] <= row[14] or row[16] < row[15] or not row[17] or row[18] != 1:
             raise AssertionError(f"Gespeicherte Terminzeiten sind inkonsistent: {row!r}")
-        if row[16:21] != ("email", "test@example.invalid", "", "", ""):
+        if row[19:24] != ("email", "test@example.invalid", "", "", ""):
             raise AssertionError(f"Strukturierter E-Mail-Kontakt wurde falsch gespeichert: {row!r}")
-        if row[21] != "Komplettpflege" or row[22] != 120 or row[23] != 15:
+        if row[24] != "Komplettpflege" or row[25] != 120 or row[26] != 15:
             raise AssertionError(f"Leistungssnapshot wurde falsch gespeichert: {row!r}")
 
         portal_path = portal_match.group(1).decode("ascii")
@@ -792,6 +884,9 @@ def run_stateful_tests() -> int:
         csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', admin_body)
         if csrf_match is None:
             raise AssertionError("CSRF-Token wurde im Adminbereich nicht gefunden")
+        if ("Teststraße 12a".encode("utf-8") not in admin_body or
+            b"26121 Oldenburg" not in admin_body):
+            raise AssertionError("Adminbereich zeigt die gespeicherte Pflichtadresse nicht")
         csrf_token = csrf_match.group(1).decode("ascii")
 
         with sqlite3.connect(database_file) as connection:
@@ -981,6 +1076,16 @@ def run_stateful_tests() -> int:
         if b"TSV V2 Test" not in contact_body or b"Legacy Test" in contact_body:
             raise AssertionError("Kontaktsuche filtert die Buchungen nicht korrekt")
 
+        address_query = urlencode({"q": "26121"})
+        address_response = raw_request(request_text(
+            "GET",
+            f"/admin/bookings?{address_query}",
+            auth_headers,
+        ).encode())
+        _, address_body = assert_status(address_response, "200 OK")
+        if b"Pew Pew Test" not in address_body or b"Legacy Test" in address_body:
+            raise AssertionError("Adresssuche filtert die Buchungen nicht korrekt")
+
         literal_wildcard_query = urlencode({"q": "%"})
         literal_wildcard_response = raw_request(request_text(
             "GET",
@@ -1137,6 +1242,7 @@ def run_stateful_tests() -> int:
         phone_body = urlencode({
             "name": "WhatsApp Kundin",
             **phone_contact("+49 170 1234567", "mobile", "whatsapp"),
+            **address_fields("Mobilweg 7", "26122", "Oldenburg"),
             "dog_name": "Luna",
             "dog_size": "small",
             "service": pending_service,
@@ -1599,6 +1705,7 @@ def run_stateful_tests() -> int:
                 "first_name": "Spam",
                 "last_name": f"Schutz {index + 1}",
                 **email_contact(contact_email),
+                **address_fields(f"Spamweg {index + 1}", "26123", "Oldenburg"),
                 "dog_name": f"Hund {index + 1}",
                 "dog_size": "small",
                 "service": "claw_care",
@@ -1773,6 +1880,7 @@ def run_stateful_tests() -> int:
         booking_body = urlencode({
             "name": "Auto Bestätigung",
             **email_contact("auto@example.invalid"),
+            **address_fields("Automatikstraße 8", "26124", "Oldenburg"),
             "dog_name": "Milo",
             "dog_size": "medium",
             "service": "full_groom",
@@ -1869,6 +1977,7 @@ def run_stateful_tests() -> int:
             "first_name": "Portal",
             "last_name": "Absage",
             **email_contact("portal-absage@example.invalid"),
+            **address_fields("Portalweg 9", "26125", "Oldenburg"),
             "dog_name": "Flocke",
             "dog_size": "small",
             "service": "claw_care",
@@ -2161,6 +2270,30 @@ def run_stateful_tests() -> int:
 
 
     def rate_limiting() -> None:
+        postal_headers = proxy_headers("198.51.100.199")
+        for _ in range(30):
+            response = raw_request(request_text(
+                "GET",
+                "/api/postal-code?postal_code=26121",
+                postal_headers,
+            ).encode())
+            assert_status(response, "200 OK")
+
+        postal_limited = raw_request(request_text(
+            "GET",
+            "/api/postal-code?postal_code=26121",
+            postal_headers,
+        ).encode())
+        postal_limit_headers, _ = assert_status(
+            postal_limited,
+            "429 Too Many Requests",
+        )
+        postal_retry = int(postal_limit_headers.get("retry-after", "0"))
+        if postal_retry < 1 or postal_retry > 60:
+            raise AssertionError(
+                f"Ungültiger PLZ-Retry-After-Wert: {postal_retry}"
+            )
+
         invalid_body = urlencode({"name": "Rate Limit"})
         booking_headers = proxy_headers(
             "198.51.100.200",
@@ -2310,6 +2443,7 @@ def run_stateful_tests() -> int:
     check("GET/HEAD Content-Length und leerer HEAD-Body", content_length_and_head)
     check("TSV-Altbestand und Kalenderschema werden korrekt geladen", booking_persistence)
     check("Kontaktformular trennt Vor- und Nachname", contact_form_layout)
+    check("PLZ-API ergänzt den Wohnort", postal_code_lookup)
     check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
     check("Admin sieht das zentrale Dashboard", admin_dashboard_overview)
@@ -2325,7 +2459,7 @@ def run_stateful_tests() -> int:
     check("Admin individualisiert Bestätigungen, Absagen und bereinigt die Queue", admin_message_templates)
     check("Kunden sehen und stornieren ihre Buchung über einen sicheren Link", customer_portal_cancellation)
     check("Admin sieht Termine in Tages-, Wochen- und 30-Tage-Ansicht", admin_appointments_workflow)
-    check("Rate-Limits schützen Buchung und Adminzugang", rate_limiting)
+    check("Rate-Limits schützen PLZ-Abfrage, Buchung und Adminzugang", rate_limiting)
 
     return failures
 
@@ -2342,6 +2476,7 @@ def main() -> int:
         ("Impressum", "/impressum"),
         ("Datenschutz", "/datenschutz"),
         ("Stylesheet", "/style.css"),
+        ("PLZ-JavaScript", "/postal-code.js"),
         ("Kalender-JavaScript", "/calendar.js"),
         ("Admin-Kalender-JavaScript", "/admin-calendar.js"),
         ("Galerie-JavaScript", "/gallery.js"),
@@ -2403,6 +2538,7 @@ def main() -> int:
     missing_slot_booking = urlencode({
         "name": "Laz0r Test",
         **email_contact("laz0r@example.invalid"),
+        **address_fields(),
         "dog_name": "Flocke",
         "dog_size": "small",
         "service": "wash_dry",
@@ -2433,6 +2569,7 @@ def main() -> int:
     missing_privacy = urlencode({
         "name": "Ohne Zustimmung",
         **email_contact("privacy@example.invalid"),
+        **address_fields(),
         "dog_size": "medium",
         "service": "full_groom",
     })
@@ -2449,6 +2586,7 @@ def main() -> int:
     invalid_service = urlencode({
         "name": "Ungültige Leistung",
         **email_contact("service@example.invalid"),
+        **address_fields(),
         "dog_size": "medium",
         "service": "nicht-erlaubt",
         "privacy_consent": "accepted",
@@ -2466,6 +2604,7 @@ def main() -> int:
     invalid_date = urlencode({
         "name": "Ungültiges Datum",
         **email_contact("date@example.invalid"),
+        **address_fields(),
         "dog_size": "medium",
         "service": "full_groom",
         "appointment_date": "2026-02-31",
@@ -2482,9 +2621,50 @@ def main() -> int:
         invalid_date,
     ), "400 Bad Request")
 
+    invalid_postal_code = urlencode({
+        "name": "Ungültige Postleitzahl",
+        **email_contact("postal@example.invalid"),
+        **address_fields(postal_code="2612A"),
+        "dog_size": "small",
+        "service": "wash_dry",
+        "appointment_date": "2026-08-20",
+        "appointment_start": "09:00",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "Nicht numerische Postleitzahl wird abgelehnt", request_text(
+        "POST",
+        "/booking",
+        proxy_headers(
+            "198.51.100.146",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
+        invalid_postal_code,
+    ), "400 Bad Request")
+
+    missing_house_number = urlencode({
+        "name": "Fehlende Hausnummer",
+        **email_contact("street@example.invalid"),
+        **address_fields(street_address="Teststraße"),
+        "dog_size": "small",
+        "service": "wash_dry",
+        "appointment_date": "2026-08-20",
+        "appointment_start": "09:00",
+        "privacy_consent": "accepted",
+    })
+    add_status(cannon, "Straße ohne Hausnummer wird abgelehnt", request_text(
+        "POST",
+        "/booking",
+        proxy_headers(
+            "198.51.100.147",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        ),
+        missing_house_number,
+    ), "400 Bad Request")
+
     invalid_whatsapp_landline = urlencode({
         "name": "Ungültiger WhatsApp-Kontakt",
         **phone_contact("02571 123456", "landline", "whatsapp"),
+        **address_fields(),
         "dog_size": "small",
         "service": "wash_dry",
         "appointment_date": "2026-08-20",
@@ -2504,6 +2684,7 @@ def main() -> int:
     invalid_email = urlencode({
         "name": "Ungültige E-Mail",
         **email_contact("keine-adresse"),
+        **address_fields(),
         "dog_size": "small",
         "service": "wash_dry",
         "appointment_date": "2026-08-20",

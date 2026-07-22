@@ -237,7 +237,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 7, "Kalenderschema verwendet Version 7");
+    expect_int(schema_version, 8, "Kalenderschema verwendet Version 8");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -437,6 +437,9 @@ int main(void)
     reservation.phone_number = "";
     reservation.phone_kind = "";
     reservation.contact_preference = "";
+    reservation.street_address = "Teststraße 12a";
+    reservation.postal_code = "26121";
+    reservation.city = "Oldenburg";
     reservation.auto_confirm = false;
     reservation.dog_name = "Flocke";
     reservation.dog_size = "small";

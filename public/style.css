@@ -1604,6 +1604,14 @@ select:focus {
     font-size: 0.88rem;
 }
 
+.postal-lookup-status {
+    min-height: 1.35em;
+}
+
+.postal-lookup-status-error {
+    color: var(--danger, #9b2c2c);
+}
+
 .calendar-slots {
     display: grid;
     grid-template-columns: 1fr;

@@ -92,6 +92,7 @@ add_executable(Server
         notification_settings.c
         notification_templates.c
         contact_links.c
+        postal_lookup.c
 )
 
 add_executable(notification_worker
@@ -206,6 +207,7 @@ target_compile_definitions(calendar_fuzz_target PRIVATE
 target_link_libraries(Server PRIVATE
         PkgConfig::SODIUM
         PkgConfig::SQLITE3
+        PkgConfig::CURL
 )
 
 target_link_libraries(notification_worker PRIVATE

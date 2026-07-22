@@ -21,6 +21,12 @@ bool rate_limit_allow_booking(
         unsigned int *retry_after_seconds
 );
 
+/* Begrenzt öffentliche PLZ-Abfragen, unabhängig vom Buchungslimit. */
+bool rate_limit_allow_postal_lookup(
+        const char *client_ip,
+        unsigned int *retry_after_seconds
+);
+
 /* Returns true while this client is blocked after repeated admin failures. */
 bool rate_limit_admin_is_blocked(
         const char *client_ip,

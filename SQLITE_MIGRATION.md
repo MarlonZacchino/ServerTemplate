@@ -146,3 +146,28 @@ sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
 sqlite3 /var/lib/styles4dogs/styles4dogs.db \
   "SELECT name FROM sqlite_master WHERE type='table' AND name='gallery_images';"
 ```
+
+## Adressschema Version 8
+
+Phase 10 erweitert die Datenbank idempotent auf:
+
+```text
+PRAGMA user_version = 8
+```
+
+Die Tabelle `bookings` erhält die Felder `street_address`, `postal_code` und
+`city`. Bestehende Datensätze und importierte Legacy-Buchungen erhalten leere
+Werte; neue öffentliche Terminanfragen benötigen eine vollständige, serverseitig
+validierte Adresse.
+
+Prüfung nach der Installation:
+
+```bash
+sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT name FROM pragma_table_info('bookings') WHERE name IN ('street_address','postal_code','city') ORDER BY name;"
+```
+
+Erwartet werden Version `8` sowie die drei Spalten `city`, `postal_code` und
+`street_address`. Vor jedem produktiven Upgrade bleibt ein geprüftes Backup
+verpflichtend.

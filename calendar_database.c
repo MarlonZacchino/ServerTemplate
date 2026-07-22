@@ -429,6 +429,15 @@ static int migrate_booking_columns(void)
             "contact_preference",
             "contact_preference TEXT NOT NULL DEFAULT ''") != 0 ||
         ensure_booking_column(
+            "street_address",
+            "street_address TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "postal_code",
+            "postal_code TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "city",
+            "city TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
             "service_name_snapshot",
             "service_name_snapshot TEXT NOT NULL DEFAULT ''") != 0 ||
         ensure_booking_column(
@@ -683,7 +692,7 @@ static int migrate_schema(void)
         migrate_notification_jobs_v6() != 0 ||
         seed_calendar_defaults() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 7;") != 0 ||
+        execute_sql("PRAGMA user_version = 8;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -1972,6 +1981,9 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
           strcmp(booking->created_at_utc, booking->hold_expires_at_utc) >= 0)) ||
         booking->customer_name == NULL || booking->customer_name[0] == '\0' ||
         booking->contact == NULL || booking->contact[0] == '\0' ||
+        booking->street_address == NULL || booking->street_address[0] == '\0' ||
+        booking->postal_code == NULL || strlen(booking->postal_code) != 5 ||
+        booking->city == NULL || booking->city[0] == '\0' ||
         !contact_fields_are_valid(
                 booking->contact_channel,
                 booking->email,
@@ -2017,6 +2029,7 @@ int calendar_database_insert_pending(
             "    appointment_date, start_minute, end_minute, blocked_until_minute,"
             "    decision_status, hold_expires_at, decision_at, rejection_reason,"
             "    contact_channel, email, phone_number, phone_kind, contact_preference,"
+            "    street_address, postal_code, city,"
             "    service_name_snapshot, service_duration_minutes_snapshot,"
             "    service_buffer_minutes_snapshot"
             ") "
@@ -2024,10 +2037,10 @@ int calendar_database_insert_pending(
             "       ?6, ?8, ?9, ?10, CASE WHEN ?11 = 1 THEN 'confirmed' ELSE 'pending' END,"
             "       CASE WHEN ?11 = 1 THEN NULL ELSE ?12 END,"
             "       CASE WHEN ?11 = 1 THEN ?1 ELSE NULL END, '',"
-            "       ?13, ?14, ?15, ?16, ?17, services.name, services.duration_minutes,"
+            "       ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, services.name, services.duration_minutes,"
             "       services.buffer_minutes "
             "FROM services "
-            "WHERE services.code = ?18 AND services.active = 1;",
+            "WHERE services.code = ?21 AND services.active = 1;",
             -1,
             &statement,
             NULL) != SQLITE_OK) {
@@ -2054,7 +2067,10 @@ int calendar_database_insert_pending(
         sqlite3_bind_text(statement, 15, booking->phone_number, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 16, booking->phone_kind, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 17, booking->contact_preference, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 18, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        sqlite3_bind_text(statement, 18, booking->street_address, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 19, booking->postal_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 20, booking->city, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 21, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
         set_sqlite_error("Terminreservierungswerte konnten nicht gebunden werden");
         goto cleanup;
     }

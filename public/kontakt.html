@@ -6,6 +6,7 @@
     <meta name="description" content="Termin bei Styling 4 Dogs anfragen. Teile uns deine Kontaktdaten und Informationen zu deinem Hund mit.">
     <title>Termin anfragen | Styling 4 Dogs</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/postal-code.js" defer></script>
     <script src="/calendar.js" defer></script>
 </head>
 <body>
@@ -83,6 +84,24 @@
                             <input id="last-name" type="text" name="last_name" autocomplete="family-name" maxlength="120" required>
                         </div>
                     </div>
+
+                    <div class="form-field">
+                        <label for="street-address">Straße und Hausnummer <span aria-hidden="true">*</span></label>
+                        <input id="street-address" type="text" name="street_address" autocomplete="street-address" maxlength="255" required>
+                    </div>
+
+                    <div class="form-grid-two address-locality-fields">
+                        <div class="form-field">
+                            <label for="postal-code">Postleitzahl <span aria-hidden="true">*</span></label>
+                            <input id="postal-code" type="text" name="postal_code" autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" aria-describedby="postal-lookup-status" data-postal-code required>
+                        </div>
+                        <div class="form-field">
+                            <label for="city">Wohnort <span aria-hidden="true">*</span></label>
+                            <input id="city" type="text" name="city" autocomplete="address-level2" maxlength="127" list="city-suggestions" data-city required>
+                            <datalist id="city-suggestions" data-city-suggestions></datalist>
+                        </div>
+                    </div>
+                    <p id="postal-lookup-status" class="form-help postal-lookup-status" role="status" aria-live="polite" data-postal-lookup-status>Nach Eingabe der PLZ kann der Wohnort automatisch ergänzt werden.</p>
 
                     <label for="dog-name">Name des Hundes</label>
                     <input id="dog-name" type="text" name="dog_name" maxlength="120" autocomplete="off">

@@ -18,6 +18,7 @@
 #include "gallery.h"
 #include "customer_portal.h"
 #include "admin_dashboard.h"
+#include "postal_lookup.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -1084,6 +1085,74 @@ static string *handle_calendar_availability(
             "200 OK",
             "application/json; charset=utf-8",
             calendar_api_headers(),
+            get_const_char_str(json),
+            get_length(json),
+            send_body);
+    free_str(json);
+    return response;
+}
+
+static string *handle_postal_lookup(
+        const char *query,
+        size_t query_length,
+        bool send_body
+)
+{
+    char postal_code[6] = {0};
+    string *json = NULL;
+    string *response;
+    form_value_result query_result;
+    postal_lookup_result lookup_result;
+
+    if (query == NULL || query_length == 0) {
+        return handle_calendar_api_error(
+                "400 Bad Request",
+                "invalid_postal_code",
+                send_body);
+    }
+
+    query_result = form_urlencoded_get_from_data(
+            query,
+            query_length,
+            "postal_code",
+            postal_code,
+            sizeof(postal_code));
+
+    if (query_result != FORM_VALUE_OK) {
+        return handle_calendar_api_error(
+                "400 Bad Request",
+                "invalid_postal_code",
+                send_body);
+    }
+
+    lookup_result = postal_lookup_fetch(postal_code, &json);
+    if (lookup_result == POSTAL_LOOKUP_INVALID_POSTAL_CODE) {
+        return handle_calendar_api_error(
+                "400 Bad Request",
+                "invalid_postal_code",
+                send_body);
+    }
+    if (lookup_result == POSTAL_LOOKUP_UNAVAILABLE) {
+        fprintf(stderr, "PLZ-Abfrage nicht verfügbar: %s\n", postal_lookup_last_error());
+        return handle_calendar_api_error(
+                "503 Service Unavailable",
+                "postal_lookup_unavailable",
+                send_body);
+    }
+    if (lookup_result != POSTAL_LOOKUP_OK || json == NULL) {
+        fprintf(stderr, "PLZ-Abfrage fehlgeschlagen: %s\n", postal_lookup_last_error());
+        return handle_calendar_api_error(
+                "500 Internal Server Error",
+                "postal_lookup_error",
+                send_body);
+    }
+
+    response = build_response_bytes(
+            "200 OK",
+            "application/json; charset=utf-8",
+            "Cache-Control: public, max-age=3600\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "Referrer-Policy: no-referrer\r\n",
             get_const_char_str(json),
             get_length(json),
             send_body);
@@ -2627,6 +2696,10 @@ string *process(string *request)
 
     if (strcmp(path, "/api/availability") == 0) {
         return handle_calendar_availability(query, query_length, send_body);
+    }
+
+    if (strcmp(path, "/api/postal-code") == 0) {
+        return handle_postal_lookup(query, query_length, send_body);
     }
 
     if (strcmp(path, "/api/gallery") == 0) {

@@ -83,7 +83,7 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 7, Legacy-Migration, sichere geschlossene Defaults,
+Er prüft Schema-Version 8, Legacy-Migration, sichere geschlossene Defaults,
 Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
 Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
 ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
@@ -206,7 +206,7 @@ Der Regressionstest prüft zusätzlich:
 - Zurücksetzen gesendeter sowie Löschen fehlgeschlagener Mailjobs.
 
 Der vollständige HTTP-Lauf enthält jetzt 40 Beams. Das Datenbankschema wird
-mit Phase 8 auf Version 7 erweitert.
+mit Phase 10 auf Version 8 erweitert.
 
 
 ## Galerie Phase 8
@@ -221,7 +221,7 @@ Der Regressionstest prüft zusätzlich:
 - korrekte JSON-Ausgabe über `/api/gallery`,
 - binär korrekte Bildauslieferung über `/media/...`,
 - vollständiges Löschen des Galerieeintrags,
-- Schema-Migration auf Version 7,
+- Schema-Migration auf Version 8,
 - Einbindung des Logos und des Namens „Styling 4 Dogs“.
 
 
@@ -240,3 +240,20 @@ Der Regressionstest prüft zusätzlich:
 - sofortige Freigabe des stornierten Zeitraums,
 - Kundenlink in automatisch erzeugten E-Mails,
 - Backup und Restore von Datenbank und Kundenbereich-Schlüssel.
+
+## Pflichtadresse und PLZ-Abfrage Phase 10
+
+Der HTTP-Regressionstest startet vor dem Webserver einen lokalen OpenPLZ-Mock
+auf `127.0.0.1:31339`. Der Webserver erhält dessen URL ausschließlich über die
+Testkonfiguration. Dadurch sind die Tests reproduzierbar und benötigen keinen
+Internetzugang.
+
+Zusätzlich geprüft werden:
+
+- verpflichtende Felder für Straße, Postleitzahl und Wohnort,
+- fünfstellige PLZ-Validierung und fehlerhafte API-Anfragen,
+- automatische Einzel- und Mehrort-Antworten,
+- persistierte Anschrift und Adminanzeige,
+- Suchbarkeit nach Straße, Postleitzahl und Wohnort,
+- Schema-Version 8,
+- Produktionswert des lokalen Caddy-Upstreams.

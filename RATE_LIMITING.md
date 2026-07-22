@@ -11,6 +11,8 @@ gespeichert oder in SQLite geschrieben.
 |---|---:|---:|
 | `POST /booking` pro Client-IP | 5 Versuche | 10 Minuten |
 | `POST /booking` global | 120 Versuche | 1 Minute |
+| `GET /api/postal-code` pro Client-IP | 30 Abfragen | 1 Minute |
+| `GET /api/postal-code` global | 300 Abfragen | 1 Minute |
 | fehlgeschlagene Admin-Authentifizierung pro Client-IP | 10 Fehler | 10 Minuten |
 
 Ein abgelehnter Request erhält:
@@ -20,6 +22,8 @@ HTTP/1.1 429 Too Many Requests
 Retry-After: <Sekunden>
 Cache-Control: no-store
 ```
+
+Das PLZ-Limit besitzt einen getrennten Zustand, damit die Eingabehilfe keine Buchungsversuche verbraucht. Erfolgreiche PLZ-Antworten werden zusätzlich im Arbeitsspeicher gecacht.
 
 Das Buchungslimit zählt absichtlich auch ungültige Formulare. Dadurch kann ein
 Angreifer die teurere Formularverarbeitung nicht unbegrenzt auslösen. Beim
