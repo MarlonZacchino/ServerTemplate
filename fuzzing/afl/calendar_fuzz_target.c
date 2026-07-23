@@ -1,8 +1,8 @@
-#include "availability.h"
-#include "booking_database.h"
-#include "calendar_database.h"
-#include "form_urlencoded.h"
-#include "server_config.h"
+#include "styles4dogs/calendar/availability.h"
+#include "styles4dogs/booking/booking_database.h"
+#include "styles4dogs/calendar/calendar_database.h"
+#include "styles4dogs/http/form_urlencoded.h"
+#include "styles4dogs/core/server_config.h"
 
 #include <errno.h>
 #include <stdio.h>

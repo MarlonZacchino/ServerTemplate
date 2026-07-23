@@ -1,10 +1,10 @@
-#include "availability.h"
-#include "booking_database.h"
-#include "calendar_database.h"
-#include "calendar_time.h"
-#include "notification_settings.h"
-#include "notification_templates.h"
-#include "server_config.h"
+#include "styles4dogs/calendar/availability.h"
+#include "styles4dogs/booking/booking_database.h"
+#include "styles4dogs/calendar/calendar_database.h"
+#include "styles4dogs/calendar/calendar_time.h"
+#include "styles4dogs/notifications/notification_settings.h"
+#include "styles4dogs/notifications/notification_templates.h"
+#include "styles4dogs/core/server_config.h"
 
 #include <sqlite3.h>
 #include <stdbool.h>
