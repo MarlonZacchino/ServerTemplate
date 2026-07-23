@@ -48,7 +48,7 @@ Vor dem Start darf kein anderer Prozess Port `31338` oder `31339` belegen.
 - Literalbehandlung von SQL-LIKE-Sonderzeichen und sichere HTML-Ausgabe von Suchwerten,
 - Runtime-Overrides für Port und Pfade,
 - kontrollierter Startabbruch bei ungültiger Adresse, ungültigem Port und fehlendem Document Root,
-- Datenbankschema Version 9, Pflichtanschrift, Hunderasse und Migration bestehender Buchungen zu `legacy`,
+- Datenbankschema Version 10, Pflichtanschrift, Hunderasse und Migration bestehender Buchungen zu `legacy`,
 - Leistungen mit Dauer und Puffer, Wochenöffnungszeiten und Sperrzeiten,
 - Mindestvorlauf, Buchungshorizont und deaktivierbare Leistungen,
 - ablaufende Pending-Reservierungen und transaktionssicherer Doppelbuchungsschutz,

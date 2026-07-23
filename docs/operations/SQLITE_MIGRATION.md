@@ -198,3 +198,28 @@ sqlite3 /var/lib/styles4dogs/styles4dogs.db \
 Erwartet werden Version `9` und die Spalte `dog_breed`. Die Migration der
 Rassespalte läuft bereits beim Öffnen der Buchungsdatenbank, damit auch ein
 noch ausstehender Legacy-TSV-Import nicht auf einem älteren Schema scheitert.
+
+
+## Admin-Benachrichtigungen Version 10
+
+Die Kundenabsage erweitert das Datenbankschema idempotent auf:
+
+```text
+PRAGMA user_version = 10
+```
+
+Die erlaubten Ereignistypen in `notification_jobs` und
+`notification_templates` werden um `admin_booking_cancelled` ergänzt. Vorhandene
+Jobs und individuell bearbeitete Vorlagen bleiben beim Tabellenumbau erhalten.
+Die neue Standardvorlage wird anschließend nur dann eingefügt, wenn noch keine
+eigene Vorlage für dieses Ereignis existiert.
+
+Prüfung nach der Installation:
+
+```bash
+sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+sqlite3 /var/lib/styles4dogs/styles4dogs.db \
+  "SELECT event_type FROM notification_templates WHERE event_type='admin_booking_cancelled';"
+```
+
+Erwartet werden Version `10` und der Ereignistyp `admin_booking_cancelled`.

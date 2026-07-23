@@ -24,7 +24,7 @@ Benutzername:       häufig die vollständige E-Mail-Adresse
 Passwort:           vorzugsweise ein separates App-Passwort
 Absenderadresse:    sichtbare Salon-Adresse
 Absendername:       Styling 4 Dogs
-Admin-Adresse:      Ziel für neue Terminanfragen
+Admin-Adresse:      Ziel für neue Terminanfragen und Kundenabsagen
 ```
 
 Nach dem Speichern:
@@ -96,6 +96,7 @@ booking_confirmed      Termin bestätigt
 booking_rejected       Terminanfrage abgelehnt
 appointment_reminder   Erinnerung
 admin_new_booking      neue Anfrage für den Admin
+admin_booking_cancelled Kundenabsage für den Admin
 ```
 
 Erlaubte Platzhalter:
@@ -133,7 +134,7 @@ den Link automatisch am Ende der Nachricht an.
 Die technische SMTP-Verbindung und die fachliche Versandfreigabe sind bewusst
 getrennt:
 
-- `/admin/notifications`: globaler Hauptschalter, Postfach, Testmail, Admin-Mail, Vorlagen und Queue
+- `/admin/notifications`: globaler Hauptschalter, Postfach, Testmail, Admin-Mails bei neuen Anfragen und Kundenabsagen, Vorlagen und Queue
 - `/admin/calendar`: Kunden-E-Mails, Erinnerungen und Erinnerungszeitpunkt
 
 Der Hauptschalter pausiert den Versand, ohne Zugangsdaten, Vorlagen oder

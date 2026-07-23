@@ -83,7 +83,7 @@ isolierten C-Test `calendar_engine_tests`:
 ./tests/pewpewlaz0rt4nk/run.sh
 ```
 
-Er prüft Schema-Version 9, Legacy- und Rassespalten-Migration, sichere geschlossene Defaults,
+Er prüft Schema-Version 10, Legacy-, Rassespalten- und Benachrichtigungsmigration, sichere geschlossene Defaults,
 Leistungsdauer und Puffer, Hinzufügen und Löschen von Leistungen,
 Wochenöffnungszeiten, Sperrzeiten, Buchungshorizont, Mindestvorlauf,
 ablaufende Pending-Reservierungen, Annahme und Ablehnung, automatische
@@ -179,7 +179,7 @@ Der Regressionstest prüft zusätzlich:
 - Beibehaltung des Passworts bei leerem Bearbeitungsfeld,
 - Deaktivieren der Verbindung ohne Fallback auf alte Zugangsdaten,
 - Testmails mit `booking_id = NULL`,
-- Admin-Benachrichtigungen bei neuen Terminanfragen,
+- Admin-Benachrichtigungen bei neuen Terminanfragen und Kundenabsagen,
 - Speichern, Rendern und Zurücksetzen aller Nachrichtenvorlagen,
 - Ablehnung unbekannter oder unvollständiger Platzhalter,
 - erneute Freigabe fehlgeschlagener Jobs,

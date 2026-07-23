@@ -31,7 +31,10 @@ static const default_template defaults[] = {
      "Terminerinnerung"},
     {"admin_new_booking", "Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
      "Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings",
-     "Admin-Benachrichtigung"}
+     "Neue Terminanfrage für den Admin"},
+    {"admin_booking_cancelled", "Kundenabsage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
+     "Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}",
+     "Kundenabsage für den Admin"}
 };
 
 static char template_error[TEMPLATE_ERROR_SIZE];

@@ -163,8 +163,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 9:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 9, erhalten {schema_version}")
+            if schema_version != 10:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 10, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -279,8 +279,10 @@ def run_stateful_tests() -> int:
                 page,
             ) is None:
                 raise AssertionError(f"Adressfeld {field_name!r} ist nicht verpflichtend")
-        if re.search(r'<select[^>]+name="dog_breed"[^>]+required', page) is None:
-            raise AssertionError("Rasse ist kein verpflichtendes Auswahlfeld")
+        if re.search(r'<select[^>]+name="dog_breed"[^>]+required', page) is not None:
+            raise AssertionError("Rasse wird weiterhin als Pflichtfeld ausgeliefert")
+        if '<option value="">Keine Angabe</option>' not in page:
+            raise AssertionError("Die optionale Rasse bietet keine eindeutige Leerauswahl")
         if 'value="other">Sonstiges</option>' not in page or 'data-dog-breed-other-hint' not in page:
             raise AssertionError("Sonstiges-Auswahl oder Rassehinweis fehlt")
         if 'pattern="[0-9]{5}"' not in page:
@@ -400,7 +402,7 @@ def run_stateful_tests() -> int:
             raise AssertionError("Der konfigurierte Öffnungstag enthält keine freien Slots")
 
         selected_slot = free_slots[0]
-        body = urlencode({
+        booking_fields = {
             "first_name": "Pew Pew",
             "last_name": "Test",
             **email_contact("test@example.invalid"),
@@ -412,7 +414,9 @@ def run_stateful_tests() -> int:
             "appointment_start": selected_slot["start"],
             "message": "Zeile 1\nZeile 2",
             "privacy_consent": "accepted",
-        })
+        }
+        booking_fields.pop("dog_breed")
+        body = urlencode(booking_fields)
         response = raw_request(request_text(
             "POST",
             "/booking",
@@ -435,7 +439,7 @@ def run_stateful_tests() -> int:
                 "       start_minute, end_minute, blocked_until_minute, hold_expires_at, "
                 "       service_id IS NOT NULL, contact_channel, email, phone_number, "
                 "       phone_kind, contact_preference, service_name_snapshot, "
-                "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot "
+                "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed "
                 "FROM bookings ORDER BY id DESC LIMIT 1"
             ).fetchone()
 
@@ -466,6 +470,8 @@ def run_stateful_tests() -> int:
             raise AssertionError(f"Strukturierter E-Mail-Kontakt wurde falsch gespeichert: {row!r}")
         if row[24] != "Komplettpflege" or row[25] != 120 or row[26] != 15:
             raise AssertionError(f"Leistungssnapshot wurde falsch gespeichert: {row!r}")
+        if row[27] != "":
+            raise AssertionError(f"Optionale Rasse wurde nicht leer gespeichert: {row!r}")
 
         portal_path = portal_match.group(1).decode("ascii")
         portal_response = raw_request(request_text("GET", portal_path).encode())
@@ -1813,6 +1819,7 @@ def run_stateful_tests() -> int:
             "Automatische Nachrichten individualisieren",
             "Terminbestätigung",
             "Terminabsage",
+            "Kundenabsage für den Admin",
             "{{customer_first_name}}",
             "{{customer_last_name}}",
             "Vornamen",
@@ -1821,9 +1828,9 @@ def run_stateful_tests() -> int:
             if expected.encode("utf-8") not in body:
                 raise AssertionError(f"E-Mail-Adminseite enthält {expected!r} nicht")
 
-        if body.count(b'<details class="notification-template-card"') != 5:
+        if body.count(b'<details class="notification-template-card"') != 6:
             raise AssertionError("Nicht jede E-Mail-Vorlage ist einklappbar")
-        if body.count(b'class="notification-template-summary"') != 5:
+        if body.count(b'class="notification-template-summary"') != 6:
             raise AssertionError("Einklappbare E-Mail-Vorlagen haben keine Zusammenfassung")
 
         match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
@@ -2159,8 +2166,29 @@ def run_stateful_tests() -> int:
                 "SELECT decision_status, status, hold_expires_at, decision_at FROM bookings WHERE id = ?",
                 (booking_id,),
             ).fetchone()
+            admin_cancellation = connection.execute(
+                "SELECT recipient_email, status, subject, body_text "
+                "FROM notification_jobs "
+                "WHERE booking_id = ? AND event_type = 'admin_booking_cancelled'",
+                (booking_id,),
+            ).fetchone()
         if row is None or row[0:2] != ("cancelled", "abgesagt") or row[2] is not None or not row[3]:
             raise AssertionError(f"Kundenabsage wurde falsch gespeichert: {row!r}")
+        if admin_cancellation is None or admin_cancellation[0:2] != (
+            "admin@example.invalid", "pending"
+        ):
+            raise AssertionError(
+                f"Admin-Mail zur Kundenabsage wurde nicht eingereiht: {admin_cancellation!r}"
+            )
+        if (
+            "Kundenabsage" not in admin_cancellation[2]
+            or "Portal Absage" not in admin_cancellation[3]
+            or "Flocke" not in admin_cancellation[3]
+            or str(booking_id) not in admin_cancellation[3]
+        ):
+            raise AssertionError(
+                "Admin-Mail zur Kundenabsage enthält nicht die erwarteten Buchungsdaten"
+            )
 
         availability_after = raw_request(request_text(
             "GET",

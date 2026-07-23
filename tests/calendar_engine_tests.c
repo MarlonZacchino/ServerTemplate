@@ -264,7 +264,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 9, "Kalenderschema verwendet Version 9");
+    expect_int(schema_version, 10, "Kalenderschema verwendet Version 10");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -300,7 +300,7 @@ int main(void)
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM notification_templates;",
             &value), 0, "Nachrichtenvorlagen sind abfragbar");
-    expect_int(value, 5, "Fünf Standard-Nachrichtenvorlagen wurden angelegt");
+    expect_int(value, 6, "Sechs Standard-Nachrichtenvorlagen wurden angelegt");
 
     {
         notification_template template_value;

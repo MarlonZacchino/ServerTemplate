@@ -347,7 +347,7 @@ static bool reservation_request_is_valid(
         request->street_address == NULL || request->street_address[0] == '\0' ||
         request->postal_code == NULL || strlen(request->postal_code) != 5 ||
         request->city == NULL || request->city[0] == '\0' ||
-        request->dog_breed == NULL || request->dog_breed[0] == '\0' ||
+        request->dog_breed == NULL ||
         !contact_fields_are_valid(
                 request->contact_channel,
                 request->email,

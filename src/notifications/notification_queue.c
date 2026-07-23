@@ -195,10 +195,17 @@ static bool booking_event_type_is_valid(const char *event_type)
             strcmp(event_type, "appointment_reminder") == 0);
 }
 
+static bool admin_event_type_is_valid(const char *event_type)
+{
+    return event_type != NULL &&
+           (strcmp(event_type, "admin_new_booking") == 0 ||
+            strcmp(event_type, "admin_booking_cancelled") == 0);
+}
+
 static bool internal_event_type_is_valid(const char *event_type)
 {
     return booking_event_type_is_valid(event_type) ||
-           (event_type != NULL && strcmp(event_type, "admin_new_booking") == 0);
+           admin_event_type_is_valid(event_type);
 }
 
 static bool event_matches_booking(const char *event_type, const char *decision_status)
@@ -213,6 +220,8 @@ static bool event_matches_booking(const char *event_type, const char *decision_s
     if (strcmp(event_type, "admin_new_booking") == 0)
         return strcmp(decision_status, "pending") == 0 ||
                strcmp(decision_status, "confirmed") == 0;
+    if (strcmp(event_type, "admin_booking_cancelled") == 0)
+        return strcmp(decision_status, "cancelled") == 0;
     return false;
 }
 
@@ -651,7 +660,7 @@ static int enqueue_event_with_database(
     if (load_result != 0) return load_result < 0 ? -1 : 0;
     if (!event_matches_booking(event_type, data.decision_status)) return 0;
 
-    if (strcmp(event_type, "admin_new_booking") == 0) {
+    if (admin_event_type_is_valid(event_type)) {
         notification_smtp_settings smtp;
         int result;
 
@@ -722,7 +731,9 @@ int notification_queue_enqueue_booking_event(
     int result;
 
     queue_error[0] = '\0';
-    if (booking_id <= 0 || !booking_event_type_is_valid(event_type) ||
+    if (booking_id <= 0 ||
+        !(booking_event_type_is_valid(event_type) ||
+          (event_type != NULL && strcmp(event_type, "admin_booking_cancelled") == 0)) ||
         open_database(&database) != 0) {
         return -1;
     }

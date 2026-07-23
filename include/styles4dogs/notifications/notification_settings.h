@@ -29,7 +29,7 @@ typedef struct notification_smtp_settings {
     bool enabled; /**< Kennzeichnet eine vollständig konfigurierte SMTP-Verbindung. */
     bool delivery_enabled; /**< Aktiviert oder pausiert die automatische Queue-Verarbeitung. */
     bool managed_by_admin; /**< Kennzeichnet eine über die Adminoberfläche gespeicherte Konfiguration. */
-    bool notify_admin_on_new_booking; /**< Aktiviert Adminmails bei neuen Buchungen. */
+    bool notify_admin_on_new_booking; /**< Aktiviert Adminmails bei neuen Buchungen und Kundenabsagen. */
     char url[NOTIFICATION_SMTP_URL_SIZE]; /**< SMTP-URL einschließlich Protokoll und Port. */
     char username[NOTIFICATION_SMTP_USERNAME_SIZE]; /**< SMTP-Benutzername. */
     char password[NOTIFICATION_SMTP_PASSWORD_SIZE]; /**< SMTP-Passwort; im Speicher sensibel behandeln. */

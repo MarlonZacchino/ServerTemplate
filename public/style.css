@@ -171,9 +171,12 @@ textarea {
     content: "→";
 }
 
-.hero-section,
-.page-hero {
+.hero-section {
     padding: 88px 0 72px;
+}
+
+.page-hero {
+    padding: 56px 0 44px;
 }
 
 .hero-grid,
@@ -414,10 +417,6 @@ h3 {
     background: white;
     border-color: white;
     color: var(--text);
-}
-
-.page-hero {
-    padding-bottom: 44px;
 }
 
 .compact-hero {
@@ -799,13 +798,12 @@ textarea:focus {
     }
 
     .hero-section,
-    .page-hero,
     .section {
         padding: 62px 0;
     }
 
     .page-hero {
-        padding-bottom: 30px;
+        padding: 40px 0 30px;
     }
 
     .section-first {

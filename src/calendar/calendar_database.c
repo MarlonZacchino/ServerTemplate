@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 9
+#define CALENDAR_SCHEMA_VERSION 10
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -299,7 +299,7 @@ static int create_calendar_tables(void)
             "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'smtp_test'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -321,7 +321,7 @@ static int create_calendar_tables(void)
             "CREATE TABLE IF NOT EXISTS notification_templates ("
             "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled'"
             "    )),"
             "    subject_template TEXT NOT NULL,"
             "    body_template TEXT NOT NULL,"
@@ -379,7 +379,9 @@ static int seed_calendar_defaults(void)
             "('appointment_reminder', 'Erinnerung an deinen Termin – {{salon_name}}', "
             "'Hallo {{customer_first_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
             "('admin_new_booking', 'Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}', "
-            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
+            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
+            "('admin_booking_cancelled', 'Kundenabsage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}', "
+            "'Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
 
     return execute_sql(sql);
 }
@@ -652,7 +654,7 @@ static int migrate_notification_jobs_v6(void)
             "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'smtp_test'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -681,6 +683,122 @@ static int migrate_notification_jobs_v6(void)
 
     if (notification_jobs_need_v6_migration(&needed) != 0) return -1;
     return needed ? execute_sql(sql) : 0;
+}
+
+static int table_schema_contains(
+        const char *table_name,
+        const char *needle,
+        bool *out_contains
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int step_result;
+
+    if (table_name == NULL || needle == NULL || out_contains == NULL) {
+        set_error("Ungültige Schemabedingung für Benachrichtigungsmigration");
+        return -1;
+    }
+
+    *out_contains = false;
+    if (sqlite3_prepare_v2(
+            calendar_database,
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1;",
+            -1,
+            &statement,
+            NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, table_name, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        set_sqlite_error("Benachrichtigungsschema konnte nicht vorbereitet werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    step_result = sqlite3_step(statement);
+    if (step_result == SQLITE_ROW) {
+        const unsigned char *sql = sqlite3_column_text(statement, 0);
+        *out_contains = sql != NULL && strstr((const char *)sql, needle) != NULL;
+    } else if (step_result != SQLITE_DONE) {
+        set_sqlite_error("Benachrichtigungsschema konnte nicht gelesen werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    sqlite3_finalize(statement);
+    return 0;
+}
+
+static int migrate_admin_cancellation_notifications_v10(void)
+{
+    bool jobs_support_event;
+    bool templates_support_event;
+    static const char *jobs_sql =
+            "ALTER TABLE notification_jobs RENAME TO notification_jobs_v9;"
+            "DROP INDEX IF EXISTS idx_notification_jobs_delivery;"
+            "CREATE TABLE notification_jobs ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    event_type TEXT NOT NULL CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
+            "    )),"
+            "    recipient_email TEXT NOT NULL,"
+            "    subject TEXT NOT NULL,"
+            "    body_text TEXT NOT NULL,"
+            "    ics_content TEXT NOT NULL DEFAULT '',"
+            "    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ("
+            "        'pending', 'processing', 'sent', 'failed'"
+            "    )),"
+            "    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 20),"
+            "    available_at TEXT NOT NULL,"
+            "    created_at TEXT NOT NULL,"
+            "    claimed_at TEXT,"
+            "    sent_at TEXT,"
+            "    last_error TEXT NOT NULL DEFAULT '',"
+            "    UNIQUE(booking_id, event_type)"
+            ");"
+            "INSERT INTO notification_jobs("
+            "id, booking_id, event_type, recipient_email, subject, body_text, ics_content,"
+            "status, attempts, available_at, created_at, claimed_at, sent_at, last_error"
+            ") SELECT id, booking_id, event_type, recipient_email, subject, body_text, ics_content,"
+            "status, attempts, available_at, created_at, claimed_at, sent_at, last_error "
+            "FROM notification_jobs_v9;"
+            "DROP TABLE notification_jobs_v9;"
+            "CREATE INDEX idx_notification_jobs_delivery "
+            "ON notification_jobs(status, available_at, id);";
+    static const char *templates_sql =
+            "ALTER TABLE notification_templates RENAME TO notification_templates_v9;"
+            "CREATE TABLE notification_templates ("
+            "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled'"
+            "    )),"
+            "    subject_template TEXT NOT NULL,"
+            "    body_template TEXT NOT NULL,"
+            "    updated_at_utc TEXT NOT NULL"
+            ");"
+            "INSERT INTO notification_templates("
+            "event_type, subject_template, body_template, updated_at_utc"
+            ") SELECT event_type, subject_template, body_template, updated_at_utc "
+            "FROM notification_templates_v9;"
+            "DROP TABLE notification_templates_v9;";
+
+    if (table_schema_contains(
+            "notification_jobs",
+            "admin_booking_cancelled",
+            &jobs_support_event) != 0 ||
+        table_schema_contains(
+            "notification_templates",
+            "admin_booking_cancelled",
+            &templates_support_event) != 0) {
+        return -1;
+    }
+
+    if (!jobs_support_event && execute_sql(jobs_sql) != 0) {
+        return -1;
+    }
+    if (!templates_support_event && execute_sql(templates_sql) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static int synchronize_booking_statuses(void)
@@ -747,11 +865,12 @@ static int migrate_schema(void)
         migrate_booking_columns() != 0 ||
         synchronize_booking_statuses() != 0 ||
         migrate_notification_jobs_v6() != 0 ||
+        migrate_admin_cancellation_notifications_v10() != 0 ||
         seed_calendar_defaults() != 0 ||
         migrate_customer_name_placeholders() != 0 ||
         migrate_booking_links_into_templates() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 9;") != 0 ||
+        execute_sql("PRAGMA user_version = 10;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -2104,7 +2223,7 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
         booking->street_address == NULL || booking->street_address[0] == '\0' ||
         booking->postal_code == NULL || strlen(booking->postal_code) != 5 ||
         booking->city == NULL || booking->city[0] == '\0' ||
-        booking->dog_breed == NULL || booking->dog_breed[0] == '\0' ||
+        booking->dog_breed == NULL ||
         !contact_fields_are_valid(
                 booking->contact_channel,
                 booking->email,

@@ -2470,6 +2470,18 @@ static string *handle_customer_portal_cancel_post(
         return handle_internal_error(true);
     }
 
+    /* Die Absage bleibt auch dann wirksam, wenn das nachgelagerte Einreihen
+     * der Admin-Mail fehlschlägt. Die Buchung darf nicht wegen eines
+     * Benachrichtigungsproblems erneut als aktiv erscheinen. */
+    if (notification_queue_enqueue_booking_event(
+            booking_id,
+            "admin_booking_cancelled") != 0) {
+        fprintf(
+                stderr,
+                "Admin-Benachrichtigung zur Kundenabsage konnte nicht eingereiht werden: %s\n",
+                notification_queue_last_error());
+    }
+
     written = snprintf(
             location,
             sizeof(location),

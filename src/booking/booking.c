@@ -399,7 +399,7 @@ bool parse_booking_request(const string *request, booking_request *booking)
             "dog_name",
             booking->dog_name,
             sizeof(booking->dog_name)) ||
-        !get_required_field(
+        !get_optional_single_line_field(
             request,
             "dog_breed",
             booking->dog_breed,
@@ -436,10 +436,11 @@ bool parse_booking_request(const string *request, booking_request *booking)
         return false;
     }
 
-    if (!equals_one_of(
-            booking->dog_breed,
-            allowed_dog_breeds,
-            sizeof(allowed_dog_breeds) / sizeof(allowed_dog_breeds[0])) ||
+    if ((booking->dog_breed[0] != '\0' &&
+         !equals_one_of(
+             booking->dog_breed,
+             allowed_dog_breeds,
+             sizeof(allowed_dog_breeds) / sizeof(allowed_dog_breeds[0]))) ||
         !equals_one_of(
             booking->dog_size,
             allowed_dog_sizes,
