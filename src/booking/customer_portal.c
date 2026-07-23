@@ -1,6 +1,7 @@
 #include "styles4dogs/booking/customer_portal.h"
 
 #include "styles4dogs/calendar/calendar_time.h"
+#include "styles4dogs/calendar/calendar_database.h"
 #include "styles4dogs/core/server_config.h"
 
 #include <errno.h>
@@ -422,6 +423,10 @@ customer_portal_result customer_portal_load_booking(
 {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
+    calendar_settings settings;
+    calendar_clock_snapshot snapshot;
+    time_t appointment_end;
+    time_t now_epoch;
     int step_result;
 
     if (out_booking == NULL || !customer_portal_token_is_valid(booking_id, token)) {
@@ -439,7 +444,8 @@ customer_portal_result customer_portal_load_booking(
             "SELECT id, customer_name, dog_name, "
             "       CASE WHEN service_name_snapshot <> '' THEN service_name_snapshot ELSE service END, "
             "       COALESCE(appointment_date, ''), COALESCE(start_minute, -1), "
-            "       COALESCE(end_minute, -1), decision_status, rejection_reason "
+            "       COALESCE(end_minute, -1), decision_status, rejection_reason, "
+            "       COALESCE(cancellation_reason,''), COALESCE(late_cancellation,0) "
             "FROM bookings WHERE id = ?1 AND legacy = 0;",
             -1,
             &statement,
@@ -467,13 +473,15 @@ customer_portal_result customer_portal_load_booking(
     out_booking->id = sqlite3_column_int64(statement, 0);
     out_booking->start_minute = sqlite3_column_int(statement, 5);
     out_booking->end_minute = sqlite3_column_int(statement, 6);
+    out_booking->late_cancellation = sqlite3_column_int(statement, 10) != 0;
 
     if (copy_column(statement, 1, out_booking->customer_name, sizeof(out_booking->customer_name)) != 0 ||
         copy_column(statement, 2, out_booking->dog_name, sizeof(out_booking->dog_name)) != 0 ||
         copy_column(statement, 3, out_booking->service_name, sizeof(out_booking->service_name)) != 0 ||
         copy_column(statement, 4, out_booking->appointment_date, sizeof(out_booking->appointment_date)) != 0 ||
         copy_column(statement, 7, out_booking->decision_status, sizeof(out_booking->decision_status)) != 0 ||
-        copy_column(statement, 8, out_booking->rejection_reason, sizeof(out_booking->rejection_reason)) != 0) {
+        copy_column(statement, 8, out_booking->rejection_reason, sizeof(out_booking->rejection_reason)) != 0 ||
+        copy_column(statement, 9, out_booking->cancellation_reason, sizeof(out_booking->cancellation_reason)) != 0) {
         set_error("Buchungsdaten sind zu lang");
         sqlite3_finalize(statement);
         sqlite3_close_v2(database);
@@ -482,74 +490,156 @@ customer_portal_result customer_portal_load_booking(
 
     sqlite3_finalize(statement);
     sqlite3_close_v2(database);
+
+    if (calendar_database_get_settings(&settings) != 0 ||
+        calendar_clock_now(settings.timezone, &snapshot) != 0 ||
+        calendar_utc_timestamp_to_epoch(snapshot.now_utc, &now_epoch) != 0) {
+        set_error("Aktuelle Salonzeit konnte nicht ermittelt werden");
+        return CUSTOMER_PORTAL_ERROR;
+    }
+
+    out_booking->cancellation_notice_minutes = settings.cancellation_notice_minutes;
+    out_booking->can_cancel = false;
+    if ((strcmp(out_booking->decision_status, "pending") == 0 ||
+         strcmp(out_booking->decision_status, "confirmed") == 0) &&
+        out_booking->appointment_date[0] != '\0' && out_booking->end_minute >= 0 &&
+        calendar_local_datetime_to_epoch(settings.timezone, out_booking->appointment_date,
+                                         out_booking->end_minute >= 1440 ? 1439 : out_booking->end_minute,
+                                         &appointment_end) == 0) {
+        if (out_booking->end_minute == 1440) appointment_end += 60;
+        out_booking->can_cancel = now_epoch < appointment_end;
+    }
+
     return CUSTOMER_PORTAL_OK;
+}
+
+static bool cancellation_reason_is_valid(const char *reason)
+{
+    size_t length;
+    if (reason == NULL) return false;
+    length = strlen(reason);
+    if (length >= 1024) return false;
+    for (size_t index = 0; index < length; index++) {
+        unsigned char character = (unsigned char)reason[index];
+        if ((character < 0x20 && character != '\n' && character != '\r' && character != '\t') ||
+            character == 0x7f) return false;
+    }
+    return true;
 }
 
 customer_portal_result customer_portal_cancel_booking(
         int64_t booking_id,
         const char *token,
-        const char *cancelled_at_utc
+        const char *cancelled_at_utc,
+        const char *cancellation_reason
 )
 {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
-    int result;
+    calendar_settings settings;
+    time_t now_epoch;
+    time_t appointment_start;
+    time_t appointment_end;
+    char appointment_date[11] = "";
+    char decision_status[32] = "";
+    int end_minute = -1;
+    int start_minute = -1;
+    bool late_cancellation;
+    int step_result;
     int changed_rows;
 
     if (!customer_portal_token_is_valid(booking_id, token)) {
         return CUSTOMER_PORTAL_NOT_FOUND;
     }
-    if (!calendar_utc_timestamp_is_valid(cancelled_at_utc)) {
-        set_error("Ungültiger Zeitpunkt für Terminabsage");
+    if (!calendar_utc_timestamp_is_valid(cancelled_at_utc) ||
+        !cancellation_reason_is_valid(cancellation_reason)) {
+        set_error("Ungültige Daten für Terminabsage");
+        return CUSTOMER_PORTAL_ERROR;
+    }
+    if (calendar_database_get_settings(&settings) != 0 ||
+        calendar_utc_timestamp_to_epoch(cancelled_at_utc, &now_epoch) != 0) {
+        set_error("Stornierungsfrist konnte nicht ermittelt werden");
         return CUSTOMER_PORTAL_ERROR;
     }
 
-    if (open_database(&database) != 0) {
-        return CUSTOMER_PORTAL_ERROR;
-    }
-
-    if (sqlite3_prepare_v2(
-            database,
-            "UPDATE bookings "
-            "SET decision_status = 'cancelled', decision_at = ?1, hold_expires_at = NULL, status = 'abgesagt' "
-            "WHERE id = ?2 AND legacy = 0 "
-            "  AND decision_status IN ('pending', 'confirmed');",
-            -1,
-            &statement,
-            NULL) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 1, cancelled_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_int64(statement, 2, booking_id) != SQLITE_OK) {
-        set_sqlite_error(database, "Terminabsage konnte nicht vorbereitet werden");
-        sqlite3_finalize(statement);
+    if (open_database(&database) != 0) return CUSTOMER_PORTAL_ERROR;
+    if (sqlite3_exec(database, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+        set_sqlite_error(database, "Terminabsage konnte nicht begonnen werden");
         sqlite3_close_v2(database);
         return CUSTOMER_PORTAL_ERROR;
     }
 
-    result = sqlite3_step(statement);
-    changed_rows = sqlite3_changes(database);
-    if (result != SQLITE_DONE) {
-        set_sqlite_error(database, "Terminabsage konnte nicht gespeichert werden");
+    if (sqlite3_prepare_v2(database,
+            "SELECT appointment_date,start_minute,end_minute,decision_status "
+            "FROM bookings WHERE id=?1 AND legacy=0;",
+            -1, &statement, NULL) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 1, booking_id) != SQLITE_OK) goto database_error;
+    step_result = sqlite3_step(statement);
+    if (step_result == SQLITE_DONE) {
         sqlite3_finalize(statement);
+        sqlite3_exec(database, "ROLLBACK;", NULL, NULL, NULL);
         sqlite3_close_v2(database);
-        return CUSTOMER_PORTAL_ERROR;
+        return CUSTOMER_PORTAL_NOT_FOUND;
     }
+    if (step_result != SQLITE_ROW ||
+        copy_column(statement, 0, appointment_date, sizeof(appointment_date)) != 0 ||
+        copy_column(statement, 3, decision_status, sizeof(decision_status)) != 0) goto database_error;
+    start_minute = sqlite3_column_int(statement, 1);
+    end_minute = sqlite3_column_int(statement, 2);
     sqlite3_finalize(statement);
-    sqlite3_close_v2(database);
+    statement = NULL;
 
-    if (changed_rows == 0) {
-        customer_portal_booking booking;
-        customer_portal_result load_result = customer_portal_load_booking(
-                booking_id,
-                token,
-                &booking);
-        if (load_result == CUSTOMER_PORTAL_NOT_FOUND) {
-            return CUSTOMER_PORTAL_NOT_FOUND;
-        }
-        if (load_result != CUSTOMER_PORTAL_OK) {
-            return CUSTOMER_PORTAL_ERROR;
-        }
+    if (strcmp(decision_status, "pending") != 0 && strcmp(decision_status, "confirmed") != 0) {
+        sqlite3_exec(database, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close_v2(database);
         return CUSTOMER_PORTAL_NOT_CANCELLABLE;
     }
+    if (!calendar_date_is_valid(appointment_date) || start_minute < 0 || end_minute < 0 ||
+        calendar_local_datetime_to_epoch(settings.timezone, appointment_date, start_minute,
+                                         &appointment_start) != 0 ||
+        calendar_local_datetime_to_epoch(settings.timezone, appointment_date,
+                                         end_minute >= 1440 ? 1439 : end_minute,
+                                         &appointment_end) != 0) {
+        set_error("Terminzeit konnte nicht ausgewertet werden");
+        goto rollback;
+    }
+    if (end_minute == 1440) appointment_end += 60;
+    if (now_epoch >= appointment_end) {
+        sqlite3_exec(database, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close_v2(database);
+        return CUSTOMER_PORTAL_TOO_LATE;
+    }
 
+    late_cancellation = settings.cancellation_notice_minutes > 0 &&
+                        appointment_start - now_epoch < (time_t)settings.cancellation_notice_minutes * 60;
+
+    if (sqlite3_prepare_v2(database,
+            "UPDATE bookings SET decision_status='cancelled',decision_at=?1,hold_expires_at=NULL,"
+            "status='abgesagt',cancelled_at=?1,cancellation_reason=?2,cancellation_actor='customer',"
+            "late_cancellation=?3,last_actor_type='customer',last_actor_identifier='customer_portal' "
+            "WHERE id=?4 AND legacy=0 AND decision_status IN ('pending','confirmed');",
+            -1, &statement, NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, cancelled_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, cancellation_reason, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 3, late_cancellation ? 1 : 0) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 4, booking_id) != SQLITE_OK ||
+        sqlite3_step(statement) != SQLITE_DONE) goto database_error;
+    changed_rows = sqlite3_changes(database);
+    sqlite3_finalize(statement);
+    statement = NULL;
+    if (changed_rows != 1) {
+        set_error("Buchung wurde gleichzeitig geändert");
+        goto rollback;
+    }
+    if (sqlite3_exec(database, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) goto database_error;
+    sqlite3_close_v2(database);
     return CUSTOMER_PORTAL_OK;
+
+database_error:
+    set_sqlite_error(database, "Terminabsage konnte nicht gespeichert werden");
+rollback:
+    sqlite3_finalize(statement);
+    sqlite3_exec(database, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close_v2(database);
+    return CUSTOMER_PORTAL_ERROR;
 }

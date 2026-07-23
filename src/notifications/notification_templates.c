@@ -33,8 +33,14 @@ static const default_template defaults[] = {
      "Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings",
      "Neue Terminanfrage für den Admin"},
     {"admin_booking_cancelled", "Kundenabsage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
-     "Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}",
-     "Kundenabsage für den Admin"}
+     "Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nGrund: {{cancellation_reason}}\n{{late_cancellation}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}",
+     "Kundenabsage für den Admin"},
+    {"booking_rescheduled", "Dein Termin wurde geändert – {{salon_name}}",
+     "Hallo {{customer_first_name}},\n\ndein Termin wurde geändert.\n\nBisher: {{old_appointment_date}}, {{old_start_time}}–{{old_end_time}} Uhr\nNeu: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie aktualisierte Kalenderdatei ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Terminverschiebung"},
+    {"booking_cancelled", "Deine Terminabsage – {{salon_name}}",
+     "Hallo {{customer_first_name}},\n\nwir bestätigen die Absage deines Termins.\n\nTermin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\nGrund: {{cancellation_reason}}\n{{late_cancellation}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}",
+     "Absagebestätigung für den Kunden"}
 };
 
 static char template_error[TEMPLATE_ERROR_SIZE];
@@ -76,23 +82,34 @@ static int copy_column(sqlite3_stmt *stmt, int column, char *destination, size_t
     return written >= 0 && (size_t)written < size ? 0 : -1;
 }
 
+static const char *nonnull(const char *value)
+{
+    return value == NULL ? "" : value;
+}
+
 static const char *placeholder(const notification_template_context *context, const char *name)
 {
-    if (strcmp(name, "customer_name") == 0) return context->customer_name;
-    if (strcmp(name, "customer_first_name") == 0) return context->customer_first_name;
-    if (strcmp(name, "customer_last_name") == 0) return context->customer_last_name;
-    if (strcmp(name, "booking_id") == 0) return context->booking_id;
-    if (strcmp(name, "appointment_date") == 0) return context->appointment_date;
-    if (strcmp(name, "start_time") == 0) return context->start_time;
-    if (strcmp(name, "end_time") == 0) return context->end_time;
-    if (strcmp(name, "service_name") == 0) return context->service_name;
-    if (strcmp(name, "dog_name") == 0) return context->dog_name;
-    if (strcmp(name, "rejection_reason") == 0) return context->rejection_reason;
-    if (strcmp(name, "salon_name") == 0) return context->salon_name;
-    if (strcmp(name, "salon_address") == 0) return context->salon_address;
-    if (strcmp(name, "salon_phone") == 0) return context->salon_phone;
-    if (strcmp(name, "website_url") == 0) return context->website_url;
-    if (strcmp(name, "booking_url") == 0) return context->booking_url;
+    if (context == NULL || name == NULL) return NULL;
+    if (strcmp(name, "customer_name") == 0) return nonnull(context->customer_name);
+    if (strcmp(name, "customer_first_name") == 0) return nonnull(context->customer_first_name);
+    if (strcmp(name, "customer_last_name") == 0) return nonnull(context->customer_last_name);
+    if (strcmp(name, "booking_id") == 0) return nonnull(context->booking_id);
+    if (strcmp(name, "appointment_date") == 0) return nonnull(context->appointment_date);
+    if (strcmp(name, "start_time") == 0) return nonnull(context->start_time);
+    if (strcmp(name, "end_time") == 0) return nonnull(context->end_time);
+    if (strcmp(name, "service_name") == 0) return nonnull(context->service_name);
+    if (strcmp(name, "dog_name") == 0) return nonnull(context->dog_name);
+    if (strcmp(name, "rejection_reason") == 0) return nonnull(context->rejection_reason);
+    if (strcmp(name, "cancellation_reason") == 0) return nonnull(context->cancellation_reason);
+    if (strcmp(name, "late_cancellation") == 0) return nonnull(context->late_cancellation);
+    if (strcmp(name, "old_appointment_date") == 0) return nonnull(context->old_appointment_date);
+    if (strcmp(name, "old_start_time") == 0) return nonnull(context->old_start_time);
+    if (strcmp(name, "old_end_time") == 0) return nonnull(context->old_end_time);
+    if (strcmp(name, "salon_name") == 0) return nonnull(context->salon_name);
+    if (strcmp(name, "salon_address") == 0) return nonnull(context->salon_address);
+    if (strcmp(name, "salon_phone") == 0) return nonnull(context->salon_phone);
+    if (strcmp(name, "website_url") == 0) return nonnull(context->website_url);
+    if (strcmp(name, "booking_url") == 0) return nonnull(context->booking_url);
     return NULL;
 }
 
@@ -140,7 +157,7 @@ static bool subject_valid(const char *subject)
 
 static bool valid_template(const notification_template *value)
 {
-    notification_template_context empty = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+    notification_template_context empty = {0};
     char subject[NOTIFICATION_SUBJECT_SIZE], body[NOTIFICATION_BODY_SIZE];
     return value != NULL && notification_template_event_is_valid(value->event_type) &&
            subject_valid(value->subject_template) && value->body_template[0] != '\0' &&

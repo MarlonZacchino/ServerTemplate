@@ -130,7 +130,7 @@ static void append_today_appointment(
     str_cat_cstr(context->page, "</span></article>");
 }
 
-string *admin_dashboard_build_page(void)
+string *admin_dashboard_build_page(const char *csrf_token, const char *username)
 {
     booking_status_counts booking_counts;
     notification_queue_counts notification_counts;
@@ -167,53 +167,25 @@ string *admin_dashboard_build_page(void)
     appointment_context.pending = 0;
     appointment_context.confirmed = 0;
 
-    str_cat_cstr(
-    page,
-    "<!doctype html>"
-    "<html lang=\"de\">"
-    "<head>"
-        "<meta charset=\"utf-8\">"
+    str_cat_cstr(page,
+        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<meta name=\"robots\" content=\"noindex,nofollow\">"
-        "<title>Dashboard - Styling 4 Dogs</title>"
-        "<link rel=\"stylesheet\" href=\"/style.css\">"
-    "</head>"
-    "<body>"
-        "<header class=\"site-header\">"
-            "<div class=\"container nav-wrap\">"
-                "<a class=\"brand\" href=\"/admin\">"
-                    "<span class=\"brand-mark brand-mark-logo\">"
-                        "<img src=\"/logo.jpg\" alt=\"\">"
-                    "</span>"
-                    "<span>Styling 4 Dogs Admin</span>"
-                "</a>"
-
-                "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\">"
-                    "<a href=\"/admin\" aria-current=\"page\">Übersicht</a>"
-                    "<a href=\"/\">Website öffnen</a>"
-                    "<a href=\"/admin/bookings\">Buchungsanfragen</a>"
-                    "<a href=\"/admin/gallery\">Fotos</a>"
-                    "<a href=\"/admin/appointments\">Termine</a>"
-                    "<a href=\"/admin/notifications\">E-Mail</a>"
-                    "<a href=\"/admin/calendar\">Einstellungen</a>"
-                "</nav>"
-            "</div>"
-        "</header>"
-
-        "<main class=\"page admin-page admin-dashboard-page\">"
-            "<section class=\"card admin-card dashboard-intro\">"
-                "<p class=\"eyebrow\">Salonübersicht</p>"
-                "<h1>Dein Dashboard</h1>"
-                "<p>"
-                    "Hier verwaltest du Buchungen, Termine, Fotos und E-Mails."
-                "</p>"
-            "</section>"
-
-            "<section class=\"dashboard-summary-grid\">"
-                "<a class=\"dashboard-summary-card\" href=\"/admin/bookings\">"
-                    "<span>Buchungen insgesamt</span>"
-                    "<strong>"
-);
+        "<title>Dashboard - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body>"
+        "<header class=\"site-header\"><div class=\"container nav-wrap\">"
+        "<a class=\"brand\" href=\"/admin\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs Admin</span></a>"
+        "<nav class=\"site-nav\" aria-label=\"Admin-Navigation\"><a href=\"/admin\" aria-current=\"page\">Übersicht</a>"
+        "<a href=\"/\">Website öffnen</a><a href=\"/admin/bookings\">Buchungsanfragen</a><a href=\"/admin/gallery\">Fotos</a>"
+        "<a href=\"/admin/appointments\">Termine</a><a href=\"/admin/notifications\">E-Mail</a><a href=\"/admin/calendar\">Einstellungen</a></nav>"
+        "</div></header><main class=\"page admin-page admin-dashboard-page\">"
+        "<section class=\"card admin-card dashboard-intro\"><p class=\"eyebrow\">Salonübersicht</p><h1>Dein Dashboard</h1>"
+        "<p>Hier verwaltest du Buchungen, Termine, Fotos und E-Mails.</p><div class=\"admin-session-bar\"><span>Angemeldet als ");
+    append_html(page, username == NULL ? "admin" : username);
+    str_cat_cstr(page, "</span><form method=\"post\" action=\"/admin/logout\"><input type=\"hidden\" name=\"csrf_token\" value=\"");
+    append_html(page, csrf_token);
+    str_cat_cstr(page, "\"><button class=\"button button-small button-secondary\" type=\"submit\">Abmelden</button></form></div></section>"
+                       "<section class=\"dashboard-summary-grid\"><a class=\"dashboard-summary-card\" href=\"/admin/bookings\">"
+                       "<span>Buchungen insgesamt</span><strong>");
 
 append_size(page, booking_counts.total);
 

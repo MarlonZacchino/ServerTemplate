@@ -3632,3 +3632,162 @@ select:focus {
         width: 100%;
     }
 }
+
+/* Phase 14: sichere Anmeldung und erweiterte Buchungsverwaltung */
+.admin-login-page {
+    display: grid;
+    min-height: calc(100vh - 80px);
+    place-items: center;
+    padding-block: 48px;
+}
+
+.admin-login-card {
+    width: min(100%, 520px);
+}
+
+.admin-login-card .brand {
+    margin-bottom: 28px;
+}
+
+.admin-login-card form {
+    display: grid;
+    gap: 16px;
+    margin: 24px 0 14px;
+}
+
+.admin-error {
+    padding: 13px 15px;
+    border: 1px solid #c98282;
+    border-radius: 12px;
+    background: #fff0f0;
+    color: #742c2c;
+    font-weight: 700;
+}
+
+.admin-session-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    font-size: 0.86rem;
+    font-weight: 750;
+}
+
+.admin-session-bar form {
+    margin: 0;
+}
+
+.admin-booking-editor,
+.admin-booking-danger-zone,
+.booking-history,
+.customer-history {
+    width: min(100%, 1180px);
+    margin: 0 auto 22px;
+}
+
+.admin-booking-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.admin-booking-editor form,
+.admin-booking-danger-zone form {
+    display: grid;
+    gap: 16px;
+}
+
+.booking-management-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.booking-late-cancellation {
+    width: min(100%, 1180px);
+    margin: 0 auto 20px;
+    padding: 14px 16px;
+    border: 1px solid #d1a35f;
+    border-radius: 12px;
+    background: #fff7e7;
+}
+
+.booking-timeline,
+.booking-history-list {
+    display: grid;
+    gap: 10px;
+    padding: 0;
+    list-style: none;
+}
+
+.booking-timeline li,
+.booking-history-list li {
+    display: grid;
+    gap: 4px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-soft);
+}
+
+.booking-timeline time {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.booking-timeline strong {
+    font-size: 0.98rem;
+}
+
+.booking-timeline span {
+    overflow-wrap: anywhere;
+    color: var(--muted);
+}
+
+.admin-booking-danger-zone {
+    border-color: #c98282;
+    background: #fff7f7;
+}
+
+.booking-card .booking-late-cancellation {
+    width: auto;
+    margin: 8px 0;
+    padding: 8px 10px;
+    font-size: 0.84rem;
+}
+
+@media (max-width: 1050px) {
+    .admin-booking-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-session-bar {
+        width: 100%;
+        justify-content: flex-end;
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 700px) {
+    .admin-login-page {
+        padding-block: 24px;
+    }
+
+    .admin-booking-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-session-bar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-session-bar .button,
+    .admin-booking-editor .button,
+    .admin-booking-danger-zone .button {
+        width: 100%;
+    }
+}

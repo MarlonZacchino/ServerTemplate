@@ -47,6 +47,7 @@ STYLES4DOGS_BUILD_DIR="$PROJECT_ROOT/cmake-build-deploy-test" \
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/ADDRESS_PHASE10.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/BOOKING_WORKFLOW_PHASE13.md" ]]
 [[ -f "$STAGING_ROOT/opt/styles4dogs/share/NOTIFICATIONS.md" ]]
+[[ -f "$STAGING_ROOT/opt/styles4dogs/share/BOOKING_MANAGEMENT.md" ]]
 
 grep -Fq "STYLES4DOGS_DOCUMENT_ROOT=$STAGING_ROOT/var/www/styles4dogs" \
     "$STAGING_ROOT/etc/styles4dogs/server.env"

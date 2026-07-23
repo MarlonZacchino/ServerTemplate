@@ -6,6 +6,9 @@
 #include "styles4dogs/admin/admin_appointments.h"
 #include "styles4dogs/admin/admin_notifications.h"
 #include "styles4dogs/security/auth.h"
+#include "styles4dogs/security/admin_session.h"
+#include "styles4dogs/admin/admin_booking_management.h"
+#include "styles4dogs/booking/booking_management.h"
 #include "styles4dogs/http/process.h"
 #include "styles4dogs/booking/booking.h"
 #include "styles4dogs/booking/booking_database.h"
@@ -42,6 +45,38 @@ static void customer_portal_append_html(
         string *destination,
         const char *source
 );
+static bool request_has_valid_admin_csrf(const string *request);
+static string *handle_admin_action_forbidden(void);
+
+static _Thread_local admin_session current_admin_session;
+static _Thread_local bool current_admin_session_valid = false;
+static _Thread_local bool current_admin_basic_valid = false;
+static _Thread_local char current_client_ip[64] = "127.0.0.1";
+
+static void reset_admin_request_context(void)
+{
+    sodium_memzero(&current_admin_session, sizeof(current_admin_session));
+    current_admin_session_valid = false;
+    current_admin_basic_valid = false;
+}
+
+static bool request_has_admin_access(const string *request)
+{
+    if (current_admin_session_valid || current_admin_basic_valid) return true;
+    if (admin_session_authenticate(request, &current_admin_session)) {
+        current_admin_session_valid = true;
+        return true;
+    }
+    current_admin_basic_valid = request_has_valid_admin_auth(request);
+    return current_admin_basic_valid;
+}
+
+static const char *current_admin_username(void)
+{
+    return current_admin_session_valid && current_admin_session.username[0] != '\0'
+           ? current_admin_session.username : "admin";
+}
+
 
 /*
  * Content-Type anhand der Dateiendung bestimmen.
@@ -513,34 +548,6 @@ static string *handle_internal_error(bool send_body)
     return build_response_text("500 Internal Server Error", "text/html; charset=utf-8", NULL, body, send_body);
 }
 
-static string *handle_unauthorized(bool send_body)
-{
-    const char *body =
-            "<!doctype html>\n"
-            "<html lang=\"de\">\n"
-            "<head><meta charset=\"utf-8\"><title>401 Unauthorized</title></head>\n"
-            "<body><h1>401 Unauthorized</h1><p>Für diesen Bereich musst du dich anmelden.</p></body>\n"
-            "</html>\n";
-
-    return build_response_text(
-            "401 Unauthorized",
-            "text/html; charset=utf-8",
-            "WWW-Authenticate: Basic realm=\"Styling 4 Dogs Admin\"\r\n"
-            "Cache-Control: no-store\r\n"
-            "Pragma: no-cache\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "X-Frame-Options: DENY\r\n",
-            body,
-            send_body
-    );
-}
-
-/*
- * Liefert eine Datei aus dem public-Ordner aus.
- *
- * Wichtig:
- * realpath() schützt uns davor, dass jemand mit ../ aus public ausbricht.
- */
 static string *serve_static_file(const char *request_path, bool send_body)
 {
     char document_root_real[PATH_MAX];
@@ -634,6 +641,13 @@ static bool get_form_csrf_token(
 
     if (out_token == NULL || out_token_size < sizeof(token)) {
         return false;
+    }
+
+    if (current_admin_session_valid) {
+        if (out_token_size < sizeof(current_admin_session.csrf_token)) return false;
+        memcpy(out_token, current_admin_session.csrf_token,
+               sizeof(current_admin_session.csrf_token));
+        return true;
     }
 
     if (!initialized) {
@@ -964,7 +978,13 @@ static string *handle_admin_setup_post(string *request)
     create_result = create_admin_auth(username, password);
 
     if (create_result == 0) {
-        response = handle_admin_setup_created(true);
+        if (admin_session_initialize() != 0) {
+            fprintf(stderr, "Admin-Sitzungszugang konnte nicht initialisiert werden: %s\n",
+                    admin_session_last_error());
+            response = handle_internal_error(true);
+        } else {
+            response = handle_admin_setup_created(true);
+        }
         goto cleanup;
     }
 
@@ -1495,6 +1515,198 @@ static bool parse_positive_booking_id(
     return true;
 }
 
+
+static string *admin_booking_edit_redirect(int64_t booking_id, const char *notice)
+{
+    char headers[512];
+    int written = snprintf(headers, sizeof(headers),
+            "Location: /admin/bookings/edit?id=%lld&saved=%s\r\nCache-Control: no-store\r\nPragma: no-cache\r\n",
+            (long long)booking_id, notice == NULL ? "updated" : notice);
+    if (written < 0 || (size_t)written >= sizeof(headers)) return handle_internal_error(true);
+    return build_response_text("303 See Other", "text/html; charset=utf-8", headers,
+            "<!doctype html><html lang=\"de\"><body></body></html>", true);
+}
+
+static string *handle_admin_booking_management_page(
+        const string *request,
+        bool send_body,
+        const char *query,
+        size_t query_length
+)
+{
+    char id_text[32] = {0};
+    char notice[32] = {0};
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    int64_t booking_id;
+    string *body;
+    string *response;
+    form_value_result result;
+
+    (void)request;
+    result = form_urlencoded_get_from_data(query, query_length, "id", id_text, sizeof(id_text));
+    if (result != FORM_VALUE_OK || !parse_positive_booking_id(id_text, &booking_id)) {
+        return handle_bad_request(send_body);
+    }
+    result = form_urlencoded_get_from_data(query, query_length, "saved", notice, sizeof(notice));
+    if (result != FORM_VALUE_OK && result != FORM_VALUE_NOT_FOUND) return handle_bad_request(send_body);
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) return handle_internal_error(send_body);
+    body = admin_booking_management_build_page(
+            booking_id, csrf_token, notice[0] == '\0' ? NULL : notice,
+            current_admin_username());
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    if (body == NULL) {
+        fprintf(stderr, "Buchungsbearbeitung konnte nicht erzeugt werden: %s\n",
+                admin_booking_management_last_error());
+        return handle_admin_status_not_found();
+    }
+    response = build_response_bytes("200 OK", "text/html; charset=utf-8", admin_security_headers(),
+                                    get_char_str(body), get_length(body), send_body);
+    free_str(body);
+    return response;
+}
+
+static bool get_form_field(
+        const string *request,
+        const char *name,
+        char *output,
+        size_t output_size,
+        bool optional
+)
+{
+    form_value_result result = form_urlencoded_get(request, name, output, output_size);
+    if (result == FORM_VALUE_NOT_FOUND && optional) {
+        output[0] = '\0';
+        return true;
+    }
+    return result == FORM_VALUE_OK;
+}
+
+static string *handle_admin_booking_update_post(const string *request)
+{
+    char booking_id_text[32] = {0};
+    char first_name[128] = {0};
+    char last_name[128] = {0};
+    char email[256] = {0};
+    char phone_number[64] = {0};
+    char phone_kind[32] = {0};
+    char contact_channel[32] = {0};
+    char contact_preference[32] = {0};
+    char street_address[256] = {0};
+    char postal_code[16] = {0};
+    char city[128] = {0};
+    char dog_name[128] = {0};
+    char dog_breed[128] = {0};
+    char dog_size[32] = {0};
+    char service_code[64] = {0};
+    char appointment_date[11] = {0};
+    char appointment_start[6] = {0};
+    char message[2048] = {0};
+    char admin_note[BOOKING_INTERNAL_NOTE_SIZE] = {0};
+    int64_t booking_id;
+    int start_minute;
+    bool rescheduled = false;
+    booking_management_update update;
+    booking_management_result result;
+
+    if (!request_has_valid_admin_csrf(request) ||
+        !get_form_field(request, "booking_id", booking_id_text, sizeof(booking_id_text), false) ||
+        !parse_positive_booking_id(booking_id_text, &booking_id) ||
+        !get_form_field(request, "first_name", first_name, sizeof(first_name), false) ||
+        !get_form_field(request, "last_name", last_name, sizeof(last_name), false) ||
+        !get_form_field(request, "email", email, sizeof(email), true) ||
+        !get_form_field(request, "phone_number", phone_number, sizeof(phone_number), true) ||
+        !get_form_field(request, "phone_kind", phone_kind, sizeof(phone_kind), true) ||
+        !get_form_field(request, "contact_channel", contact_channel, sizeof(contact_channel), false) ||
+        !get_form_field(request, "contact_preference", contact_preference, sizeof(contact_preference), true) ||
+        !get_form_field(request, "street_address", street_address, sizeof(street_address), false) ||
+        !get_form_field(request, "postal_code", postal_code, sizeof(postal_code), false) ||
+        !get_form_field(request, "city", city, sizeof(city), false) ||
+        !get_form_field(request, "dog_name", dog_name, sizeof(dog_name), false) ||
+        !get_form_field(request, "dog_breed", dog_breed, sizeof(dog_breed), true) ||
+        !get_form_field(request, "dog_size", dog_size, sizeof(dog_size), false) ||
+        !get_form_field(request, "service_code", service_code, sizeof(service_code), false) ||
+        !get_form_field(request, "appointment_date", appointment_date, sizeof(appointment_date), false) ||
+        !get_form_field(request, "appointment_start", appointment_start, sizeof(appointment_start), false) ||
+        !get_form_field(request, "message", message, sizeof(message), true) ||
+        !get_form_field(request, "admin_note", admin_note, sizeof(admin_note), true) ||
+        calendar_time_parse_hhmm(appointment_start, &start_minute) != 0) {
+        if (!request_has_valid_admin_csrf(request)) return handle_admin_action_forbidden();
+        return handle_bad_request(true);
+    }
+
+    update = (booking_management_update){
+        .booking_id = booking_id,
+        .first_name = first_name,
+        .last_name = last_name,
+        .email = email,
+        .phone_number = phone_number,
+        .phone_kind = phone_kind,
+        .contact_channel = contact_channel,
+        .contact_preference = contact_preference,
+        .street_address = street_address,
+        .postal_code = postal_code,
+        .city = city,
+        .dog_name = dog_name,
+        .dog_breed = dog_breed,
+        .dog_size = dog_size,
+        .service_code = service_code,
+        .appointment_date = appointment_date,
+        .start_minute = start_minute,
+        .message = message,
+        .admin_note = admin_note,
+        .actor_identifier = current_admin_username()
+    };
+    result = booking_management_update_booking(&update, &rescheduled);
+    if (result == BOOKING_MANAGEMENT_OK) return admin_booking_edit_redirect(booking_id, rescheduled ? "rescheduled" : "updated");
+    if (result == BOOKING_MANAGEMENT_CONFLICT) return admin_booking_edit_redirect(booking_id, "conflict");
+    if (result == BOOKING_MANAGEMENT_INVALID) return admin_booking_edit_redirect(booking_id, "invalid");
+    if (result == BOOKING_MANAGEMENT_NOT_ALLOWED) return admin_booking_edit_redirect(booking_id, "not-allowed");
+    if (result == BOOKING_MANAGEMENT_NOT_FOUND) return handle_admin_status_not_found();
+    fprintf(stderr, "Buchungsänderung fehlgeschlagen: %s\n", booking_management_last_error());
+    return handle_internal_error(true);
+}
+
+static string *handle_admin_booking_no_show_post(const string *request)
+{
+    char booking_id_text[32] = {0};
+    char note[BOOKING_INTERNAL_NOTE_SIZE] = {0};
+    int64_t booking_id;
+    booking_management_result result;
+
+    if (!request_has_valid_admin_csrf(request)) return handle_admin_action_forbidden();
+    if (!get_form_field(request, "booking_id", booking_id_text, sizeof(booking_id_text), false) ||
+        !parse_positive_booking_id(booking_id_text, &booking_id) ||
+        !get_form_field(request, "note", note, sizeof(note), true)) return handle_bad_request(true);
+    result = booking_management_mark_no_show(booking_id, note, current_admin_username());
+    if (result == BOOKING_MANAGEMENT_OK) return admin_booking_edit_redirect(booking_id, "no-show");
+    if (result == BOOKING_MANAGEMENT_NOT_ALLOWED) return admin_booking_edit_redirect(booking_id, "not-allowed");
+    if (result == BOOKING_MANAGEMENT_NOT_FOUND) return handle_admin_status_not_found();
+    fprintf(stderr, "No-Show-Status konnte nicht gespeichert werden: %s\n", booking_management_last_error());
+    return handle_internal_error(true);
+}
+
+static string *handle_admin_booking_dog_note_post(const string *request)
+{
+    char booking_id_text[32] = {0};
+    char dog_id_text[32] = {0};
+    char note[BOOKING_INTERNAL_NOTE_SIZE] = {0};
+    int64_t booking_id;
+    int64_t dog_id;
+    booking_management_result result;
+
+    if (!request_has_valid_admin_csrf(request)) return handle_admin_action_forbidden();
+    if (!get_form_field(request, "booking_id", booking_id_text, sizeof(booking_id_text), false) ||
+        !get_form_field(request, "dog_id", dog_id_text, sizeof(dog_id_text), false) ||
+        !parse_positive_booking_id(booking_id_text, &booking_id) ||
+        !parse_positive_booking_id(dog_id_text, &dog_id) ||
+        !get_form_field(request, "dog_note", note, sizeof(note), true)) return handle_bad_request(true);
+    result = booking_management_update_dog_note(dog_id, note, current_admin_username());
+    if (result == BOOKING_MANAGEMENT_OK) return admin_booking_edit_redirect(booking_id, "dog-note");
+    if (result == BOOKING_MANAGEMENT_NOT_FOUND) return handle_admin_status_not_found();
+    fprintf(stderr, "Hundenotiz konnte nicht gespeichert werden: %s\n", booking_management_last_error());
+    return handle_internal_error(true);
+}
+
 static bool is_valid_admin_booking_status(const char *status)
 {
     if (status == NULL) {
@@ -1700,8 +1912,13 @@ static bool request_has_valid_admin_csrf(const string *request)
             "csrf_token",
             csrf_token,
             sizeof(csrf_token));
-    bool valid = result == FORM_VALUE_OK && form_csrf_token_matches(csrf_token);
+    bool valid = false;
 
+    if (result == FORM_VALUE_OK) {
+        valid = current_admin_session_valid
+                ? admin_session_validate_csrf(&current_admin_session, csrf_token)
+                : form_csrf_token_matches(csrf_token);
+    }
     sodium_memzero(csrf_token, sizeof(csrf_token));
     return valid;
 }
@@ -1990,8 +2207,17 @@ static string *handle_admin_calendar_post(
 static bool request_has_valid_admin_multipart_csrf(const string *request)
 {
     char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
-    bool ok = gallery_extract_multipart_text_field(request, "csrf_token", csrf_token, sizeof(csrf_token)) &&
-              form_csrf_token_matches(csrf_token);
+    bool ok = gallery_extract_multipart_text_field(
+            request,
+            "csrf_token",
+            csrf_token,
+            sizeof(csrf_token));
+
+    if (ok) {
+        ok = current_admin_session_valid
+             ? admin_session_validate_csrf(&current_admin_session, csrf_token)
+             : form_csrf_token_matches(csrf_token);
+    }
     sodium_memzero(csrf_token, sizeof(csrf_token));
     return ok;
 }
@@ -2300,6 +2526,130 @@ static const char *customer_portal_security_headers(void)
             "X-Frame-Options: DENY\r\n";
 }
 
+
+static string *handle_admin_login_required(bool send_body)
+{
+    return build_response_text(
+            "303 See Other",
+            "text/html; charset=utf-8",
+            "Location: /admin/login\r\nCache-Control: no-store\r\nPragma: no-cache\r\n",
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><title>Anmeldung erforderlich</title></head><body><p>Bitte melde dich im Adminbereich an.</p></body></html>",
+            send_body);
+}
+
+static string *handle_admin_login_page(
+        const string *request,
+        bool send_body,
+        const char *error_code
+)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    string *body;
+    string *response;
+    const char *error_text = NULL;
+
+    if (request_has_admin_access(request)) {
+        return build_response_text(
+                "303 See Other", "text/html; charset=utf-8",
+                "Location: /admin\r\nCache-Control: no-store\r\n",
+                "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><title>Weiterleitung</title></head><body></body></html>",
+                send_body);
+    }
+    reset_admin_request_context();
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) return handle_internal_error(send_body);
+    if (error_code != NULL && strcmp(error_code, "invalid") == 0) {
+        error_text = "Anmeldung fehlgeschlagen. Bitte prüfe deine Zugangsdaten.";
+    } else if (error_code != NULL && strcmp(error_code, "limited") == 0) {
+        error_text = "Zu viele fehlgeschlagene Anmeldeversuche. Bitte warte einige Minuten.";
+    }
+
+    body = _new_string();
+    if (body == NULL) return handle_internal_error(send_body);
+    str_cat_cstr(body,
+            "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<meta name=\"robots\" content=\"noindex,nofollow\"><title>Admin-Anmeldung - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head>"
+            "<body><main class=\"page admin-login-page\"><section class=\"card admin-login-card\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a>"
+            "<p class=\"eyebrow\">Geschützter Bereich</p><h1>Admin-Anmeldung</h1><p>Melde dich mit dem eingerichteten Adminzugang an.</p>");
+    if (error_text != NULL) {
+        str_cat_cstr(body, "<p class=\"admin-error\" role=\"alert\">");
+        customer_portal_append_html(body, error_text);
+        str_cat_cstr(body, "</p>");
+    }
+    str_cat_cstr(body, "<form method=\"post\" action=\"/admin/login\"><input type=\"hidden\" name=\"csrf_token\" value=\"");
+    customer_portal_append_html(body, csrf_token);
+    str_cat_cstr(body, "\"><label>Benutzername<input name=\"username\" autocomplete=\"username\" maxlength=\"127\" required autofocus></label>"
+                         "<label>Passwort<input type=\"password\" name=\"password\" autocomplete=\"current-password\" maxlength=\"512\" required></label>"
+                         "<button class=\"button\" type=\"submit\">Anmelden</button></form><a class=\"button button-secondary\" href=\"/\">Zur Website</a></section></main></body></html>");
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    response = build_response_bytes("200 OK", "text/html; charset=utf-8", admin_security_headers(),
+                                    get_char_str(body), get_length(body), send_body);
+    free_str(body);
+    return response;
+}
+
+static string *handle_admin_login_post(const string *request)
+{
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE] = {0};
+    char username[ADMIN_SESSION_USERNAME_SIZE] = {0};
+    char password[SETUP_PASSWORD_SIZE] = {0};
+    char cookie[ADMIN_SESSION_COOKIE_HEADER_SIZE] = {0};
+    char headers[ADMIN_SESSION_COOKIE_HEADER_SIZE + 256];
+    admin_session_login_result result;
+    int written;
+
+    if (form_urlencoded_get(request, "csrf_token", csrf_token, sizeof(csrf_token)) != FORM_VALUE_OK ||
+        !form_csrf_token_matches(csrf_token) ||
+        form_urlencoded_get(request, "username", username, sizeof(username)) != FORM_VALUE_OK ||
+        form_urlencoded_get(request, "password", password, sizeof(password)) != FORM_VALUE_OK) {
+        sodium_memzero(password, sizeof(password));
+        sodium_memzero(csrf_token, sizeof(csrf_token));
+        return build_response_text("303 See Other", "text/html; charset=utf-8",
+                "Location: /admin/login?error=invalid\r\nCache-Control: no-store\r\n",
+                "<!doctype html><html lang=\"de\"><body></body></html>", true);
+    }
+
+    result = admin_session_login(request, current_client_ip, username, password,
+                                 cookie, sizeof(cookie));
+    sodium_memzero(password, sizeof(password));
+    sodium_memzero(csrf_token, sizeof(csrf_token));
+    if (result != ADMIN_SESSION_LOGIN_OK) {
+        const char *location = result == ADMIN_SESSION_LOGIN_RATE_LIMITED
+                               ? "Location: /admin/login?error=limited\r\nCache-Control: no-store\r\n"
+                               : "Location: /admin/login?error=invalid\r\nCache-Control: no-store\r\n";
+        if (result == ADMIN_SESSION_LOGIN_ERROR) {
+            fprintf(stderr, "Admin-Anmeldung fehlgeschlagen: %s\n", admin_session_last_error());
+        }
+        return build_response_text("303 See Other", "text/html; charset=utf-8", location,
+                "<!doctype html><html lang=\"de\"><body></body></html>", true);
+    }
+
+    written = snprintf(headers, sizeof(headers), "%sLocation: /admin\r\nCache-Control: no-store\r\nPragma: no-cache\r\n", cookie);
+    sodium_memzero(cookie, sizeof(cookie));
+    if (written < 0 || (size_t)written >= sizeof(headers)) return handle_internal_error(true);
+    return build_response_text("303 See Other", "text/html; charset=utf-8", headers,
+            "<!doctype html><html lang=\"de\"><body></body></html>", true);
+}
+
+static string *handle_admin_logout_post(const string *request)
+{
+    char clear_cookie[ADMIN_SESSION_COOKIE_HEADER_SIZE] = {0};
+    char headers[ADMIN_SESSION_COOKIE_HEADER_SIZE + 256];
+    int written;
+
+    if (!request_has_admin_access(request)) return handle_admin_login_required(true);
+    if (!request_has_valid_admin_csrf(request)) return handle_admin_action_forbidden();
+    if (admin_session_logout(request) != 0 ||
+        admin_session_build_clear_cookie(request, clear_cookie, sizeof(clear_cookie)) != 0) {
+        fprintf(stderr, "Admin-Logout fehlgeschlagen: %s\n", admin_session_last_error());
+        return handle_internal_error(true);
+    }
+    written = snprintf(headers, sizeof(headers), "%sLocation: /admin/login\r\nCache-Control: no-store\r\n", clear_cookie);
+    sodium_memzero(clear_cookie, sizeof(clear_cookie));
+    if (written < 0 || (size_t)written >= sizeof(headers)) return handle_internal_error(true);
+    return build_response_text("303 See Other", "text/html; charset=utf-8", headers,
+            "<!doctype html><html lang=\"de\"><body></body></html>", true);
+}
+
 static string *handle_customer_portal_not_found(bool send_body)
 {
     return build_response_text(
@@ -2345,8 +2695,7 @@ static string *handle_customer_portal_page(
     if (booking.start_minute >= 0) calendar_time_format_hhmm(booking.start_minute, start);
     if (booking.end_minute >= 0) calendar_time_format_hhmm(booking.end_minute, end);
 
-    cancellable = strcmp(booking.decision_status, "pending") == 0 ||
-                  strcmp(booking.decision_status, "confirmed") == 0;
+    cancellable = booking.can_cancel;
 
     body = _new_string();
     str_cat_cstr(body, "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><title>Deine Buchung - Styling 4 Dogs</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><header class=\"site-header\"><div class=\"container nav-wrap\"><a class=\"brand\" href=\"/\"><span class=\"brand-mark brand-mark-logo\"><img src=\"/logo.jpg\" alt=\"\"></span><span>Styling 4 Dogs</span></a><a class=\"button button-small button-secondary\" href=\"/kontakt\">Neue Anfrage</a></div></header><main class=\"page customer-portal-page\"><section class=\"card customer-portal-card\"><p class=\"eyebrow\">Deine Buchung</p><h1>Hallo ");
@@ -2386,6 +2735,13 @@ static string *handle_customer_portal_page(
         str_cat_cstr(body, "</p></div>");
     }
 
+    if (strcmp(booking.decision_status, "cancelled") == 0 &&
+        booking.cancellation_reason[0] != '\0') {
+        str_cat_cstr(body, "<div class=\"customer-portal-message\"><h2>Dein Absagegrund</h2><p>");
+        customer_portal_append_html(body, booking.cancellation_reason);
+        str_cat_cstr(body, "</p></div>");
+    }
+
     if (cancellable) {
         bool confirmed = strcmp(booking.decision_status, "confirmed") == 0;
 
@@ -2393,25 +2749,32 @@ static string *handle_customer_portal_page(
         str_cat_cstr(body, confirmed ? "Termin absagen" : "Anfrage zurückziehen");
         str_cat_cstr(body, "</h2><p>Der Zeitraum wird anschließend wieder für andere Kundinnen und Kunden freigegeben.</p>");
 
-        if (confirmed) {
-            str_cat_cstr(
-                    body,
-                    "<p class=\"customer-portal-cancellation-fee\">"
-                    "<strong>Hinweis zur Stornierung:</strong> "
-                    "Bei einer Stornierung innerhalb von 72 Stunden vor dem Termin "
-                    "fällt eine Ausfallgebühr an."
-                    "</p>");
+        if (confirmed && booking.cancellation_notice_minutes > 0) {
+            char hours_text[32];
+            int notice_hours = booking.cancellation_notice_minutes / 60;
+            int hours_written = snprintf(hours_text, sizeof(hours_text), "%d", notice_hours);
+            str_cat_cstr(body, "<p class=\"customer-portal-cancellation-fee\"><strong>Hinweis zur Stornierung:</strong> Bei einer Stornierung innerhalb von ");
+            if (hours_written > 0 && (size_t)hours_written < sizeof(hours_text)) {
+                str_cat(body, hours_text, (size_t)hours_written);
+            }
+            str_cat_cstr(body, " Stunden vor dem Termin kann eine Ausfallgebühr anfallen.</p>");
         }
 
         str_cat_cstr(body, "<form method=\"post\" action=\"/buchung/");
         {
             char id_text[32];
-            int written = snprintf(id_text, sizeof(id_text), "%lld", (long long)booking.id);
-            if (written > 0 && (size_t)written < sizeof(id_text)) str_cat(body, id_text, (size_t)written);
+            int id_written = snprintf(id_text, sizeof(id_text), "%lld", (long long)booking.id);
+            if (id_written > 0 && (size_t)id_written < sizeof(id_text)) {
+                str_cat(body, id_text, (size_t)id_written);
+            }
         }
         str_cat_cstr(body, "/");
         customer_portal_append_html(body, token);
-        str_cat_cstr(body, "/cancel\"><label class=\"consent-field\"><input type=\"checkbox\" name=\"confirm_cancel\" value=\"1\" required><span>Ja, ich möchte diese Buchung wirklich absagen.</span></label><button class=\"button button-danger\" type=\"submit\">Buchung absagen</button></form></div>");
+        str_cat_cstr(body, "/cancel\"><label for=\"cancellation_reason\">Absagegrund <span class=\"field-optional\">(optional)</span></label><textarea id=\"cancellation_reason\" name=\"cancellation_reason\" maxlength=\"1000\" rows=\"4\" placeholder=\"Du kannst uns kurz mitteilen, warum du absagen musst.\"></textarea><label class=\"consent-field\"><input type=\"checkbox\" name=\"confirm_cancel\" value=\"1\" required><span>Ja, ich möchte diese Buchung wirklich absagen.</span></label><button class=\"button button-danger\" type=\"submit\">Buchung absagen</button></form></div>");
+    } else if ((strcmp(booking.decision_status, "pending") == 0 ||
+                strcmp(booking.decision_status, "confirmed") == 0) &&
+               !booking.can_cancel) {
+        str_cat_cstr(body, "<div class=\"customer-portal-message\"><h2>Onlineabsage nicht mehr möglich</h2><p>Der Termin ist bereits beendet. Bitte kontaktiere den Salon direkt, falls noch etwas geklärt werden muss.</p></div>");
     }
 
     str_cat_cstr(body, "<div class=\"customer-portal-help\"><h2>Fragen oder Änderungswünsche?</h2><p>Die Kontaktdaten des Salons findest du im Impressum.</p><a class=\"button button-secondary\" href=\"/impressum\">Zum Impressum</a></div></section></main><footer class=\"site-footer\"><div class=\"container footer-bottom\"><small>&copy; 2026 Styling 4 Dogs.</small></div></footer></body></html>");
@@ -2434,6 +2797,7 @@ static string *handle_customer_portal_cancel_post(
 )
 {
     char confirmation[8] = {0};
+    char cancellation_reason[1024] = {0};
     calendar_settings settings;
     calendar_clock_snapshot snapshot;
     customer_portal_result result;
@@ -2449,6 +2813,17 @@ static string *handle_customer_portal_cancel_post(
         return handle_bad_request(true);
     }
 
+    {
+        form_value_result reason_result = form_urlencoded_get(
+                request,
+                "cancellation_reason",
+                cancellation_reason,
+                sizeof(cancellation_reason));
+        if (reason_result != FORM_VALUE_OK && reason_result != FORM_VALUE_NOT_FOUND) {
+            return handle_bad_request(true);
+        }
+    }
+
     if (calendar_database_get_settings(&settings) != 0 ||
         calendar_clock_now(settings.timezone, &snapshot) != 0) {
         return handle_internal_error(true);
@@ -2457,12 +2832,13 @@ static string *handle_customer_portal_cancel_post(
     result = customer_portal_cancel_booking(
             booking_id,
             token,
-            snapshot.now_utc);
+            snapshot.now_utc,
+            cancellation_reason);
 
     if (result == CUSTOMER_PORTAL_NOT_FOUND) {
         return handle_customer_portal_not_found(true);
     }
-    if (result == CUSTOMER_PORTAL_NOT_CANCELLABLE) {
+    if (result == CUSTOMER_PORTAL_NOT_CANCELLABLE || result == CUSTOMER_PORTAL_TOO_LATE) {
         return handle_customer_portal_page(booking_id, token, true, false);
     }
     if (result != CUSTOMER_PORTAL_OK) {
@@ -2473,6 +2849,10 @@ static string *handle_customer_portal_cancel_post(
     /* Die Absage bleibt auch dann wirksam, wenn das nachgelagerte Einreihen
      * der Admin-Mail fehlschlägt. Die Buchung darf nicht wegen eines
      * Benachrichtigungsproblems erneut als aktiv erscheinen. */
+    if (notification_queue_enqueue_booking_event(booking_id, "booking_cancelled") != 0) {
+        fprintf(stderr, "Absagebestätigung konnte nicht eingereiht werden: %s\n",
+                notification_queue_last_error());
+    }
     if (notification_queue_enqueue_booking_event(
             booking_id,
             "admin_booking_cancelled") != 0) {
@@ -2503,8 +2883,15 @@ static string *handle_customer_portal_cancel_post(
 
 static string *handle_admin_dashboard_page(bool send_body)
 {
-    string *body = admin_dashboard_build_page();
+    char csrf_token[FORM_CSRF_TOKEN_HEX_SIZE];
+    string *body;
     string *response;
+
+    if (!get_form_csrf_token(csrf_token, sizeof(csrf_token))) {
+        return handle_internal_error(send_body);
+    }
+    body = admin_dashboard_build_page(csrf_token, current_admin_username());
+    sodium_memzero(csrf_token, sizeof(csrf_token));
 
     if (body == NULL) {
         fprintf(stderr, "Admin-Dashboard konnte nicht erzeugt werden: %s\n", admin_dashboard_last_error());
@@ -2548,13 +2935,17 @@ static string *handle_admin_gallery_reorder_post(const string *request)
     return handle_internal_error(true);
 }
 
-string *process(string *request)
+string *process_from_client(string *request, const char *client_ip)
 {
     char method[MAX_METHOD_LENGTH + 1];
     char path[MAX_PATH_LENGTH + 1];
     const char *query = NULL;
     size_t query_length = 0;
     bool send_body = true;
+
+    reset_admin_request_context();
+    snprintf(current_client_ip, sizeof(current_client_ip), "%s",
+             client_ip == NULL || client_ip[0] == '\0' ? "127.0.0.1" : client_ip);
 
     if (!parse_request_line(request, method, sizeof(method), path, sizeof(path))) {
         return handle_bad_request(true);
@@ -2595,9 +2986,25 @@ string *process(string *request)
             return handle_admin_setup_post(request);
         }
 
+        if (strcmp(path, "/admin/login") == 0) {
+            return handle_admin_login_post(request);
+        }
+        if (strcmp(path, "/admin/logout") == 0) {
+            return handle_admin_logout_post(request);
+        }
+
+        if (strcmp(path, "/admin/bookings/update") == 0 ||
+            strcmp(path, "/admin/bookings/no-show") == 0 ||
+            strcmp(path, "/admin/bookings/dog-note") == 0) {
+            if (!request_has_admin_access(request)) return handle_admin_login_required(true);
+            if (strcmp(path, "/admin/bookings/update") == 0) return handle_admin_booking_update_post(request);
+            if (strcmp(path, "/admin/bookings/no-show") == 0) return handle_admin_booking_no_show_post(request);
+            return handle_admin_booking_dog_note_post(request);
+        }
+
         if (strcmp(path, "/admin/bookings/status") == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
 
             return handle_admin_booking_status_post(request);
@@ -2605,8 +3012,8 @@ string *process(string *request)
 
         if (strcmp(path, "/admin/bookings/accept") == 0 ||
             strcmp(path, "/admin/bookings/reject") == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
 
             return handle_admin_booking_decision_post(
@@ -2615,8 +3022,8 @@ string *process(string *request)
         }
 
         if (strncmp(path, "/admin/notifications/", strlen("/admin/notifications/")) == 0) {
-            if (!request_has_valid_admin_auth(request))
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request))
+                return handle_admin_login_required(true);
 
             if (strcmp(path, "/admin/notifications/toggle") == 0)
                 return handle_admin_notifications_post(
@@ -2651,8 +3058,8 @@ string *process(string *request)
         }
 
         if (strncmp(path, "/admin/calendar/", strlen("/admin/calendar/")) == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
 
             if (strcmp(path, "/admin/calendar/settings") == 0) {
@@ -2706,22 +3113,22 @@ string *process(string *request)
         }
 
         if (strcmp(path, "/admin/gallery/upload") == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
             return handle_admin_gallery_upload_post(request);
         }
 
         if (strcmp(path, "/admin/gallery/delete") == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
             return handle_admin_gallery_delete_post(request);
         }
 
         if (strcmp(path, "/admin/gallery/reorder") == 0) {
-            if (!request_has_valid_admin_auth(request)) {
-                return handle_unauthorized(true);
+            if (!request_has_admin_access(request)) {
+                return handle_admin_login_required(true);
             }
             return handle_admin_gallery_reorder_post(request);
         }
@@ -2792,42 +3199,55 @@ string *process(string *request)
      * Ab hier bleiben nur noch GET und HEAD übrig.
      * Die Admin-Seite schützen wir mit Basic Auth.
      */
+    if (strcmp(path, "/admin/login") == 0) {
+        char error_code[16] = {0};
+        if (query != NULL && query_length > 0) {
+            form_value_result error_result = form_urlencoded_get_from_data(
+                    query, query_length, "error", error_code, sizeof(error_code));
+            if (error_result != FORM_VALUE_OK && error_result != FORM_VALUE_NOT_FOUND) {
+                return handle_bad_request(send_body);
+            }
+        }
+        return handle_admin_login_page(request, send_body,
+                error_code[0] == '\0' ? NULL : error_code);
+    }
+
     if (strcmp(path, "/setup/admin") == 0) {
         return handle_admin_setup_page(send_body);
     }
 
     if (strcmp(path, "/admin") == 0) {
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
         return handle_admin_dashboard_page(send_body);
     }
 
     if (strcmp(path, "/admin/notifications") == 0) {
-        if (!request_has_valid_admin_auth(request))
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request))
+            return handle_admin_login_required(send_body);
         return handle_admin_notifications_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/appointments") == 0) {
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
 
         return handle_admin_appointments_page(send_body, query, query_length);
     }
 
     if (strcmp(path, "/admin/calendar") == 0) {
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
 
         return handle_admin_calendar_page(send_body, query, query_length);
     }
 
     if (strncmp(path, "/admin/gallery/media/", strlen("/admin/gallery/media/")) == 0) {
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
 
         return handle_gallery_media(
@@ -2838,18 +3258,24 @@ string *process(string *request)
     }
 
     if (strcmp(path, "/admin/gallery") == 0) {
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
 
         return handle_admin_gallery_page(send_body, query, query_length);
     }
 
+    if (strcmp(path, "/admin/bookings/edit") == 0) {
+        if (!request_has_admin_access(request)) return handle_admin_login_required(send_body);
+        if (query == NULL || query_length == 0) return handle_bad_request(send_body);
+        return handle_admin_booking_management_page(request, send_body, query, query_length);
+    }
+
     if (strcmp(path, "/admin/bookings") == 0) {
         booking_admin_filter filter;
 
-        if (!request_has_valid_admin_auth(request)) {
-            return handle_unauthorized(send_body);
+        if (!request_has_admin_access(request)) {
+            return handle_admin_login_required(send_body);
         }
 
         if (!parse_booking_admin_filter(query, query_length, &filter)) {
@@ -2860,4 +3286,9 @@ string *process(string *request)
     }
 
     return serve_static_file(path, send_body);
+}
+
+string *process(string *request)
+{
+    return process_from_client(request, "127.0.0.1");
 }

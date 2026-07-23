@@ -23,6 +23,7 @@
 #include "styles4dogs/http/process.h"
 #include "styles4dogs/services/postal_lookup.h"
 #include "styles4dogs/security/rate_limit.h"
+#include "styles4dogs/security/admin_session.h"
 #include "styles4dogs/core/server_config.h"
 
 /**
@@ -754,7 +755,7 @@ static int handle_raw_request(
             return -1;
         }
 
-        response = process(request);
+        response = process_from_client(request, client_ip);
 
         if (kind == REQUEST_KIND_ADMIN) {
             if (response_has_status(response, "HTTP/1.1 401 ")) {
@@ -1004,6 +1005,15 @@ int main(int argc, char *argv[])
                 stderr,
                 "ERROR initializing calendar database: %s\n",
                 calendar_database_last_error());
+        booking_database_shutdown();
+        return EXIT_FAILURE;
+    }
+
+    if (admin_session_initialize() != 0 || admin_session_cleanup() != 0) {
+        fprintf(
+                stderr,
+                "ERROR initializing admin sessions: %s\n",
+                admin_session_last_error());
         booking_database_shutdown();
         return EXIT_FAILURE;
     }

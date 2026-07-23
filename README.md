@@ -57,3 +57,12 @@ Unter Linux kann sie direkt im Standardbrowser geöffnet werden:
 ```bash
 xdg-open cmake-build-debug/docs/html/index.html
 ```
+
+## Termin-Lebenszyklus und Admin-Sitzungen
+
+Die aktuelle Buchungsverwaltung unterstützt Terminverschiebungen mit erneuter
+Verfügbarkeitsprüfung, Kunden- und Hundehistorien, Audit-Verläufe,
+konfigurierbare kurzfristige Absagen und den Status „Nicht erschienen“.
+Der Adminbereich verwendet eine eigene Loginseite mit serverseitigen Sitzungen
+und CSRF-Schutz. Die Betriebsdetails stehen unter
+[`docs/operations/BOOKING_MANAGEMENT.md`](docs/operations/BOOKING_MANAGEMENT.md).

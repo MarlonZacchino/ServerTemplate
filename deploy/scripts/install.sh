@@ -213,6 +213,7 @@ install_file 0644 root root "$PROJECT_ROOT/docs/history/CUSTOMER_PORTAL_PHASE9.m
 install_file 0644 root root "$PROJECT_ROOT/docs/history/ADDRESS_PHASE10.md" "$APP_PATH/share/ADDRESS_PHASE10.md"
 install_file 0644 root root "$PROJECT_ROOT/docs/history/BOOKING_WORKFLOW_PHASE13.md" "$APP_PATH/share/BOOKING_WORKFLOW_PHASE13.md"
 install_file 0644 root root "$PROJECT_ROOT/docs/operations/NOTIFICATIONS.md" "$APP_PATH/share/NOTIFICATIONS.md"
+install_file 0644 root root "$PROJECT_ROOT/docs/operations/BOOKING_MANAGEMENT.md" "$APP_PATH/share/BOOKING_MANAGEMENT.md"
 
 case "$WEB_PATH" in
     */var/www/styles4dogs|*/staging/*|/var/www/styles4dogs) ;;

@@ -217,3 +217,16 @@ sudo systemctl restart styles4dogs
 sudo systemctl restart styles4dogs-notification.timer
 sudo /opt/styles4dogs/bin/styles4dogs-verify
 ```
+
+## Admin-Sitzungen nach einem Upgrade auf Schema 14
+
+Nach dem Upgrade wird der vorhandene Zugang aus
+`/etc/styles4dogs/secrets/admin.auth` beim Serverstart in die neue
+Admin-Benutzertabelle übernommen. Die normale Anmeldung erfolgt anschließend
+unter `/admin/login`. Ein separates Zurücksetzen der Zugangsdaten ist für das
+Upgrade nicht erforderlich.
+
+In einer öffentlichen Installation muss `STYLES4DOGS_PUBLIC_BASE_URL` auf die
+HTTPS-Adresse zeigen. Dadurch werden Admin-Sitzungscookies mit `Secure`
+ausgeliefert. Nach der Installation Anmeldung, Logout und eine schreibende
+Adminaktion manuell prüfen.

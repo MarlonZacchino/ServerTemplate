@@ -51,6 +51,8 @@ typedef struct availability_reservation_request {
     const char *created_at_utc; /**< Erstellungszeitpunkt im UTC-Format. */
     const char *hold_expires_at_utc; /**< Ablaufzeitpunkt der Reservierung im UTC-Format. */
     const char *customer_name; /**< Vollständiger Kundenname. */
+    const char *customer_first_name; /**< Vorname des Kunden. */
+    const char *customer_last_name; /**< Nachname des Kunden. */
     const char *contact; /**< Primäre Kontaktangabe. */
     const char *contact_channel; /**< Gewählter Kontaktkanal. */
     const char *email; /**< E-Mail-Adresse des Kunden. */

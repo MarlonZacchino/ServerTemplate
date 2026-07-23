@@ -27,7 +27,11 @@ typedef struct customer_portal_booking {
     int start_minute; /**< Startzeit in Minuten seit Mitternacht. */
     int end_minute; /**< Endzeit in Minuten seit Mitternacht. */
     char decision_status[32]; /**< Aktueller Entscheidungsstatus für die Kundenansicht. */
-    char rejection_reason[512]; /**< Optionaler Ablehnungs- oder Stornierungsgrund. */
+    char rejection_reason[512]; /**< Optionaler Ablehnungsgrund. */
+    char cancellation_reason[1024]; /**< Optionaler vom Kunden angegebener Absagegrund. */
+    int cancellation_notice_minutes; /**< Konfigurierte Frist für kurzfristige Absagen. */
+    bool late_cancellation; /**< Kennzeichnet eine Absage innerhalb der Frist. */
+    bool can_cancel; /**< Gibt an, ob die Onlineabsage aktuell möglich ist. */
 } customer_portal_booking; /**< Typalias für ::customer_portal_booking. */
 
 /**
@@ -37,7 +41,8 @@ typedef enum customer_portal_result {
     CUSTOMER_PORTAL_ERROR = -1, /**< Interner Fehler. */
     CUSTOMER_PORTAL_OK = 0, /**< Operation erfolgreich. */
     CUSTOMER_PORTAL_NOT_FOUND = 1, /**< Angeforderter Datensatz wurde nicht gefunden. */
-    CUSTOMER_PORTAL_NOT_CANCELLABLE = 2 /**< Buchung kann nicht mehr storniert werden. */
+    CUSTOMER_PORTAL_NOT_CANCELLABLE = 2, /**< Buchung kann aufgrund ihres Status nicht storniert werden. */
+    CUSTOMER_PORTAL_TOO_LATE = 3 /**< Der Termin ist bereits beendet. */
 } customer_portal_result; /**< Typalias für ::customer_portal_result. */
 
 /**
@@ -84,12 +89,14 @@ customer_portal_result customer_portal_load_booking(
  * @param[in] booking_id Eindeutige ID der Buchung.
  * @param[in] token Hexadezimaler Zugriffstoken.
  * @param[in] cancelled_at_utc Stornierungszeitpunkt als UTC-Zeitstempel.
+ * @param[in] cancellation_reason Optionaler, vom Kunden angegebener Absagegrund.
  * @return Ein Wert aus ::customer_portal_result.
  */
 customer_portal_result customer_portal_cancel_booking(
         int64_t booking_id,
         const char *token,
-        const char *cancelled_at_utc
+        const char *cancelled_at_utc,
+        const char *cancellation_reason
 );
 
 /**

@@ -462,6 +462,8 @@ availability_reservation_result availability_reserve_pending(
             .created_at_utc = request->created_at_utc,
             .hold_expires_at_utc = request->hold_expires_at_utc,
             .customer_name = request->customer_name,
+            .customer_first_name = request->customer_first_name,
+            .customer_last_name = request->customer_last_name,
             .contact = request->contact,
             .contact_channel = request->contact_channel,
             .email = request->email,

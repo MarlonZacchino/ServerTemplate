@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 700
+
 #include "styles4dogs/calendar/availability.h"
 #include "styles4dogs/booking/booking_database.h"
 #include "styles4dogs/calendar/calendar_database.h"
@@ -6,6 +8,8 @@
 #include "styles4dogs/notifications/notification_templates.h"
 #include "styles4dogs/core/server_config.h"
 
+#include <ftw.h>
+#include <limits.h>
 #include <sqlite3.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,8 +17,64 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static int failures = 0;
+static char isolated_test_root[PATH_MAX];
+
+static int remove_test_path(
+        const char *path,
+        const struct stat *status,
+        int type,
+        struct FTW *walk
+)
+{
+    (void)status;
+    (void)type;
+    (void)walk;
+    return remove(path);
+}
+
+static void cleanup_isolated_test_environment(void)
+{
+    if (isolated_test_root[0] != '\0') {
+        (void)nftw(isolated_test_root, remove_test_path, 16, FTW_DEPTH | FTW_PHYS);
+    }
+}
+
+static int configure_isolated_test_environment(void)
+{
+    char template_path[] = "/tmp/styles4dogs-calendar-tests-XXXXXX";
+    char data_dir[PATH_MAX];
+    char secrets_dir[PATH_MAX];
+    char database_file[PATH_MAX];
+    char auth_file[PATH_MAX];
+    char legacy_file[PATH_MAX];
+    char *root;
+
+    if (getenv("STYLES4DOGS_DATABASE_FILE") != NULL) return 0;
+
+    root = mkdtemp(template_path);
+    if (root == NULL || strlen(root) >= sizeof(isolated_test_root)) return -1;
+    memcpy(isolated_test_root, root, strlen(root) + 1);
+
+    if (snprintf(data_dir, sizeof(data_dir), "%s/data", root) < 0 ||
+        snprintf(secrets_dir, sizeof(secrets_dir), "%s/secrets", root) < 0 ||
+        snprintf(database_file, sizeof(database_file), "%s/calendar-engine.db", data_dir) < 0 ||
+        snprintf(auth_file, sizeof(auth_file), "%s/admin.auth", secrets_dir) < 0 ||
+        snprintf(legacy_file, sizeof(legacy_file), "%s/bookings.txt", data_dir) < 0 ||
+        mkdir(data_dir, 0700) != 0 || mkdir(secrets_dir, 0700) != 0 ||
+        setenv("STYLES4DOGS_DATA_DIR", data_dir, 1) != 0 ||
+        setenv("STYLES4DOGS_SECRETS_DIR", secrets_dir, 1) != 0 ||
+        setenv("STYLES4DOGS_DATABASE_FILE", database_file, 1) != 0 ||
+        setenv("STYLES4DOGS_AUTH_FILE", auth_file, 1) != 0 ||
+        setenv("STYLES4DOGS_LEGACY_BOOKING_FILE", legacy_file, 1) != 0) {
+        cleanup_isolated_test_environment();
+        isolated_test_root[0] = '\0';
+        return -1;
+    }
+    return atexit(cleanup_isolated_test_environment) == 0 ? 0 : -1;
+}
 
 static void fail(const char *message)
 {
@@ -152,6 +212,11 @@ int main(void)
     int64_t second_booking_id = 0;
     size_t slot_count;
 
+    if (configure_isolated_test_environment() != 0) {
+        fprintf(stderr, "Isolierte Testumgebung konnte nicht erzeugt werden.\n");
+        return EXIT_FAILURE;
+    }
+
     {
         char next_date[11];
         char next_timestamp[21];
@@ -264,7 +329,7 @@ int main(void)
     }
 
     expect_int(calendar_database_schema_version(&schema_version), 0, "Schema-Version ist lesbar");
-    expect_int(schema_version, 10, "Kalenderschema verwendet Version 10");
+    expect_int(schema_version, 14, "Kalenderschema verwendet Version 14");
 
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM bookings "
@@ -287,6 +352,8 @@ int main(void)
                 "Terminerinnerungen sind standardmäßig vorbereitet");
     expect_int(settings.reminder_lead_minutes, 1440,
                "Standard-Erinnerung erfolgt 24 Stunden vorher");
+    expect_int(settings.cancellation_notice_minutes, 4320,
+               "Standard-Stornierungsfrist beträgt 72 Stunden");
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
             "AND name = 'notification_jobs';",
@@ -300,7 +367,7 @@ int main(void)
     expect_int(query_single_int(
             "SELECT COUNT(*) FROM notification_templates;",
             &value), 0, "Nachrichtenvorlagen sind abfragbar");
-    expect_int(value, 6, "Sechs Standard-Nachrichtenvorlagen wurden angelegt");
+    expect_int(value, 8, "Acht Standard-Nachrichtenvorlagen wurden angelegt");
 
     {
         notification_template template_value;
@@ -706,6 +773,38 @@ int main(void)
     expect_true(
             availability_collect(&query, slots, AVAILABILITY_MAX_SLOTS, &slot_count) != 0,
             "Ungültiges Kalenderdatum wird abgelehnt");
+
+    {
+        notification_template customized;
+        expect_int(notification_template_get("booking_confirmed", &customized), 0,
+                   "Vorlage kann vor erneutem Datenbankstart geladen werden");
+        snprintf(customized.subject_template, sizeof(customized.subject_template),
+                 "%s", "Individuelle Bestätigung bleibt erhalten");
+        snprintf(customized.body_template, sizeof(customized.body_template),
+                 "%s", "Hallo {{customer_first_name}}, diese Vorlage bleibt bestehen.");
+        expect_int(notification_template_update(&customized), 0,
+                   "Individuelle Vorlage wird vor erneutem Datenbankstart gespeichert");
+        expect_int(execute_direct_sql(
+                "INSERT INTO notification_jobs(booking_id,event_type,recipient_email,subject,body_text,"
+                "ics_content,status,attempts,available_at,created_at,last_error,dedupe_key) "
+                "VALUES(NULL,'smtp_test','persist@example.invalid','Migrationstest','Bleibt erhalten','',"
+                "'pending',0,'2026-08-01T00:00:00Z','2026-08-01T00:00:00Z','','migration-persist-job');"),
+                   0, "Bestehender Notification-Job wird für Neustarttest angelegt");
+
+        calendar_database_shutdown();
+        expect_int(calendar_database_initialize(), 0,
+                   "Erneuter Datenbankstart führt die Migration idempotent aus");
+        expect_int(notification_template_get("booking_confirmed", &customized), 0,
+                   "Individuelle Vorlage ist nach erneutem Datenbankstart lesbar");
+        expect_true(strcmp(customized.subject_template,
+                           "Individuelle Bestätigung bleibt erhalten") == 0,
+                    "Individuelle Vorlage bleibt bei erneuter Migration erhalten");
+        expect_int(query_single_int(
+                "SELECT COUNT(*) FROM notification_jobs WHERE dedupe_key='migration-persist-job';",
+                &value), 0, "Bestehender Notification-Job ist nach Neustart abfragbar");
+        expect_int(value, 1,
+                   "Bestehender Notification-Job bleibt bei erneuter Migration genau einmal erhalten");
+    }
 
     calendar_database_shutdown();
     booking_database_shutdown();

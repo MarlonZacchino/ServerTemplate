@@ -223,3 +223,37 @@ sqlite3 /var/lib/styles4dogs/styles4dogs.db \
 ```
 
 Erwartet werden Version `10` und der Ereignistyp `admin_booking_cancelled`.
+
+## Schema-Version 14
+
+Phase 14 erweitert die Datenbank transaktional und idempotent. Bestehende
+Buchungen, individualisierte E-Mail-Vorlagen und Notification-Jobs bleiben
+erhalten.
+
+Neu sind insbesondere:
+
+```text
+customers             normalisierte Kundenstammdaten
+dogs                  Hunde und interne Salonnotizen
+booking_events        fachlicher Änderungsverlauf
+admin_users           Adminzugänge mit Argon2-Hash
+admin_sessions        serverseitige Sitzungen mit Token-Hash
+admin_login_attempts  persistentes Login-Rate-Limit
+```
+
+`bookings` erhält Verknüpfungen zu Kunde und Hund, interne Notizen,
+Stornierungsmetadaten, Akteursfelder sowie die Zustände für kurzfristige
+Absagen und `no_show`. `calendar_settings` enthält
+`cancellation_notice_minutes`. Die Notification-Tabellen unterstützen
+`booking_rescheduled` und `booking_cancelled` sowie eindeutige Deduplizierungs-
+schlüssel.
+
+Vor einem produktiven Upgrade wird weiterhin zuerst das vorhandene
+Online-Backup des Installers erstellt. Nach dem Start kann die Version geprüft
+werden:
+
+```bash
+sudo sqlite3 /var/lib/styles4dogs/styles4dogs.db 'PRAGMA user_version;'
+```
+
+Erwartet wird `14`.

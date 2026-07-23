@@ -10,9 +10,11 @@
 
 /**
  * @brief Baut die zentrale Admin-Übersicht.
+ * @param[in] csrf_token Gültiger CSRF-Token für den Logout.
+ * @param[in] username Benutzername des angemeldeten Admins.
  * @return Neu allozierter Wert bei Erfolg, sonst NULL. Der Aufrufer gibt ihn mit der dokumentierten Freigabefunktion frei.
  */
-string *admin_dashboard_build_page(void);
+string *admin_dashboard_build_page(const char *csrf_token, const char *username);
 /**
  * @brief Liefert die letzte Fehlermeldung des Admin-Dashboards.
  * @return Zeiger auf den modulverwalteten Wert. Der Aufrufer darf ihn nicht freigeben.

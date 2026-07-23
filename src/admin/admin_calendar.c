@@ -345,6 +345,11 @@ static void append_settings_section(
     append_integer(page, settings->reminder_lead_minutes / 60);
     str_cat_cstr(page,
             "\"><span class=\"admin-field-help\">Wie viele Stunden vorher die Erinnerungsmail eingeplant wird.</span></label>\n"
+            "                    <label>Frist für kurzfristige Absagen"
+            "<input name=\"cancellation_notice_hours\" type=\"number\" min=\"0\" max=\"720\" required value=\"" );
+    append_integer(page, settings->cancellation_notice_minutes / 60);
+    str_cat_cstr(page,
+            "\"><span class=\"admin-field-help\">Absagen innerhalb dieser Frist werden im Adminbereich als kurzfristig markiert.</span></label>\n"
             "                </div>\n"
             "                <label class=\"admin-checkbox admin-confirmation-setting\">"
             "<input type=\"checkbox\" name=\"auto_confirm_bookings\" value=\"1\"");
@@ -851,11 +856,13 @@ static bool parse_settings(
     char interval_text[32];
     char hold_hours_text[32];
     char reminder_lead_hours_text[32];
+    char cancellation_notice_hours_text[32];
     int min_notice_hours;
     int booking_horizon_days;
     int slot_interval_minutes;
     int hold_hours;
     int reminder_lead_hours;
+    int cancellation_notice_hours;
 
     if (request == NULL || settings == NULL ||
         !get_required_field(request, "min_notice_hours", min_notice_hours_text, sizeof(min_notice_hours_text)) ||
@@ -863,11 +870,13 @@ static bool parse_settings(
         !get_required_field(request, "slot_interval_minutes", interval_text, sizeof(interval_text)) ||
         !get_required_field(request, "pending_hold_hours", hold_hours_text, sizeof(hold_hours_text)) ||
         !get_required_field(request, "reminder_lead_hours", reminder_lead_hours_text, sizeof(reminder_lead_hours_text)) ||
+        !get_required_field(request, "cancellation_notice_hours", cancellation_notice_hours_text, sizeof(cancellation_notice_hours_text)) ||
         !parse_integer_text(min_notice_hours_text, 0, 8760, &min_notice_hours) ||
         !parse_integer_text(horizon_text, 1, 730, &booking_horizon_days) ||
         !parse_integer_text(interval_text, 5, 60, &slot_interval_minutes) ||
         !parse_integer_text(hold_hours_text, 1, 168, &hold_hours) ||
-        !parse_integer_text(reminder_lead_hours_text, 1, 168, &reminder_lead_hours)) {
+        !parse_integer_text(reminder_lead_hours_text, 1, 168, &reminder_lead_hours) ||
+        !parse_integer_text(cancellation_notice_hours_text, 0, 720, &cancellation_notice_hours)) {
         return false;
     }
 
@@ -893,6 +902,7 @@ static bool parse_settings(
     settings->email_notifications_enabled = checkbox_is_checked(request, "email_notifications_enabled");
     settings->reminder_enabled = checkbox_is_checked(request, "reminder_enabled");
     settings->reminder_lead_minutes = reminder_lead_hours * 60;
+    settings->cancellation_notice_minutes = cancellation_notice_hours * 60;
 
     return true;
 }

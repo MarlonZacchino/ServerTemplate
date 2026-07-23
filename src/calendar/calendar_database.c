@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define CALENDAR_DATABASE_ERROR_SIZE 512
-#define CALENDAR_SCHEMA_VERSION 10
+#define CALENDAR_SCHEMA_VERSION 14
 
 static sqlite3 *calendar_database = NULL;
 static char calendar_database_error[CALENDAR_DATABASE_ERROR_SIZE];
@@ -268,7 +268,9 @@ static int create_calendar_tables(void)
             "    reminder_enabled INTEGER NOT NULL DEFAULT 1 "
             "        CHECK(reminder_enabled IN (0, 1)),"
             "    reminder_lead_minutes INTEGER NOT NULL DEFAULT 1440 "
-            "        CHECK(reminder_lead_minutes BETWEEN 60 AND 10080)"
+            "        CHECK(reminder_lead_minutes BETWEEN 60 AND 10080),"
+            "    cancellation_notice_minutes INTEGER NOT NULL DEFAULT 4320 "
+            "        CHECK(cancellation_notice_minutes BETWEEN 0 AND 43200)"
             ");"
             "CREATE TABLE IF NOT EXISTS weekly_opening_hours ("
             "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -299,7 +301,7 @@ static int create_calendar_tables(void)
             "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'booking_rescheduled', 'booking_cancelled', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -314,20 +316,219 @@ static int create_calendar_tables(void)
             "    claimed_at TEXT,"
             "    sent_at TEXT,"
             "    last_error TEXT NOT NULL DEFAULT '',"
-            "    UNIQUE(booking_id, event_type)"
+            "    dedupe_key TEXT NOT NULL UNIQUE"
             ");"
             "CREATE INDEX IF NOT EXISTS idx_notification_jobs_delivery "
             "    ON notification_jobs(status, available_at, id);"
             "CREATE TABLE IF NOT EXISTS notification_templates ("
             "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'booking_rescheduled', 'booking_cancelled'"
             "    )),"
             "    subject_template TEXT NOT NULL,"
             "    body_template TEXT NOT NULL,"
             "    updated_at_utc TEXT NOT NULL"
             ");";
 
+    return execute_sql(sql);
+}
+
+
+static int create_phase14_tables(void)
+{
+    static const char *sql =
+            "CREATE TABLE IF NOT EXISTS customers ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    first_name TEXT NOT NULL DEFAULT '',"
+            "    last_name TEXT NOT NULL DEFAULT '',"
+            "    email TEXT NOT NULL DEFAULT '',"
+            "    normalized_email TEXT NOT NULL DEFAULT '',"
+            "    phone_number TEXT NOT NULL DEFAULT '',"
+            "    normalized_phone TEXT NOT NULL DEFAULT '',"
+            "    contact_preference TEXT NOT NULL DEFAULT '',"
+            "    street_address TEXT NOT NULL DEFAULT '',"
+            "    postal_code TEXT NOT NULL DEFAULT '',"
+            "    city TEXT NOT NULL DEFAULT '',"
+            "    created_at TEXT NOT NULL,"
+            "    updated_at TEXT NOT NULL"
+            ");"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email_identity "
+            "    ON customers(normalized_email) WHERE normalized_email <> '';"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_only_identity "
+            "    ON customers(normalized_phone) "
+            "    WHERE normalized_email = '' AND normalized_phone <> '';"
+            "CREATE TABLE IF NOT EXISTS dogs ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,"
+            "    name TEXT NOT NULL,"
+            "    breed TEXT NOT NULL DEFAULT '',"
+            "    size TEXT NOT NULL DEFAULT '',"
+            "    internal_note TEXT NOT NULL DEFAULT '',"
+            "    created_at TEXT NOT NULL,"
+            "    updated_at TEXT NOT NULL"
+            ");"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_dogs_customer_name "
+            "    ON dogs(customer_id, lower(trim(name)));"
+            "CREATE TABLE IF NOT EXISTS booking_events ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    event_type TEXT NOT NULL,"
+            "    actor_type TEXT NOT NULL CHECK(actor_type IN ('customer','admin','system')),"
+            "    actor_identifier TEXT NOT NULL DEFAULT '',"
+            "    old_value TEXT NOT NULL DEFAULT '',"
+            "    new_value TEXT NOT NULL DEFAULT '',"
+            "    reason TEXT NOT NULL DEFAULT '',"
+            "    created_at TEXT NOT NULL"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_booking_events_history "
+            "    ON booking_events(booking_id, created_at, id);"
+            "CREATE TABLE IF NOT EXISTS admin_users ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    username TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+            "    password_hash TEXT NOT NULL,"
+            "    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),"
+            "    created_at TEXT NOT NULL,"
+            "    updated_at TEXT NOT NULL,"
+            "    last_login_at TEXT"
+            ");"
+            "CREATE TABLE IF NOT EXISTS admin_sessions ("
+            "    token_hash BLOB PRIMARY KEY,"
+            "    admin_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,"
+            "    created_at INTEGER NOT NULL,"
+            "    expires_at INTEGER NOT NULL,"
+            "    last_activity_at INTEGER NOT NULL,"
+            "    user_agent_hash BLOB,"
+            "    CHECK(expires_at > created_at)"
+            ");"
+            "CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry "
+            "    ON admin_sessions(expires_at);"
+            "CREATE TABLE IF NOT EXISTS admin_login_attempts ("
+            "    identity_hash BLOB PRIMARY KEY,"
+            "    attempt_count INTEGER NOT NULL DEFAULT 0,"
+            "    window_started_at INTEGER NOT NULL,"
+            "    blocked_until INTEGER NOT NULL DEFAULT 0"
+            ");";
+
+    return execute_sql(sql);
+}
+
+static int create_phase14_triggers(void)
+{
+    static const char *drop_sql =
+            "DROP TRIGGER IF EXISTS trg_booking_events_created;"
+            "DROP TRIGGER IF EXISTS trg_booking_events_status;"
+            "DROP TRIGGER IF EXISTS trg_booking_events_rescheduled;"
+            "DROP TRIGGER IF EXISTS trg_booking_events_updated;"
+            "DROP TRIGGER IF EXISTS trg_booking_events_reminder;"
+            "DROP TRIGGER IF EXISTS trg_booking_customer_link_insert;"
+            "DROP TRIGGER IF EXISTS trg_booking_customer_link_update;";
+    static const char *created_sql =
+            "CREATE TRIGGER trg_booking_events_created AFTER INSERT ON bookings "
+            "WHEN NEW.legacy = 0 BEGIN "
+            "  INSERT INTO booking_events(booking_id,event_type,actor_type,actor_identifier,new_value,created_at) "
+            "  VALUES(NEW.id,'booking_created',COALESCE(NULLIF(NEW.last_actor_type,''),'customer'),"
+            "         COALESCE(NEW.last_actor_identifier,''),NEW.status,"
+            "         strftime('%Y-%m-%dT%H:%M:%SZ','now'));"
+            "END;";
+    static const char *status_sql =
+            "CREATE TRIGGER trg_booking_events_status AFTER UPDATE OF status, decision_status ON bookings "
+            "WHEN OLD.status <> NEW.status OR OLD.decision_status <> NEW.decision_status BEGIN "
+            "  INSERT INTO booking_events(booking_id,event_type,actor_type,actor_identifier,old_value,new_value,reason,created_at) "
+            "  VALUES(NEW.id, CASE "
+            "      WHEN NEW.status='erledigt' AND OLD.status<>'erledigt' THEN 'booking_completed' "
+            "      WHEN NEW.decision_status='no_show' THEN 'booking_no_show' "
+            "      WHEN NEW.decision_status='confirmed' THEN 'booking_confirmed' "
+            "      WHEN NEW.decision_status='rejected' THEN 'booking_rejected' "
+            "      WHEN NEW.decision_status='cancelled' THEN CASE WHEN NEW.cancellation_actor='customer' THEN 'customer_cancelled' ELSE 'admin_cancelled' END "
+            "      ELSE 'booking_status_changed' END,"
+            "    COALESCE(NULLIF(NEW.last_actor_type,''),'system'),COALESCE(NEW.last_actor_identifier,''),"
+            "    OLD.status,NEW.status,CASE WHEN NEW.decision_status='rejected' THEN NEW.rejection_reason "
+            "    WHEN NEW.decision_status='cancelled' THEN NEW.cancellation_reason ELSE NEW.admin_note END,"
+            "    strftime('%Y-%m-%dT%H:%M:%SZ','now'));"
+            "END;";
+    static const char *rescheduled_sql =
+            "CREATE TRIGGER trg_booking_events_rescheduled AFTER UPDATE OF appointment_date,start_minute,end_minute,service_id ON bookings "
+            "WHEN COALESCE(OLD.appointment_date,'') <> COALESCE(NEW.appointment_date,'') "
+            "  OR COALESCE(OLD.start_minute,-1) <> COALESCE(NEW.start_minute,-1) "
+            "  OR COALESCE(OLD.end_minute,-1) <> COALESCE(NEW.end_minute,-1) "
+            "  OR COALESCE(OLD.service_id,-1) <> COALESCE(NEW.service_id,-1) BEGIN "
+            "  INSERT INTO booking_events(booking_id,event_type,actor_type,actor_identifier,old_value,new_value,created_at) "
+            "  VALUES(NEW.id,'booking_rescheduled',COALESCE(NULLIF(NEW.last_actor_type,''),'admin'),"
+            "    COALESCE(NEW.last_actor_identifier,''),"
+            "    printf('%s|%d|%d|%s',COALESCE(OLD.appointment_date,''),COALESCE(OLD.start_minute,-1),COALESCE(OLD.end_minute,-1),COALESCE(OLD.service,'')),"
+            "    printf('%s|%d|%d|%s',COALESCE(NEW.appointment_date,''),COALESCE(NEW.start_minute,-1),COALESCE(NEW.end_minute,-1),COALESCE(NEW.service,'')),"
+            "    strftime('%Y-%m-%dT%H:%M:%SZ','now'));"
+            "END;";
+    static const char *updated_sql =
+            "CREATE TRIGGER trg_booking_events_updated AFTER UPDATE OF customer_first_name,customer_last_name,email,phone_number,contact_preference,street_address,postal_code,city,dog_name,dog_breed,dog_size,message,admin_note ON bookings "
+            "WHEN COALESCE(OLD.customer_first_name,'') <> COALESCE(NEW.customer_first_name,'') "
+            "  OR COALESCE(OLD.customer_last_name,'') <> COALESCE(NEW.customer_last_name,'') "
+            "  OR COALESCE(OLD.email,'') <> COALESCE(NEW.email,'') "
+            "  OR COALESCE(OLD.phone_number,'') <> COALESCE(NEW.phone_number,'') "
+            "  OR COALESCE(OLD.contact_preference,'') <> COALESCE(NEW.contact_preference,'') "
+            "  OR COALESCE(OLD.street_address,'') <> COALESCE(NEW.street_address,'') "
+            "  OR COALESCE(OLD.postal_code,'') <> COALESCE(NEW.postal_code,'') "
+            "  OR COALESCE(OLD.city,'') <> COALESCE(NEW.city,'') "
+            "  OR COALESCE(OLD.dog_name,'') <> COALESCE(NEW.dog_name,'') "
+            "  OR COALESCE(OLD.dog_breed,'') <> COALESCE(NEW.dog_breed,'') "
+            "  OR COALESCE(OLD.dog_size,'') <> COALESCE(NEW.dog_size,'') "
+            "  OR COALESCE(OLD.message,'') <> COALESCE(NEW.message,'') "
+            "  OR COALESCE(OLD.admin_note,'') <> COALESCE(NEW.admin_note,'') BEGIN "
+            "  INSERT INTO booking_events(booking_id,event_type,actor_type,actor_identifier,old_value,new_value,created_at) "
+            "  VALUES(NEW.id,'booking_updated',COALESCE(NULLIF(NEW.last_actor_type,''),'admin'),"
+            "    COALESCE(NEW.last_actor_identifier,''),'Buchungsdaten vor der Änderung','Buchungsdaten aktualisiert',"
+            "    strftime('%Y-%m-%dT%H:%M:%SZ','now'));"
+            "END;";
+    static const char *reminder_sql =
+            "CREATE TRIGGER trg_booking_events_reminder AFTER INSERT ON notification_jobs "
+            "WHEN NEW.booking_id IS NOT NULL AND NEW.event_type='appointment_reminder' BEGIN "
+            "  INSERT INTO booking_events(booking_id,event_type,actor_type,new_value,created_at) "
+            "  VALUES(NEW.booking_id,'reminder_queued','system','Terminerinnerung eingereiht',"
+            "    strftime('%Y-%m-%dT%H:%M:%SZ','now'));"
+            "END;";
+
+    return execute_sql(drop_sql) != 0 ||
+           execute_sql(created_sql) != 0 ||
+           execute_sql(status_sql) != 0 ||
+           execute_sql(rescheduled_sql) != 0 ||
+           execute_sql(updated_sql) != 0 ||
+           execute_sql(reminder_sql) != 0 ? -1 : 0;
+}
+
+static int backfill_phase14_entities(void)
+{
+    static const char *sql =
+            "UPDATE bookings SET customer_first_name = CASE "
+            "  WHEN customer_first_name='' AND instr(trim(customer_name),' ')>0 "
+            "  THEN substr(trim(customer_name),1,instr(trim(customer_name),' ')-1) "
+            "  WHEN customer_first_name='' THEN trim(customer_name) ELSE customer_first_name END;"
+            "UPDATE bookings SET customer_last_name = CASE "
+            "  WHEN customer_last_name='' AND instr(trim(customer_name),' ')>0 "
+            "  THEN ltrim(substr(trim(customer_name),instr(trim(customer_name),' ')+1)) "
+            "  ELSE customer_last_name END;"
+            "INSERT OR IGNORE INTO customers(first_name,last_name,email,normalized_email,phone_number,normalized_phone,"
+            " contact_preference,street_address,postal_code,city,created_at,updated_at) "
+            "SELECT customer_first_name,customer_last_name,email,lower(trim(email)),phone_number,"
+            " replace(replace(replace(replace(replace(replace(phone_number,' ',''),'-',''),'/',''),'(',''),')',''),'+',''),"
+            " contact_preference,street_address,postal_code,city,created_at,created_at FROM bookings "
+            "WHERE legacy=0 AND email<>'' ORDER BY id;"
+            "INSERT OR IGNORE INTO customers(first_name,last_name,email,normalized_email,phone_number,normalized_phone,"
+            " contact_preference,street_address,postal_code,city,created_at,updated_at) "
+            "SELECT customer_first_name,customer_last_name,'','',phone_number,"
+            " replace(replace(replace(replace(replace(replace(phone_number,' ',''),'-',''),'/',''),'(',''),')',''),'+',''),"
+            " contact_preference,street_address,postal_code,city,created_at,created_at FROM bookings "
+            "WHERE legacy=0 AND email='' AND phone_number<>'' ORDER BY id;"
+            "UPDATE bookings SET customer_id = COALESCE("
+            " (SELECT id FROM customers c WHERE email<>'' AND c.normalized_email=lower(trim(bookings.email)) LIMIT 1),"
+            " (SELECT id FROM customers c WHERE bookings.email='' AND c.normalized_email='' AND c.normalized_phone="
+            "  replace(replace(replace(replace(replace(replace(bookings.phone_number,' ',''),'-',''),'/',''),'(',''),')',''),'+','') LIMIT 1)) "
+            "WHERE legacy=0 AND customer_id IS NULL;"
+            "INSERT OR IGNORE INTO dogs(customer_id,name,breed,size,created_at,updated_at) "
+            "SELECT customer_id,dog_name,dog_breed,dog_size,created_at,created_at FROM bookings "
+            "WHERE legacy=0 AND customer_id IS NOT NULL AND trim(dog_name)<>'' ORDER BY id;"
+            "UPDATE bookings SET dog_id=(SELECT id FROM dogs d WHERE d.customer_id=bookings.customer_id "
+            " AND lower(trim(d.name))=lower(trim(bookings.dog_name)) LIMIT 1) "
+            "WHERE legacy=0 AND customer_id IS NOT NULL AND trim(dog_name)<>'' AND dog_id IS NULL;";
     return execute_sql(sql);
 }
 
@@ -354,12 +555,18 @@ static int create_gallery_tables(void)
 
 static int seed_calendar_defaults(void)
 {
-    static const char *sql =
+    typedef struct notification_template_seed {
+        const char *event_type;
+        const char *subject;
+        const char *body;
+    } notification_template_seed;
+    static const char *calendar_sql =
             "INSERT OR IGNORE INTO calendar_settings("
             "    id, timezone, min_notice_minutes, booking_horizon_days,"
             "    slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings,"
-            "    email_notifications_enabled, reminder_enabled, reminder_lead_minutes"
-            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1, 0, 0, 1, 1440);"
+            "    email_notifications_enabled, reminder_enabled, reminder_lead_minutes,"
+            "    cancellation_notice_minutes"
+            ") VALUES(1, 'Europe/Berlin', 1440, 90, 15, 1440, 1, 0, 0, 1, 1440, 4320);"
             "INSERT OR IGNORE INTO services("
             "    code, name, duration_minutes, buffer_minutes, active, sort_order"
             ") VALUES"
@@ -367,23 +574,82 @@ static int seed_calendar_defaults(void)
             "    ('wash_dry', 'Waschen und Föhnen', 60, 15, 1, 20),"
             "    ('full_groom', 'Komplettpflege', 120, 15, 1, 30),"
             "    ('claw_care', 'Krallenpflege', 30, 0, 1, 40),"
-            "    ('other', 'Sonstiges', 60, 15, 0, 50);"
-            "INSERT OR IGNORE INTO notification_templates("
-            "event_type, subject_template, body_template, updated_at_utc) VALUES"
-            "('booking_received', 'Terminanfrage erhalten – {{salon_name}}', "
-            "'Hallo {{customer_first_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nAnfrage ansehen oder zurückziehen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('booking_confirmed', 'Termin bestätigt – {{salon_name}}', "
-            "'Hallo {{customer_first_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('booking_rejected', 'Terminanfrage nicht möglich – {{salon_name}}', "
-            "'Hallo {{customer_first_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('appointment_reminder', 'Erinnerung an deinen Termin – {{salon_name}}', "
-            "'Hallo {{customer_first_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('admin_new_booking', 'Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}', "
-            "'Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings', strftime('%Y-%m-%dT%H:%M:%SZ','now')),"
-            "('admin_booking_cancelled', 'Kundenabsage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}', "
-            "'Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}', strftime('%Y-%m-%dT%H:%M:%SZ','now'));";
+            "    ('other', 'Sonstiges', 60, 15, 0, 50);";
+    static const notification_template_seed seeds[] = {
+        {
+            "booking_received",
+            "Terminanfrage erhalten – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\nwir haben deine Terminanfrage erhalten. Der Zeitraum ist vorläufig reserviert und noch nicht verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nAnfrage ansehen oder zurückziehen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        },
+        {
+            "booking_confirmed",
+            "Termin bestätigt – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\ndein Termin ist verbindlich bestätigt.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        },
+        {
+            "booking_rejected",
+            "Terminanfrage nicht möglich – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\nleider können wir deine Terminanfrage nicht bestätigen.\n{{rejection_reason}}\n\nAngefragter Termin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nMelde dich gerne bei uns, damit wir gemeinsam einen anderen Termin finden.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        },
+        {
+            "appointment_reminder",
+            "Erinnerung an deinen Termin – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\ndies ist eine Erinnerung an deinen bevorstehenden Termin.\n\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie Kalenderdatei für deinen Termin ist angehängt.\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        },
+        {
+            "admin_new_booking",
+            "Neue Terminanfrage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
+            "Es ist eine neue Terminanfrage eingegangen.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\n\nDie Anfrage kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings"
+        },
+        {
+            "admin_booking_cancelled",
+            "Kundenabsage #{{booking_id}} – {{customer_first_name}} {{customer_last_name}}",
+            "Eine Kundin oder ein Kunde hat eine Buchung über den persönlichen Buchungslink abgesagt.\n\nBuchungsnummer: {{booking_id}}\nKundin/Kunde: {{customer_first_name}} {{customer_last_name}}\nHund: {{dog_name}}\nDatum: {{appointment_date}}\nUhrzeit: {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nGrund: {{cancellation_reason}}\n{{late_cancellation}}\n\nDie Buchung kann im Adminbereich geprüft werden:\n{{website_url}}/admin/bookings?search={{booking_id}}"
+        },
+        {
+            "booking_rescheduled",
+            "Dein Termin wurde geändert – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\ndein Termin wurde geändert.\n\nBisher: {{old_appointment_date}}, {{old_start_time}}–{{old_end_time}} Uhr\nNeu: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\n\nDie aktualisierte Kalenderdatei ist angehängt.\n\nTermin ansehen oder absagen:\n{{booking_url}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        },
+        {
+            "booking_cancelled",
+            "Deine Terminabsage – {{salon_name}}",
+            "Hallo {{customer_first_name}},\n\nwir bestätigen die Absage deines Termins.\n\nTermin: {{appointment_date}}, {{start_time}}–{{end_time}} Uhr\nLeistung: {{service_name}}\nHund: {{dog_name}}\nGrund: {{cancellation_reason}}\n{{late_cancellation}}\n\nViele Grüße\n{{salon_name}}\n{{salon_address}}\n{{salon_phone}}\n{{website_url}}"
+        }
+    };
+    sqlite3_stmt *statement = NULL;
+    int result = -1;
 
-    return execute_sql(sql);
+    if (execute_sql(calendar_sql) != 0 ||
+        sqlite3_prepare_v2(
+                calendar_database,
+                "INSERT OR IGNORE INTO notification_templates("
+                "event_type,subject_template,body_template,updated_at_utc) "
+                "VALUES(?1,?2,?3,strftime('%Y-%m-%dT%H:%M:%SZ','now'));",
+                -1,
+                &statement,
+                NULL) != SQLITE_OK) {
+        set_sqlite_error("Standard-Nachrichtenvorlagen konnten nicht vorbereitet werden");
+        goto cleanup;
+    }
+
+    for (size_t index = 0; index < sizeof(seeds) / sizeof(seeds[0]); index++) {
+        if (sqlite3_bind_text(statement, 1, seeds[index].event_type, -1, SQLITE_STATIC) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 2, seeds[index].subject, -1, SQLITE_STATIC) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 3, seeds[index].body, -1, SQLITE_STATIC) != SQLITE_OK ||
+            sqlite3_step(statement) != SQLITE_DONE) {
+            set_sqlite_error("Standard-Nachrichtenvorlage konnte nicht gespeichert werden");
+            goto cleanup;
+        }
+        sqlite3_reset(statement);
+        sqlite3_clear_bindings(statement);
+    }
+
+    result = 0;
+
+cleanup:
+    sqlite3_finalize(statement);
+    return result;
 }
 
 static int migrate_booking_columns(void)
@@ -466,7 +732,44 @@ static int migrate_booking_columns(void)
         ensure_table_column(
             "calendar_settings",
             "reminder_lead_minutes",
-            "reminder_lead_minutes INTEGER NOT NULL DEFAULT 1440 CHECK(reminder_lead_minutes BETWEEN 60 AND 10080)") != 0) {
+            "reminder_lead_minutes INTEGER NOT NULL DEFAULT 1440 CHECK(reminder_lead_minutes BETWEEN 60 AND 10080)") != 0 ||
+        ensure_table_column(
+            "calendar_settings",
+            "cancellation_notice_minutes",
+            "cancellation_notice_minutes INTEGER NOT NULL DEFAULT 4320 CHECK(cancellation_notice_minutes BETWEEN 0 AND 43200)") != 0 ||
+        ensure_booking_column(
+            "customer_first_name",
+            "customer_first_name TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "customer_last_name",
+            "customer_last_name TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "admin_note",
+            "admin_note TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "cancelled_at",
+            "cancelled_at TEXT") != 0 ||
+        ensure_booking_column(
+            "cancellation_reason",
+            "cancellation_reason TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "cancellation_actor",
+            "cancellation_actor TEXT NOT NULL DEFAULT ''") != 0 ||
+        ensure_booking_column(
+            "late_cancellation",
+            "late_cancellation INTEGER NOT NULL DEFAULT 0 CHECK(late_cancellation IN (0,1))") != 0 ||
+        ensure_booking_column(
+            "customer_id",
+            "customer_id INTEGER REFERENCES customers(id)") != 0 ||
+        ensure_booking_column(
+            "dog_id",
+            "dog_id INTEGER REFERENCES dogs(id)") != 0 ||
+        ensure_booking_column(
+            "last_actor_type",
+            "last_actor_type TEXT NOT NULL DEFAULT 'system'") != 0 ||
+        ensure_booking_column(
+            "last_actor_identifier",
+            "last_actor_identifier TEXT NOT NULL DEFAULT ''") != 0) {
         return -1;
     }
 
@@ -487,13 +790,13 @@ static int create_booking_calendar_guards(void)
             "CREATE TRIGGER trg_bookings_decision_status_insert "
             "BEFORE INSERT ON bookings "
             "WHEN NEW.decision_status NOT IN ("
-            "    'pending', 'confirmed', 'rejected', 'cancelled', 'expired', 'legacy'"
+            "    'pending', 'confirmed', 'rejected', 'cancelled', 'expired', 'legacy', 'no_show'"
             ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking decision status'); END;"
             "CREATE TRIGGER trg_bookings_decision_status_update "
             "BEFORE UPDATE OF decision_status ON bookings "
             "WHEN NEW.decision_status NOT IN ("
-            "    'pending', 'confirmed', 'rejected', 'cancelled', 'expired', 'legacy'"
+            "    'pending', 'confirmed', 'rejected', 'cancelled', 'expired', 'legacy', 'no_show'"
             ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking decision status'); END;"
             "CREATE TRIGGER trg_bookings_appointment_insert "
@@ -654,7 +957,7 @@ static int migrate_notification_jobs_v6(void)
             "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'booking_rescheduled', 'booking_cancelled', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -738,7 +1041,7 @@ static int migrate_admin_cancellation_notifications_v10(void)
             "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
             "    event_type TEXT NOT NULL CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'smtp_test'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'booking_rescheduled', 'booking_cancelled', 'smtp_test'"
             "    )),"
             "    recipient_email TEXT NOT NULL,"
             "    subject TEXT NOT NULL,"
@@ -769,7 +1072,7 @@ static int migrate_admin_cancellation_notifications_v10(void)
             "CREATE TABLE notification_templates ("
             "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
             "        'booking_received', 'booking_confirmed', 'booking_rejected', "
-            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled'"
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', 'booking_rescheduled', 'booking_cancelled'"
             "    )),"
             "    subject_template TEXT NOT NULL,"
             "    body_template TEXT NOT NULL,"
@@ -801,20 +1104,91 @@ static int migrate_admin_cancellation_notifications_v10(void)
     return 0;
 }
 
+
+static int migrate_phase14_notifications(void)
+{
+    bool jobs_support_dedupe;
+    bool templates_support_events;
+    static const char *jobs_sql =
+            "ALTER TABLE notification_jobs RENAME TO notification_jobs_v13;"
+            "DROP INDEX IF EXISTS idx_notification_jobs_delivery;"
+            "CREATE TABLE notification_jobs ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,"
+            "    event_type TEXT NOT NULL CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', "
+            "        'booking_rescheduled', 'booking_cancelled', 'smtp_test'"
+            "    )),"
+            "    recipient_email TEXT NOT NULL,"
+            "    subject TEXT NOT NULL,"
+            "    body_text TEXT NOT NULL,"
+            "    ics_content TEXT NOT NULL DEFAULT '',"
+            "    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ("
+            "        'pending', 'processing', 'sent', 'failed'"
+            "    )),"
+            "    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 20),"
+            "    available_at TEXT NOT NULL,"
+            "    created_at TEXT NOT NULL,"
+            "    claimed_at TEXT,"
+            "    sent_at TEXT,"
+            "    last_error TEXT NOT NULL DEFAULT '',"
+            "    dedupe_key TEXT NOT NULL UNIQUE"
+            ");"
+            "INSERT INTO notification_jobs("
+            " id,booking_id,event_type,recipient_email,subject,body_text,ics_content,status,attempts,"
+            " available_at,created_at,claimed_at,sent_at,last_error,dedupe_key"
+            ") SELECT id,booking_id,event_type,recipient_email,subject,body_text,ics_content,status,attempts,"
+            " available_at,created_at,claimed_at,sent_at,last_error,'legacy:' || id "
+            "FROM notification_jobs_v13;"
+            "DROP TABLE notification_jobs_v13;"
+            "CREATE INDEX idx_notification_jobs_delivery "
+            "ON notification_jobs(status, available_at, id);";
+    static const char *templates_sql =
+            "ALTER TABLE notification_templates RENAME TO notification_templates_v13;"
+            "CREATE TABLE notification_templates ("
+            "    event_type TEXT PRIMARY KEY CHECK(event_type IN ("
+            "        'booking_received', 'booking_confirmed', 'booking_rejected', "
+            "        'appointment_reminder', 'admin_new_booking', 'admin_booking_cancelled', "
+            "        'booking_rescheduled', 'booking_cancelled'"
+            "    )),"
+            "    subject_template TEXT NOT NULL,"
+            "    body_template TEXT NOT NULL,"
+            "    updated_at_utc TEXT NOT NULL"
+            ");"
+            "INSERT INTO notification_templates(event_type,subject_template,body_template,updated_at_utc) "
+            "SELECT event_type,subject_template,body_template,updated_at_utc FROM notification_templates_v13;"
+            "DROP TABLE notification_templates_v13;";
+
+    if (table_schema_contains("notification_jobs", "dedupe_key", &jobs_support_dedupe) != 0 ||
+        table_schema_contains("notification_templates", "booking_rescheduled", &templates_support_events) != 0) {
+        return -1;
+    }
+    if (!jobs_support_dedupe && execute_sql(jobs_sql) != 0) {
+        return -1;
+    }
+    if (!templates_support_events && execute_sql(templates_sql) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int synchronize_booking_statuses(void)
 {
     return execute_sql(
             "UPDATE bookings SET status = CASE "
-            "    WHEN status = 'erledigt' THEN status "
+            "    WHEN status IN ('erledigt', 'nicht_erschienen') THEN status "
             "    WHEN decision_status = 'confirmed' THEN 'bestätigt' "
             "    WHEN decision_status = 'rejected' THEN 'abgelehnt' "
             "    WHEN decision_status = 'cancelled' THEN 'abgesagt' "
+            "    WHEN decision_status = 'no_show' THEN 'nicht_erschienen' "
             "    WHEN status IN ('kontaktiert', 'altbestand') THEN 'neu' "
             "    ELSE status END "
             "WHERE status IN ('kontaktiert', 'altbestand') "
-            "   OR (decision_status = 'confirmed' AND status NOT IN ('bestätigt', 'erledigt')) "
+            "   OR (decision_status = 'confirmed' AND status NOT IN ('bestätigt', 'erledigt', 'nicht_erschienen')) "
             "   OR (decision_status = 'rejected' AND status != 'abgelehnt') "
-            "   OR (decision_status = 'cancelled' AND status != 'abgesagt');"
+            "   OR (decision_status = 'cancelled' AND status != 'abgesagt') "
+            "   OR (decision_status = 'no_show' AND status != 'nicht_erschienen');"
     );
 }
 
@@ -862,15 +1236,19 @@ static int migrate_schema(void)
 
     if (create_calendar_tables() != 0 ||
         create_gallery_tables() != 0 ||
+        create_phase14_tables() != 0 ||
         migrate_booking_columns() != 0 ||
         synchronize_booking_statuses() != 0 ||
         migrate_notification_jobs_v6() != 0 ||
         migrate_admin_cancellation_notifications_v10() != 0 ||
+        migrate_phase14_notifications() != 0 ||
         seed_calendar_defaults() != 0 ||
         migrate_customer_name_placeholders() != 0 ||
         migrate_booking_links_into_templates() != 0 ||
+        backfill_phase14_entities() != 0 ||
         create_booking_calendar_guards() != 0 ||
-        execute_sql("PRAGMA user_version = 10;") != 0 ||
+        create_phase14_triggers() != 0 ||
+        execute_sql("PRAGMA user_version = 14;") != 0 ||
         execute_sql("COMMIT;") != 0) {
         sqlite3_exec(calendar_database, "ROLLBACK;", NULL, NULL, NULL);
         return -1;
@@ -1007,7 +1385,9 @@ static bool settings_are_valid(const calendar_settings *settings)
            settings->pending_hold_minutes <= 10080 &&
            settings->capacity == 1 &&
            settings->reminder_lead_minutes >= 60 &&
-           settings->reminder_lead_minutes <= 10080;
+           settings->reminder_lead_minutes <= 10080 &&
+           settings->cancellation_notice_minutes >= 0 &&
+           settings->cancellation_notice_minutes <= 43200;
 }
 
 int calendar_database_get_settings(calendar_settings *settings)
@@ -1025,7 +1405,8 @@ int calendar_database_get_settings(calendar_settings *settings)
             calendar_database,
             "SELECT timezone, min_notice_minutes, booking_horizon_days, "
             "       slot_interval_minutes, pending_hold_minutes, capacity, auto_confirm_bookings, "
-            "       email_notifications_enabled, reminder_enabled, reminder_lead_minutes "
+            "       email_notifications_enabled, reminder_enabled, reminder_lead_minutes, "
+            "       cancellation_notice_minutes "
             "FROM calendar_settings WHERE id = 1;",
             -1,
             &statement,
@@ -1056,6 +1437,7 @@ int calendar_database_get_settings(calendar_settings *settings)
     settings->email_notifications_enabled = sqlite3_column_int(statement, 7) != 0;
     settings->reminder_enabled = sqlite3_column_int(statement, 8) != 0;
     settings->reminder_lead_minutes = sqlite3_column_int(statement, 9);
+    settings->cancellation_notice_minutes = sqlite3_column_int(statement, 10);
 
     sqlite3_finalize(statement);
     return 0;
@@ -1077,7 +1459,8 @@ int calendar_database_update_settings(const calendar_settings *settings)
             "SET timezone = ?1, min_notice_minutes = ?2, booking_horizon_days = ?3, "
             "    slot_interval_minutes = ?4, pending_hold_minutes = ?5, capacity = ?6, "
             "    auto_confirm_bookings = ?7, email_notifications_enabled = ?8, "
-            "    reminder_enabled = ?9, reminder_lead_minutes = ?10 "
+            "    reminder_enabled = ?9, reminder_lead_minutes = ?10, "
+            "    cancellation_notice_minutes = ?11 "
             "WHERE id = 1;",
             -1,
             &statement,
@@ -1095,7 +1478,8 @@ int calendar_database_update_settings(const calendar_settings *settings)
         sqlite3_bind_int(statement, 7, settings->auto_confirm_bookings ? 1 : 0) != SQLITE_OK ||
         sqlite3_bind_int(statement, 8, settings->email_notifications_enabled ? 1 : 0) != SQLITE_OK ||
         sqlite3_bind_int(statement, 9, settings->reminder_enabled ? 1 : 0) != SQLITE_OK ||
-        sqlite3_bind_int(statement, 10, settings->reminder_lead_minutes) != SQLITE_OK) {
+        sqlite3_bind_int(statement, 10, settings->reminder_lead_minutes) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 11, settings->cancellation_notice_minutes) != SQLITE_OK) {
         set_sqlite_error("Kalendereinstellungen konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -2074,6 +2458,7 @@ int calendar_database_expire_pending(const char *now_utc)
             calendar_database,
             "UPDATE bookings "
             "SET decision_status = 'expired', status = 'abgelehnt', decision_at = ?1, "
+            "    last_actor_type = 'system', last_actor_identifier = 'pending_expiration', "
             "    rejection_reason = CASE WHEN rejection_reason = '' "
             "        THEN 'Reservierung automatisch abgelaufen.' ELSE rejection_reason END "
             "WHERE decision_status = 'pending' "
@@ -2134,7 +2519,8 @@ int calendar_database_complete_due_bookings(
 
     if (sqlite3_prepare_v2(
             calendar_database,
-            "UPDATE bookings SET status = 'erledigt', decision_at = ?3 "
+            "UPDATE bookings SET status = 'erledigt', decision_at = ?3, "
+            "last_actor_type = 'system', last_actor_identifier = 'automatic_completion' "
             "WHERE status = 'bestätigt' AND decision_status = 'confirmed' "
             "  AND appointment_date IS NOT NULL AND end_minute IS NOT NULL "
             "  AND (appointment_date < ?1 "
@@ -2248,18 +2634,145 @@ static bool pending_booking_is_valid(const calendar_pending_booking *booking)
     return true;
 }
 
+static void split_customer_name(
+        const calendar_pending_booking *booking,
+        char first_name[128],
+        char last_name[128]
+)
+{
+    const char *full_name;
+    const char *separator;
+    size_t first_length;
+
+    snprintf(first_name, 128, "%s",
+             booking->customer_first_name == NULL ? "" : booking->customer_first_name);
+    snprintf(last_name, 128, "%s",
+             booking->customer_last_name == NULL ? "" : booking->customer_last_name);
+    if (first_name[0] != '\0' && last_name[0] != '\0') return;
+
+    full_name = booking->customer_name == NULL ? "" : booking->customer_name;
+    separator = strchr(full_name, ' ');
+    if (separator == NULL) {
+        snprintf(first_name, 128, "%s", full_name);
+        snprintf(last_name, 128, "%s", full_name);
+        return;
+    }
+    first_length = (size_t)(separator - full_name);
+    if (first_length >= 128) first_length = 127;
+    memcpy(first_name, full_name, first_length);
+    first_name[first_length] = '\0';
+    while (*separator == ' ') separator++;
+    snprintf(last_name, 128, "%s", *separator == '\0' ? full_name : separator);
+}
+
+static int link_pending_booking_entities(
+        int64_t booking_id,
+        const calendar_pending_booking *booking,
+        const char *first_name,
+        const char *last_name
+)
+{
+    sqlite3_stmt *statement = NULL;
+    int64_t customer_id = 0;
+    int64_t dog_id = 0;
+    const char *email = booking->email == NULL ? "" : booking->email;
+    const char *phone = booking->phone_number == NULL ? "" : booking->phone_number;
+    if (sqlite3_prepare_v2(calendar_database,
+            "INSERT OR IGNORE INTO customers(first_name,last_name,email,normalized_email,phone_number,normalized_phone,"
+            "contact_preference,street_address,postal_code,city,created_at,updated_at) "
+            "VALUES(?1,?2,?3,lower(trim(?3)),?4,replace(replace(replace(replace(replace(replace(?4,' ',''),'-',''),'/',''),'(',''),')',''),'+',''),"
+            "?5,?6,?7,?8,?9,?9);",
+            -1, &statement, NULL) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 1, first_name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, last_name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 3, email, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 4, phone, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 5, booking->contact_preference, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 6, booking->street_address, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 7, booking->postal_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 8, booking->city, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 9, booking->created_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_step(statement) != SQLITE_DONE) {
+        set_sqlite_error("Kundendaten konnten nicht verknüpft werden");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+    sqlite3_finalize(statement);
+    statement = NULL;
+
+    if (email[0] != '\0') {
+        if (sqlite3_prepare_v2(calendar_database,
+                "SELECT id FROM customers WHERE normalized_email=lower(trim(?1)) LIMIT 1;",
+                -1, &statement, NULL) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 1, email, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_step(statement) != SQLITE_ROW) goto error;
+    } else {
+        if (sqlite3_prepare_v2(calendar_database,
+                "SELECT id FROM customers WHERE normalized_email='' AND normalized_phone="
+                "replace(replace(replace(replace(replace(replace(?1,' ',''),'-',''),'/',''),'(',''),')',''),'+','') LIMIT 1;",
+                -1, &statement, NULL) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 1, phone, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_step(statement) != SQLITE_ROW) goto error;
+    }
+    customer_id = sqlite3_column_int64(statement, 0);
+    sqlite3_finalize(statement);
+    statement = NULL;
+
+    if (booking->dog_name != NULL && booking->dog_name[0] != '\0') {
+        if (sqlite3_prepare_v2(calendar_database,
+                "INSERT OR IGNORE INTO dogs(customer_id,name,breed,size,created_at,updated_at) "
+                "VALUES(?1,?2,?3,?4,?5,?5);",
+                -1, &statement, NULL) != SQLITE_OK ||
+            sqlite3_bind_int64(statement, 1, customer_id) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 2, booking->dog_name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 3, booking->dog_breed, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 4, booking->dog_size == NULL ? "" : booking->dog_size, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 5, booking->created_at_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_step(statement) != SQLITE_DONE) goto error;
+        sqlite3_finalize(statement);
+        statement = NULL;
+        if (sqlite3_prepare_v2(calendar_database,
+                "SELECT id FROM dogs WHERE customer_id=?1 AND lower(trim(name))=lower(trim(?2)) LIMIT 1;",
+                -1, &statement, NULL) != SQLITE_OK ||
+            sqlite3_bind_int64(statement, 1, customer_id) != SQLITE_OK ||
+            sqlite3_bind_text(statement, 2, booking->dog_name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+            sqlite3_step(statement) != SQLITE_ROW) goto error;
+        dog_id = sqlite3_column_int64(statement, 0);
+        sqlite3_finalize(statement);
+        statement = NULL;
+    }
+
+    if (sqlite3_prepare_v2(calendar_database,
+            "UPDATE bookings SET customer_id=?1,dog_id=?2 WHERE id=?3;",
+            -1, &statement, NULL) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 1, customer_id) != SQLITE_OK ||
+        (dog_id > 0 ? sqlite3_bind_int64(statement, 2, dog_id) : sqlite3_bind_null(statement, 2)) != SQLITE_OK ||
+        sqlite3_bind_int64(statement, 3, booking_id) != SQLITE_OK ||
+        sqlite3_step(statement) != SQLITE_DONE) goto error;
+    sqlite3_finalize(statement);
+    return 0;
+
+error:
+    set_sqlite_error("Kunden- und Hundeverknüpfung konnte nicht gespeichert werden");
+    sqlite3_finalize(statement);
+    return -1;
+}
+
 int calendar_database_insert_pending(
         const calendar_pending_booking *booking,
         int64_t *out_booking_id
 )
 {
     sqlite3_stmt *statement = NULL;
+    char first_name[128];
+    char last_name[128];
     int result = -1;
 
     if (calendar_database == NULL || !pending_booking_is_valid(booking)) {
         set_error("Ungültige Terminreservierung");
         return -1;
     }
+    split_customer_name(booking, first_name, last_name);
 
     if (sqlite3_prepare_v2(
             calendar_database,
@@ -2271,14 +2784,15 @@ int calendar_database_insert_pending(
             "    contact_channel, email, phone_number, phone_kind, contact_preference,"
             "    street_address, postal_code, city, dog_breed,"
             "    service_name_snapshot, service_duration_minutes_snapshot,"
-            "    service_buffer_minutes_snapshot"
+            "    service_buffer_minutes_snapshot, customer_first_name, customer_last_name,"
+            "    last_actor_type, last_actor_identifier"
             ") "
             "SELECT ?1, CASE WHEN ?11 = 1 THEN 'bestätigt' ELSE 'neu' END, ?2, ?3, ?4, ?5, services.code, ?6, ?7, 0, services.id,"
             "       ?6, ?8, ?9, ?10, CASE WHEN ?11 = 1 THEN 'confirmed' ELSE 'pending' END,"
             "       CASE WHEN ?11 = 1 THEN NULL ELSE ?12 END,"
             "       CASE WHEN ?11 = 1 THEN ?1 ELSE NULL END, '',"
             "       ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?22, services.name, services.duration_minutes,"
-            "       services.buffer_minutes "
+            "       services.buffer_minutes, ?23, ?24, 'customer', '' "
             "FROM services "
             "WHERE services.code = ?21 AND services.active = 1;",
             -1,
@@ -2311,7 +2825,9 @@ int calendar_database_insert_pending(
         sqlite3_bind_text(statement, 19, booking->postal_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 20, booking->city, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 21, booking->service_code, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 22, booking->dog_breed, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        sqlite3_bind_text(statement, 22, booking->dog_breed, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 23, first_name, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 24, last_name, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
         set_sqlite_error("Terminreservierungswerte konnten nicht gebunden werden");
         goto cleanup;
     }
@@ -2326,8 +2842,10 @@ int calendar_database_insert_pending(
         goto cleanup;
     }
 
-    if (out_booking_id != NULL) {
-        *out_booking_id = sqlite3_last_insert_rowid(calendar_database);
+    {
+        int64_t booking_id = sqlite3_last_insert_rowid(calendar_database);
+        if (link_pending_booking_entities(booking_id, booking, first_name, last_name) != 0) goto cleanup;
+        if (out_booking_id != NULL) *out_booking_id = booking_id;
     }
     result = 0;
 
@@ -2408,9 +2926,11 @@ calendar_booking_decision_result calendar_database_decide_booking(
             calendar_database,
             accept
                 ? "UPDATE bookings SET decision_status = 'confirmed', status = 'bestätigt', decision_at = ?1, "
-                  "hold_expires_at = NULL, rejection_reason = '' WHERE id = ?2 AND decision_status = 'pending';"
+                  "hold_expires_at = NULL, rejection_reason = '', last_actor_type='admin', "
+                  "last_actor_identifier='booking_decision' WHERE id = ?2 AND decision_status = 'pending';"
                 : "UPDATE bookings SET decision_status = 'rejected', status = 'abgelehnt', decision_at = ?1, "
-                  "hold_expires_at = NULL, rejection_reason = ?3 WHERE id = ?2 AND decision_status = 'pending';",
+                  "hold_expires_at = NULL, rejection_reason = ?3, last_actor_type='admin', "
+                  "last_actor_identifier='booking_decision' WHERE id = ?2 AND decision_status = 'pending';",
             -1,
             &statement,
             NULL) != SQLITE_OK ||

@@ -269,3 +269,22 @@ Der Regressionstest prüft zusätzlich:
 - getrennte, einklappbare Statusbereiche in der Buchungsverwaltung,
 - vollständigen Vor- und Nachnamen in `{{customer_name}}`,
 - globales Pausieren und erneutes Aktivieren des E-Mail-Systems.
+
+## Phase 14
+
+Der isolierte Regressionstest prüft zusätzlich:
+
+- Session-Login, Rotation, Logout, Cookieattribute, Ablauf und Loginlimit,
+- CSRF-Schutz der neuen Adminaktionen,
+- transaktionssichere Terminverschiebung und Kollisions-Rollback,
+- genau eine Verschiebungsmail mit stabiler ICS-UID,
+- optionale Rasse und reine Stammdatenänderungen ohne Verschiebungsmail,
+- vorsichtige Kunden-/Hundeverknüpfung anhand normalisierter Kontaktdaten,
+- interne Notizen ohne Ausgabe im Kundenportal,
+- Absagegrund, kurzfristige Absage sowie Kunden- und Adminmail,
+- Audit-Verlauf und Status „Nicht erschienen“,
+- Ausschluss von No-Show-Terminen aus der automatischen Erledigung.
+
+Alle Kalender- und HTTP-Tests verwenden temporäre Datenbanken. Ein direkter
+Aufruf von `calendar_engine_tests` erzeugt ebenfalls selbstständig eine
+isolierte Laufzeitumgebung, sofern kein Datenbankpfad gesetzt wurde.

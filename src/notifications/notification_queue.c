@@ -31,6 +31,8 @@ typedef struct notification_booking_data {
     int end_minute;
     char decision_status[32];
     char rejection_reason[512];
+    char cancellation_reason[1024];
+    bool late_cancellation;
     char service_name[128];
     char timezone[64];
     bool email_notifications_enabled;
@@ -192,7 +194,9 @@ static bool booking_event_type_is_valid(const char *event_type)
            (strcmp(event_type, "booking_received") == 0 ||
             strcmp(event_type, "booking_confirmed") == 0 ||
             strcmp(event_type, "booking_rejected") == 0 ||
-            strcmp(event_type, "appointment_reminder") == 0);
+            strcmp(event_type, "appointment_reminder") == 0 ||
+            strcmp(event_type, "booking_rescheduled") == 0 ||
+            strcmp(event_type, "booking_cancelled") == 0);
 }
 
 static bool admin_event_type_is_valid(const char *event_type)
@@ -213,15 +217,17 @@ static bool event_matches_booking(const char *event_type, const char *decision_s
     if (strcmp(event_type, "booking_received") == 0)
         return strcmp(decision_status, "pending") == 0;
     if (strcmp(event_type, "booking_confirmed") == 0 ||
-        strcmp(event_type, "appointment_reminder") == 0)
+        strcmp(event_type, "appointment_reminder") == 0 ||
+        strcmp(event_type, "booking_rescheduled") == 0)
         return strcmp(decision_status, "confirmed") == 0;
     if (strcmp(event_type, "booking_rejected") == 0)
         return strcmp(decision_status, "rejected") == 0;
+    if (strcmp(event_type, "booking_cancelled") == 0 ||
+        strcmp(event_type, "admin_booking_cancelled") == 0)
+        return strcmp(decision_status, "cancelled") == 0;
     if (strcmp(event_type, "admin_new_booking") == 0)
         return strcmp(decision_status, "pending") == 0 ||
                strcmp(decision_status, "confirmed") == 0;
-    if (strcmp(event_type, "admin_booking_cancelled") == 0)
-        return strcmp(decision_status, "cancelled") == 0;
     return false;
 }
 
@@ -247,7 +253,9 @@ static int load_booking(
             "       COALESCE(b.appointment_date, ''), COALESCE(b.start_minute, -1), "
             "       COALESCE(b.end_minute, -1), b.decision_status, b.rejection_reason, "
             "       CASE WHEN b.service_name_snapshot <> '' THEN b.service_name_snapshot ELSE b.service END, "
-            "       s.timezone, s.email_notifications_enabled "
+            "       s.timezone, s.email_notifications_enabled, "
+            "       COALESCE(b.customer_first_name,''), COALESCE(b.customer_last_name,''), "
+            "       COALESCE(b.cancellation_reason,''), COALESCE(b.late_cancellation,0) "
             "FROM bookings b CROSS JOIN calendar_settings s "
             "WHERE b.id = ?1 AND s.id = 1;",
             -1,
@@ -274,17 +282,26 @@ static int load_booking(
     data->start_minute = sqlite3_column_int(statement, 5);
     data->end_minute = sqlite3_column_int(statement, 6);
     data->email_notifications_enabled = sqlite3_column_int(statement, 11) != 0;
+    data->late_cancellation = sqlite3_column_int(statement, 15) != 0;
 
     if (copy_column(statement, 1, data->customer_name, sizeof(data->customer_name)) != 0 ||
-        split_customer_name(data) != 0 ||
         copy_column(statement, 2, data->email, sizeof(data->email)) != 0 ||
         copy_column(statement, 3, data->dog_name, sizeof(data->dog_name)) != 0 ||
         copy_column(statement, 4, data->appointment_date, sizeof(data->appointment_date)) != 0 ||
         copy_column(statement, 7, data->decision_status, sizeof(data->decision_status)) != 0 ||
         copy_column(statement, 8, data->rejection_reason, sizeof(data->rejection_reason)) != 0 ||
         copy_column(statement, 9, data->service_name, sizeof(data->service_name)) != 0 ||
-        copy_column(statement, 10, data->timezone, sizeof(data->timezone)) != 0) {
+        copy_column(statement, 10, data->timezone, sizeof(data->timezone)) != 0 ||
+        copy_column(statement, 12, data->customer_first_name, sizeof(data->customer_first_name)) != 0 ||
+        copy_column(statement, 13, data->customer_last_name, sizeof(data->customer_last_name)) != 0 ||
+        copy_column(statement, 14, data->cancellation_reason, sizeof(data->cancellation_reason)) != 0) {
         set_error("Buchungsdaten für Nachricht sind zu lang");
+        sqlite3_finalize(statement);
+        return -1;
+    }
+
+    if (data->customer_first_name[0] == '\0' && split_customer_name(data) != 0) {
+        set_error("Kundenname konnte nicht für die Nachricht aufgeteilt werden");
         sqlite3_finalize(statement);
         return -1;
     }
@@ -513,18 +530,26 @@ static int build_payload(
         const notification_booking_data *data,
         const char *event_type,
         const char *now_utc,
+        const char *old_appointment_date,
+        int old_start_minute,
+        int old_end_minute,
         char subject[NOTIFICATION_SUBJECT_SIZE],
         char body[NOTIFICATION_BODY_SIZE],
         char ics[NOTIFICATION_ICS_SIZE]
 )
 {
     notification_template template_value;
-    notification_template_context context;
+    notification_template_context context = {0};
     char start[6];
     char end[6];
+    char old_start[6] = "";
+    char old_end[6] = "";
     char appointment_date_display[48];
+    char old_appointment_date_display[48] = "";
     char booking_id[32];
     char rejection_reason[640];
+    char cancellation_reason[1200];
+    char late_cancellation[256];
     char booking_url[CUSTOMER_PORTAL_URL_SIZE];
 
     if (data == NULL || !internal_event_type_is_valid(event_type) ||
@@ -532,22 +557,35 @@ static int build_payload(
         calendar_time_format_hhmm(data->end_minute, end) != 0 ||
         notification_template_get(event_type, &template_value) != 0 ||
         calendar_date_format_de(
-                data->appointment_date,
-                true,
-                appointment_date_display,
+                data->appointment_date, true, appointment_date_display,
                 sizeof(appointment_date_display)) != 0 ||
         customer_portal_build_url(data->id, booking_url, sizeof(booking_url)) != 0) {
         return -1;
     }
 
-    snprintf(booking_id, sizeof(booking_id), "%lld", (long long)data->id);
-    if (data->rejection_reason[0] == '\0') {
-        snprintf(rejection_reason, sizeof(rejection_reason),
-                 "%s", "Es wurde kein weiterer Grund angegeben.");
-    } else {
-        snprintf(rejection_reason, sizeof(rejection_reason),
-                 "Grund: %s", data->rejection_reason);
+    if (strcmp(event_type, "booking_rescheduled") == 0) {
+        if (old_appointment_date == NULL ||
+            calendar_date_format_de(old_appointment_date, true,
+                                    old_appointment_date_display,
+                                    sizeof(old_appointment_date_display)) != 0 ||
+            calendar_time_format_hhmm(old_start_minute, old_start) != 0 ||
+            calendar_time_format_hhmm(old_end_minute, old_end) != 0) {
+            set_error("Alte Termindaten für Verschiebungsmail sind ungültig");
+            return -1;
+        }
     }
+
+    snprintf(booking_id, sizeof(booking_id), "%lld", (long long)data->id);
+    snprintf(rejection_reason, sizeof(rejection_reason), "%s",
+             data->rejection_reason[0] == '\0'
+             ? "Es wurde kein weiterer Grund angegeben." : data->rejection_reason);
+    snprintf(cancellation_reason, sizeof(cancellation_reason), "%s",
+             data->cancellation_reason[0] == '\0'
+             ? "Kein Grund angegeben" : data->cancellation_reason);
+    snprintf(late_cancellation, sizeof(late_cancellation), "%s",
+             data->late_cancellation
+             ? "Die Absage erfolgte innerhalb der eingestellten kurzfristigen Absagefrist."
+             : "Die Absage erfolgte außerhalb der eingestellten kurzfristigen Absagefrist.");
 
     context.customer_name = data->customer_name;
     context.customer_first_name = data->customer_first_name;
@@ -556,11 +594,14 @@ static int build_payload(
     context.appointment_date = appointment_date_display;
     context.start_time = start;
     context.end_time = end;
-    context.service_name = data->service_name[0] == '\0'
-                           ? "Nicht angegeben" : data->service_name;
-    context.dog_name = data->dog_name[0] == '\0'
-                       ? "Nicht angegeben" : data->dog_name;
+    context.service_name = data->service_name[0] == '\0' ? "Nicht angegeben" : data->service_name;
+    context.dog_name = data->dog_name[0] == '\0' ? "Nicht angegeben" : data->dog_name;
     context.rejection_reason = rejection_reason;
+    context.cancellation_reason = cancellation_reason;
+    context.late_cancellation = late_cancellation;
+    context.old_appointment_date = old_appointment_date_display;
+    context.old_start_time = old_start;
+    context.old_end_time = old_end;
     context.salon_name = server_config_salon_name();
     context.salon_address = server_config_salon_address();
     context.salon_phone = server_config_salon_phone();
@@ -570,13 +611,13 @@ static int build_payload(
     if (notification_template_render(&template_value, &context, subject, body) != 0)
         return -1;
 
-    if (booking_event_type_is_valid(event_type) && strstr(body, booking_url) == NULL) {
+    if (booking_event_type_is_valid(event_type) &&
+        strcmp(event_type, "booking_cancelled") != 0 &&
+        strstr(body, booking_url) == NULL) {
         size_t body_length = strlen(body);
         int written = snprintf(
-                body + body_length,
-                NOTIFICATION_BODY_SIZE - body_length,
-                "\n\nBuchung ansehen oder absagen:\n%s",
-                booking_url);
+                body + body_length, NOTIFICATION_BODY_SIZE - body_length,
+                "\n\nBuchung ansehen oder absagen:\n%s", booking_url);
         if (written < 0 || (size_t)written >= NOTIFICATION_BODY_SIZE - body_length) {
             set_error("Kundenlink passt nicht in die Benachrichtigung");
             return -1;
@@ -585,7 +626,8 @@ static int build_payload(
 
     ics[0] = '\0';
     if ((strcmp(event_type, "booking_confirmed") == 0 ||
-         strcmp(event_type, "appointment_reminder") == 0) &&
+         strcmp(event_type, "appointment_reminder") == 0 ||
+         strcmp(event_type, "booking_rescheduled") == 0) &&
         build_ics(data, now_utc, ics, NOTIFICATION_ICS_SIZE) != 0) {
         return -1;
     }
@@ -600,18 +642,26 @@ static int insert_job(
         const char *subject,
         const char *body,
         const char *ics,
-        const char *now_utc
+        const char *now_utc,
+        const char *dedupe_key
 )
 {
     sqlite3_stmt *statement = NULL;
     int result = -1;
 
+    if (database == NULL || event_type == NULL || recipient == NULL ||
+        subject == NULL || body == NULL || ics == NULL || now_utc == NULL ||
+        dedupe_key == NULL || dedupe_key[0] == '\0') {
+        set_error("Unvollständige Benachrichtigungsdaten");
+        return -1;
+    }
+
     if (sqlite3_prepare_v2(
             database,
             "INSERT OR IGNORE INTO notification_jobs("
             "booking_id, event_type, recipient_email, subject, body_text, ics_content, "
-            "status, attempts, available_at, created_at, last_error"
-            ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?7, '');",
+            "status, attempts, available_at, created_at, last_error, dedupe_key"
+            ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, ?7, ?7, '', ?8);",
             -1, &statement, NULL) != SQLITE_OK ||
         (booking_id == NULL
          ? sqlite3_bind_null(statement, 1)
@@ -621,7 +671,8 @@ static int insert_job(
         sqlite3_bind_text(statement, 4, subject, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 5, body, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
         sqlite3_bind_text(statement, 6, ics, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(statement, 7, now_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        sqlite3_bind_text(statement, 7, now_utc, -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 8, dedupe_key, -1, SQLITE_TRANSIENT) != SQLITE_OK) {
         set_sqlite_error(database, "Benachrichtigung konnte nicht vorbereitet werden");
         goto cleanup;
     }
@@ -637,18 +688,44 @@ cleanup:
     return result;
 }
 
-static int enqueue_event_with_database(
+static int build_standard_dedupe_key(
+        int64_t booking_id,
+        const char *event_type,
+        char *out_key,
+        size_t out_size
+)
+{
+    int written;
+
+    if (booking_id <= 0 || event_type == NULL || out_key == NULL || out_size == 0)
+        return -1;
+
+    written = snprintf(out_key, out_size, "booking:%lld:%s",
+                       (long long)booking_id, event_type);
+    return written >= 0 && (size_t)written < out_size ? 0 : -1;
+}
+
+static int enqueue_event_with_database_options(
         sqlite3 *database,
         int64_t booking_id,
         const char *event_type,
-        const char *now_utc
+        const char *now_utc,
+        const char *old_appointment_date,
+        int old_start_minute,
+        int old_end_minute,
+        const char *dedupe_key_override
 )
 {
     notification_booking_data data;
     char subject[NOTIFICATION_SUBJECT_SIZE];
     char body[NOTIFICATION_BODY_SIZE];
     char ics[NOTIFICATION_ICS_SIZE];
+    char dedupe_key[256];
+    const char *recipient;
+    notification_smtp_settings smtp;
+    bool admin_event;
     int load_result;
+    int result;
 
     if (!internal_event_type_is_valid(event_type) ||
         !calendar_utc_timestamp_is_valid(now_utc)) {
@@ -660,10 +737,9 @@ static int enqueue_event_with_database(
     if (load_result != 0) return load_result < 0 ? -1 : 0;
     if (!event_matches_booking(event_type, data.decision_status)) return 0;
 
-    if (admin_event_type_is_valid(event_type)) {
-        notification_smtp_settings smtp;
-        int result;
-
+    admin_event = admin_event_type_is_valid(event_type);
+    memset(&smtp, 0, sizeof(smtp));
+    if (admin_event) {
         if (notification_settings_load(&smtp) != 0) {
             set_error(notification_settings_last_error());
             return -1;
@@ -673,24 +749,49 @@ static int enqueue_event_with_database(
             sodium_memzero(&smtp, sizeof(smtp));
             return 0;
         }
-        if (build_payload(&data, event_type, now_utc, subject, body, ics) != 0) {
-            sodium_memzero(&smtp, sizeof(smtp));
-            set_error(notification_templates_last_error());
-            return -1;
-        }
-        result = insert_job(database, &booking_id, event_type, smtp.admin_email,
-                            subject, body, ics, now_utc);
-        sodium_memzero(&smtp, sizeof(smtp));
-        return result;
+        recipient = smtp.admin_email;
+    } else {
+        if (!data.email_notifications_enabled || data.email[0] == '\0') return 0;
+        recipient = data.email;
     }
 
-    if (!data.email_notifications_enabled || data.email[0] == '\0') return 0;
-    if (build_payload(&data, event_type, now_utc, subject, body, ics) != 0) {
+    if (build_payload(&data, event_type, now_utc, old_appointment_date,
+                      old_start_minute, old_end_minute,
+                      subject, body, ics) != 0) {
+        if (admin_event) sodium_memzero(&smtp, sizeof(smtp));
         set_error(notification_templates_last_error());
         return -1;
     }
-    return insert_job(database, &booking_id, event_type, data.email,
-                      subject, body, ics, now_utc);
+
+    if (dedupe_key_override != NULL && dedupe_key_override[0] != '\0') {
+        if (snprintf(dedupe_key, sizeof(dedupe_key), "%s", dedupe_key_override) < 0 ||
+            strlen(dedupe_key_override) >= sizeof(dedupe_key)) {
+            if (admin_event) sodium_memzero(&smtp, sizeof(smtp));
+            set_error("Benachrichtigungs-Deduplizierungsschlüssel ist zu lang");
+            return -1;
+        }
+    } else if (build_standard_dedupe_key(booking_id, event_type,
+                                         dedupe_key, sizeof(dedupe_key)) != 0) {
+        if (admin_event) sodium_memzero(&smtp, sizeof(smtp));
+        set_error("Benachrichtigungs-Deduplizierungsschlüssel konnte nicht erzeugt werden");
+        return -1;
+    }
+
+    result = insert_job(database, &booking_id, event_type, recipient,
+                        subject, body, ics, now_utc, dedupe_key);
+    if (admin_event) sodium_memzero(&smtp, sizeof(smtp));
+    return result;
+}
+
+static int enqueue_event_with_database(
+        sqlite3 *database,
+        int64_t booking_id,
+        const char *event_type,
+        const char *now_utc
+)
+{
+    return enqueue_event_with_database_options(
+            database, booking_id, event_type, now_utc, NULL, -1, -1, NULL);
 }
 
 static int current_clock(sqlite3 *database, calendar_clock_snapshot *snapshot)
@@ -750,6 +851,45 @@ int notification_queue_enqueue_booking_event(
         result = enqueue_event_with_database(
                 database, booking_id, "admin_new_booking", snapshot.now_utc);
     }
+    sqlite3_close_v2(database);
+    return result;
+}
+
+int notification_queue_enqueue_rescheduled(
+        int64_t booking_id,
+        const char *old_appointment_date,
+        int old_start_minute,
+        int old_end_minute,
+        const char *dedupe_nonce
+)
+{
+    sqlite3 *database = NULL;
+    calendar_clock_snapshot snapshot;
+    char dedupe_key[256];
+    int written;
+    int result;
+
+    queue_error[0] = '\0';
+    if (booking_id <= 0 || !calendar_date_is_valid(old_appointment_date) ||
+        old_start_minute < 0 || old_start_minute > 1439 ||
+        old_end_minute <= old_start_minute || old_end_minute > 1440 ||
+        dedupe_nonce == NULL || dedupe_nonce[0] == '\0') {
+        set_error("Ungültige Daten für Terminverschiebungsmail");
+        return -1;
+    }
+
+    written = snprintf(dedupe_key, sizeof(dedupe_key),
+                       "booking:%lld:booking_rescheduled:%s",
+                       (long long)booking_id, dedupe_nonce);
+    if (written < 0 || (size_t)written >= sizeof(dedupe_key) ||
+        open_database(&database) != 0 || current_clock(database, &snapshot) != 0) {
+        sqlite3_close_v2(database);
+        return -1;
+    }
+
+    result = enqueue_event_with_database_options(
+            database, booking_id, "booking_rescheduled", snapshot.now_utc,
+            old_appointment_date, old_start_minute, old_end_minute, dedupe_key);
     sqlite3_close_v2(database);
     return result;
 }
@@ -1164,8 +1304,20 @@ int notification_queue_enqueue_test_email(const char *recipient_email)
         return -1;
     }
 
-    result = insert_job(database, NULL, "smtp_test", recipient,
-                        subject, body, "", snapshot.now_utc);
+    {
+        unsigned char random_bytes[16];
+        char random_hex[33];
+        char dedupe_key[96];
+
+        randombytes_buf(random_bytes, sizeof(random_bytes));
+        sodium_bin2hex(random_hex, sizeof(random_hex), random_bytes, sizeof(random_bytes));
+        snprintf(dedupe_key, sizeof(dedupe_key), "smtp_test:%s:%s",
+                 snapshot.now_utc, random_hex);
+        result = insert_job(database, NULL, "smtp_test", recipient,
+                            subject, body, "", snapshot.now_utc, dedupe_key);
+        sodium_memzero(random_bytes, sizeof(random_bytes));
+        sodium_memzero(random_hex, sizeof(random_hex));
+    }
     sqlite3_close_v2(database);
     sodium_memzero(&smtp, sizeof(smtp));
     return result;

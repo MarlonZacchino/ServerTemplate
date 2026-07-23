@@ -77,10 +77,12 @@ endfunction()
 set(STYLES4DOGS_CORE_SOURCES
         src/admin/admin_appointments.c
         src/admin/admin_calendar.c
+        src/admin/admin_booking_management.c
         src/admin/admin_dashboard.c
         src/admin/admin_notifications.c
         src/booking/booking.c
         src/booking/booking_database.c
+        src/booking/booking_management.c
         src/booking/customer_portal.c
         src/calendar/availability.c
         src/calendar/calendar_database.c
@@ -94,6 +96,7 @@ set(STYLES4DOGS_CORE_SOURCES
         src/notifications/notification_queue.c
         src/notifications/notification_settings.c
         src/notifications/notification_templates.c
+        src/security/admin_session.c
         src/security/auth.c
         src/security/rate_limit.c
         src/services/contact_links.c

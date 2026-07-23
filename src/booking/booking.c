@@ -476,7 +476,8 @@ static bool is_valid_admin_filter_status(const char *status)
            strcmp(status, "bestätigt") == 0 ||
            strcmp(status, "abgelehnt") == 0 ||
            strcmp(status, "abgesagt") == 0 ||
-           strcmp(status, "erledigt") == 0;
+           strcmp(status, "erledigt") == 0 ||
+           strcmp(status, "nicht_erschienen") == 0;
 }
 
 bool parse_booking_admin_filter(
@@ -705,6 +706,9 @@ static const char *status_label(const char *value)
     if (strcmp(value, "erledigt") == 0) {
         return "Erledigt";
     }
+    if (strcmp(value, "nicht_erschienen") == 0) {
+        return "Nicht erschienen";
+    }
 
     return value;
 }
@@ -775,6 +779,8 @@ static void append_status_summary(
     append_size_value(page, counts->cancelled_count);
     str_cat_cstr(page, "</strong></div>\n                <div><span>Erledigt</span><strong>");
     append_size_value(page, counts->completed_count);
+    str_cat_cstr(page, "</strong></div>\n                <div><span>Nicht erschienen</span><strong>");
+    append_size_value(page, counts->no_show_count);
     str_cat_cstr(page, "</strong></div>\n            </div>\n");
 }
 
@@ -799,6 +805,7 @@ static void append_admin_filter_form(
     append_filter_option(page, "abgelehnt", "Abgelehnt", filter->status);
     append_filter_option(page, "abgesagt", "Abgesagt", filter->status);
     append_filter_option(page, "erledigt", "Erledigt", filter->status);
+    append_filter_option(page, "nicht_erschienen", "Nicht erschienen", filter->status);
 
     str_cat_cstr(page,
             "                    </select>\n"
@@ -934,6 +941,9 @@ static const char *decision_status_label(const char *status)
     }
     if (strcmp(status, "expired") == 0) {
         return "Reservierung abgelaufen";
+    }
+    if (strcmp(status, "no_show") == 0) {
+        return "Nicht erschienen";
     }
 
     return status;
@@ -1235,6 +1245,19 @@ static void append_booking_card(
     if (record->rejection_reason != NULL && record->rejection_reason[0] != '\0') {
         append_booking_detail(page, "Ablehnungsgrund", record->rejection_reason, "Nicht angegeben");
     }
+    if (record->cancellation_reason != NULL && record->cancellation_reason[0] != '\0') {
+        append_booking_detail(page, "Absagegrund", record->cancellation_reason, "Nicht angegeben");
+    }
+    if (record->late_cancellation) {
+        str_cat_cstr(page, "<p class=\"booking-late-cancellation\"><strong>Kurzfristig abgesagt</strong></p>");
+    }
+    str_cat_cstr(page, "<div class=\"booking-management-actions\"><a class=\"button button-small button-secondary\" href=\"/admin/bookings/edit?id=");
+    {
+        char edit_id[32];
+        int edit_written = snprintf(edit_id, sizeof(edit_id), "%" PRId64, record->id);
+        if (edit_written > 0 && (size_t)edit_written < sizeof(edit_id)) append_html_text(page, edit_id);
+    }
+    str_cat_cstr(page, "\">Bearbeiten &amp; Verlauf</a></div>");
     append_decision_form(page, record, context->csrf_token);
     append_status_form(page, record, context->csrf_token);
     str_cat_cstr(page, "            </article>\n");
@@ -1389,7 +1412,8 @@ string *build_booking_admin_page(
                 {"bestätigt", "Bestätigt", true},
                 {"abgelehnt", "Abgelehnt", false},
                 {"abgesagt", "Abgesagt", false},
-                {"erledigt", "Erledigt", false}
+                {"erledigt", "Erledigt", false},
+                {"nicht_erschienen", "Nicht erschienen", false}
         };
 
         for (size_t index = 0; index < sizeof(groups) / sizeof(groups[0]); index++) {

@@ -163,8 +163,8 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version != 10:
-                raise AssertionError(f"Erwartete Kalender-Schemaversion 10, erhalten {schema_version}")
+            if schema_version != 14:
+                raise AssertionError(f"Erwartete Kalender-Schemaversion 14, erhalten {schema_version}")
 
             required_tables = {
                 "services",
@@ -174,6 +174,12 @@ def run_stateful_tests() -> int:
                 "notification_jobs",
                 "notification_templates",
                 "gallery_images",
+                "customers",
+                "dogs",
+                "booking_events",
+                "admin_users",
+                "admin_sessions",
+                "admin_login_attempts",
             }
             existing_tables = {
                 row[0]
@@ -553,7 +559,7 @@ def run_stateful_tests() -> int:
             "/admin/bookings",
             {"Authorization": f"Basic {wrong_token}"},
         ).encode())
-        assert_status(wrong_response, "401 Unauthorized")
+        assert_status(wrong_response, "303 See Other")
 
         valid_token = base64.b64encode(f"{username}:{password}".encode()).decode()
         valid_response = raw_request(request_text(
@@ -574,6 +580,182 @@ def run_stateful_tests() -> int:
             raise AssertionError("Adminseite liest das frühere fünfspaltige Format nicht mehr")
         if b'action="/admin/bookings/status"' not in valid_body:
             raise AssertionError("Adminseite enthält kein Formular zur Statusänderung")
+
+    def admin_session_workflow() -> None:
+        client_ip = "198.51.100.45"
+
+        def create_session(ip_address: str) -> tuple[str, str]:
+            login_response = raw_request(request_text(
+                "GET",
+                "/admin/login",
+                proxy_headers(ip_address),
+            ).encode())
+            login_headers, login_body = assert_status(login_response, "200 OK")
+            if login_headers.get("cache-control") != "no-store":
+                raise AssertionError("Loginseite verhindert Browser-Caching nicht")
+
+            csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', login_body)
+            if csrf_match is None:
+                raise AssertionError("Loginseite enthält kein CSRF-Token")
+
+            login_body_data = urlencode({
+                "csrf_token": csrf_match.group(1).decode("ascii"),
+                "username": TEST_ADMIN_USERNAME,
+                "password": TEST_ADMIN_PASSWORD,
+            })
+            authenticated_response = raw_request(request_text(
+                "POST",
+                "/admin/login",
+                proxy_headers(ip_address, {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }),
+                login_body_data,
+            ).encode())
+            authenticated_headers, _ = assert_status(
+                authenticated_response,
+                "303 See Other",
+            )
+            if authenticated_headers.get("location") != "/admin":
+                raise AssertionError("Erfolgreiche Anmeldung leitet nicht zum Dashboard")
+
+            set_cookie = authenticated_headers.get("set-cookie", "")
+            for required in (
+                "styles4dogs_admin=",
+                "HttpOnly",
+                "SameSite=Lax",
+                "Path=/admin",
+                "Max-Age=",
+            ):
+                if required not in set_cookie:
+                    raise AssertionError(f"Session-Cookie enthält {required!r} nicht")
+            return set_cookie.split(";", 1)[0], set_cookie
+
+        def load_dashboard(cookie_value: str) -> tuple[bytes, str]:
+            dashboard_response = raw_request(request_text(
+                "GET",
+                "/admin",
+                proxy_headers(client_ip, {"Cookie": cookie_value}),
+            ).encode())
+            _, dashboard_body = assert_status(dashboard_response, "200 OK")
+            if TEST_ADMIN_USERNAME.encode() not in dashboard_body:
+                raise AssertionError("Dashboard zeigt den angemeldeten Admin nicht an")
+            csrf_match = re.search(
+                rb'<form[^>]+action="/admin/logout"[^>]*>.*?name="csrf_token" value="([0-9a-f]+)"',
+                dashboard_body,
+                re.DOTALL,
+            )
+            if csrf_match is None:
+                raise AssertionError("Dashboard enthält kein CSRF-geschütztes Logout-Formular")
+            return dashboard_body, csrf_match.group(1).decode("ascii")
+
+        cookie, _ = create_session(client_ip)
+        _, session_csrf = load_dashboard(cookie)
+
+        # Eine erneute erfolgreiche Anmeldung rotiert die serverseitige Sitzung.
+        rotated_cookie, _ = create_session(client_ip)
+        if rotated_cookie == cookie:
+            raise AssertionError("Erneute Anmeldung rotiert das Session-Token nicht")
+        old_session_response = raw_request(request_text(
+            "GET",
+            "/admin",
+            proxy_headers(client_ip, {"Cookie": cookie}),
+        ).encode())
+        old_session_headers, _ = assert_status(old_session_response, "303 See Other")
+        if old_session_headers.get("location") != "/admin/login":
+            raise AssertionError("Rotierte Vorgängersitzung bleibt verwendbar")
+        cookie = rotated_cookie
+        _, session_csrf = load_dashboard(cookie)
+
+        invalid_logout = raw_request(request_text(
+            "POST",
+            "/admin/logout",
+            proxy_headers(client_ip, {
+                "Cookie": cookie,
+                "Content-Type": "application/x-www-form-urlencoded",
+            }),
+            urlencode({"csrf_token": "0" * len(session_csrf)}),
+        ).encode())
+        assert_status(invalid_logout, "403 Forbidden")
+
+        logout_response = raw_request(request_text(
+            "POST",
+            "/admin/logout",
+            proxy_headers(client_ip, {
+                "Cookie": cookie,
+                "Content-Type": "application/x-www-form-urlencoded",
+            }),
+            urlencode({"csrf_token": session_csrf}),
+        ).encode())
+        logout_headers, _ = assert_status(logout_response, "303 See Other")
+        if logout_headers.get("location") != "/admin/login":
+            raise AssertionError("Logout leitet nicht zur Anmeldung")
+        clear_cookie = logout_headers.get("set-cookie", "")
+        if "Max-Age=0" not in clear_cookie:
+            raise AssertionError("Logout löscht das Session-Cookie nicht")
+
+        logged_out_response = raw_request(request_text(
+            "GET",
+            "/admin",
+            proxy_headers(client_ip, {"Cookie": cookie}),
+        ).encode())
+        logged_out_headers, _ = assert_status(logged_out_response, "303 See Other")
+        if logged_out_headers.get("location") != "/admin/login":
+            raise AssertionError("Ausgeloggte Session bleibt verwendbar")
+
+        # Absolut abgelaufene Sitzungen werden auch mit formal gültigem Cookie abgewiesen.
+        expired_cookie, _ = create_session(client_ip)
+        database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
+        if not database_file_value:
+            raise AssertionError("STYLES4DOGS_TEST_DATABASE_FILE fehlt")
+        with sqlite3.connect(database_file_value) as database:
+            database.execute(
+                "UPDATE admin_sessions SET created_at=0, expires_at=1, last_activity_at=0 "
+                "WHERE admin_id=(SELECT id FROM admin_users WHERE username=?);",
+                (TEST_ADMIN_USERNAME,),
+            )
+        expired_response = raw_request(request_text(
+            "GET",
+            "/admin",
+            proxy_headers(client_ip, {"Cookie": expired_cookie}),
+        ).encode())
+        expired_headers, _ = assert_status(expired_response, "303 See Other")
+        if expired_headers.get("location") != "/admin/login":
+            raise AssertionError("Abgelaufene Session bleibt verwendbar")
+
+        limited_ip = "198.51.100.46"
+        for attempt in range(6):
+            page_response = raw_request(request_text(
+                "GET",
+                "/admin/login",
+                proxy_headers(limited_ip),
+            ).encode())
+            _, page_body = assert_status(page_response, "200 OK")
+            token_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', page_body)
+            if token_match is None:
+                raise AssertionError("Rate-Limit-Test erhält kein Login-CSRF-Token")
+            response = raw_request(request_text(
+                "POST",
+                "/admin/login",
+                proxy_headers(limited_ip, {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }),
+                urlencode({
+                    "csrf_token": token_match.group(1).decode("ascii"),
+                    "username": TEST_ADMIN_USERNAME,
+                    "password": "definitiv-falsch",
+                }),
+            ).encode())
+            headers, _ = assert_status(response, "303 See Other")
+            expected_location = (
+                "/admin/login?error=limited"
+                if attempt >= 5
+                else "/admin/login?error=invalid"
+            )
+            if headers.get("location") != expected_location:
+                raise AssertionError(
+                    "Login-Rate-Limit liefert unerwartete Weiterleitung: "
+                    f"{headers.get('location')!r}"
+                )
 
     def admin_gallery_workflow() -> None:
         database_file_value = os.environ.get("STYLES4DOGS_TEST_DATABASE_FILE")
@@ -954,7 +1136,7 @@ def run_stateful_tests() -> int:
             {"Content-Type": "application/x-www-form-urlencoded"},
             missing_auth_body,
         ).encode())
-        assert_status(missing_auth_response, "401 Unauthorized")
+        assert_status(missing_auth_response, "303 See Other")
 
         invalid_csrf_body = urlencode({
             "csrf_token": "0" * 64,
@@ -1180,7 +1362,7 @@ def run_stateful_tests() -> int:
             f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
         ).decode()
         unauthorized = raw_request(request_text("GET", "/admin").encode())
-        assert_status(unauthorized, "401 Unauthorized")
+        assert_status(unauthorized, "303 See Other")
 
         response = raw_request(request_text(
             "GET",
@@ -1426,6 +1608,7 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "cancellation_notice_hours": "72",
                 "reminder_lead_hours": "24",
                 "reminder_enabled": "1",
             }),
@@ -1442,6 +1625,7 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "cancellation_notice_hours": "72",
                 "reminder_lead_hours": "24",
                 "reminder_enabled": "1",
             }),
@@ -1466,6 +1650,7 @@ def run_stateful_tests() -> int:
             "booking_horizon_days": "120",
             "slot_interval_minutes": "30",
             "pending_hold_hours": "12",
+            "cancellation_notice_hours": "72",
             "reminder_lead_hours": "24",
             "reminder_enabled": "1",
             f"day_{target_weekday}_start_1": "09:00",
@@ -1657,7 +1842,8 @@ def run_stateful_tests() -> int:
             settings = connection.execute(
                 "SELECT min_notice_minutes, booking_horizon_days, "
                 "slot_interval_minutes, pending_hold_minutes, auto_confirm_bookings, "
-                "email_notifications_enabled, reminder_enabled, reminder_lead_minutes "
+                "email_notifications_enabled, reminder_enabled, reminder_lead_minutes, "
+                "cancellation_notice_minutes "
                 "FROM calendar_settings WHERE id = 1"
             ).fetchone()
             periods = connection.execute(
@@ -1675,7 +1861,7 @@ def run_stateful_tests() -> int:
                 (target_date, target_date, "Testurlaub"),
             ).fetchone()
 
-        if settings != (0, 120, 30, 720, 0, 0, 1, 1440):
+        if settings != (0, 120, 30, 720, 0, 0, 1, 1440, 4320):
             raise AssertionError(f"Buchungsregeln wurden falsch gespeichert: {settings!r}")
         if periods != [(540, 720), (780, 1020)]:
             raise AssertionError(f"Öffnungszeiten wurden falsch gespeichert: {periods!r}")
@@ -1828,9 +2014,9 @@ def run_stateful_tests() -> int:
             if expected.encode("utf-8") not in body:
                 raise AssertionError(f"E-Mail-Adminseite enthält {expected!r} nicht")
 
-        if body.count(b'<details class="notification-template-card"') != 6:
+        if body.count(b'<details class="notification-template-card"') != 8:
             raise AssertionError("Nicht jede E-Mail-Vorlage ist einklappbar")
-        if body.count(b'class="notification-template-summary"') != 6:
+        if body.count(b'class="notification-template-summary"') != 8:
             raise AssertionError("Einklappbare E-Mail-Vorlagen haben keine Zusammenfassung")
 
         match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', body)
@@ -1950,6 +2136,7 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "cancellation_notice_hours": "72",
                 "reminder_lead_hours": "168",
                 "auto_confirm_bookings": "1",
                 "email_notifications_enabled": "1",
@@ -2074,6 +2261,7 @@ def run_stateful_tests() -> int:
                 "booking_horizon_days": "120",
                 "slot_interval_minutes": "30",
                 "pending_hold_hours": "12",
+                "cancellation_notice_hours": "72",
                 "reminder_lead_hours": "168",
                 "email_notifications_enabled": "1",
                 "reminder_enabled": "1",
@@ -2084,6 +2272,13 @@ def run_stateful_tests() -> int:
 
     def customer_portal_cancellation() -> None:
         database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+        cancellation_reason = "Unser Urlaub wurde kurzfristig verschoben"
+        with sqlite3.connect(database_file) as connection:
+            connection.execute(
+                "UPDATE calendar_settings SET cancellation_notice_minutes = ? WHERE id = 1",
+                (30 * 24 * 60,),
+            )
+            connection.commit()
         target = datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=21)
         target_date = target.date().isoformat()
         query = urlencode({
@@ -2136,7 +2331,10 @@ def run_stateful_tests() -> int:
             "POST",
             f"{portal_path}/cancel",
             {"Content-Type": "application/x-www-form-urlencoded"},
-            urlencode({"confirm_cancel": "1"}),
+            urlencode({
+                "confirm_cancel": "1",
+                "cancellation_reason": cancellation_reason,
+            }),
         ).encode())
         cancel_headers, _ = assert_status(cancel_response, "303 See Other")
         expected_location = f"{portal_path}?cancelled=1"
@@ -2148,7 +2346,11 @@ def run_stateful_tests() -> int:
             expected_location,
         ).encode())
         _, cancelled_page = assert_status(cancelled_page_response, "200 OK")
-        if "Von dir abgesagt".encode("utf-8") not in cancelled_page or "wieder freigegeben".encode("utf-8") not in cancelled_page:
+        if (
+            "Von dir abgesagt".encode("utf-8") not in cancelled_page
+            or "wieder freigegeben".encode("utf-8") not in cancelled_page
+            or cancellation_reason.encode("utf-8") not in cancelled_page
+        ):
             raise AssertionError("Kundenbereich bestätigt die Absage nicht verständlich")
 
         repeated_cancel = raw_request(request_text(
@@ -2163,7 +2365,9 @@ def run_stateful_tests() -> int:
 
         with sqlite3.connect(database_file) as connection:
             row = connection.execute(
-                "SELECT decision_status, status, hold_expires_at, decision_at FROM bookings WHERE id = ?",
+                "SELECT decision_status, status, hold_expires_at, decision_at, cancelled_at, "
+                "       cancellation_reason, cancellation_actor, late_cancellation "
+                "FROM bookings WHERE id = ?",
                 (booking_id,),
             ).fetchone()
             admin_cancellation = connection.execute(
@@ -2172,7 +2376,36 @@ def run_stateful_tests() -> int:
                 "WHERE booking_id = ? AND event_type = 'admin_booking_cancelled'",
                 (booking_id,),
             ).fetchone()
-        if row is None or row[0:2] != ("cancelled", "abgesagt") or row[2] is not None or not row[3]:
+            customer_cancellation = connection.execute(
+                "SELECT recipient_email, status, subject, body_text "
+                "FROM notification_jobs "
+                "WHERE booking_id = ? AND event_type = 'booking_cancelled'",
+                (booking_id,),
+            ).fetchone()
+            cancellation_event = connection.execute(
+                "SELECT event_type, actor_type, reason FROM booking_events "
+                "WHERE booking_id = ? AND event_type = 'customer_cancelled' "
+                "ORDER BY id DESC LIMIT 1",
+                (booking_id,),
+            ).fetchone()
+            duplicate_jobs = connection.execute(
+                "SELECT event_type, COUNT(*) FROM notification_jobs "
+                "WHERE booking_id = ? AND event_type IN ('booking_cancelled','admin_booking_cancelled') "
+                "GROUP BY event_type ORDER BY event_type",
+                (booking_id,),
+            ).fetchall()
+            connection.execute(
+                "UPDATE calendar_settings SET cancellation_notice_minutes = 4320 WHERE id = 1"
+            )
+            connection.commit()
+        if (
+            row is None
+            or row[0:2] != ("cancelled", "abgesagt")
+            or row[2] is not None
+            or not row[3]
+            or not row[4]
+            or row[5:] != (cancellation_reason, "customer", 1)
+        ):
             raise AssertionError(f"Kundenabsage wurde falsch gespeichert: {row!r}")
         if admin_cancellation is None or admin_cancellation[0:2] != (
             "admin@example.invalid", "pending"
@@ -2185,10 +2418,28 @@ def run_stateful_tests() -> int:
             or "Portal Absage" not in admin_cancellation[3]
             or "Flocke" not in admin_cancellation[3]
             or str(booking_id) not in admin_cancellation[3]
+            or cancellation_reason not in admin_cancellation[3]
+            or "kurzfristig" not in admin_cancellation[3].lower()
         ):
             raise AssertionError(
                 "Admin-Mail zur Kundenabsage enthält nicht die erwarteten Buchungsdaten"
             )
+        if customer_cancellation is None or customer_cancellation[0:2] != (
+            "portal-absage@example.invalid", "pending"
+        ):
+            raise AssertionError(
+                f"Kundenmail zur Absage wurde nicht eingereiht: {customer_cancellation!r}"
+            )
+        if (
+            "Terminabsage" not in customer_cancellation[2]
+            or cancellation_reason not in customer_cancellation[3]
+            or "kurzfristig" not in customer_cancellation[3].lower()
+        ):
+            raise AssertionError("Absagebestätigung enthält Grund oder Fristenhinweis nicht")
+        if cancellation_event != ("customer_cancelled", "customer", cancellation_reason):
+            raise AssertionError(f"Kundenabsage wurde nicht korrekt protokolliert: {cancellation_event!r}")
+        if duplicate_jobs != [("admin_booking_cancelled", 1), ("booking_cancelled", 1)]:
+            raise AssertionError(f"Kundenabsage erzeugte doppelte Nachrichten: {duplicate_jobs!r}")
 
         availability_after = raw_request(request_text(
             "GET",
@@ -2202,6 +2453,385 @@ def run_stateful_tests() -> int:
         )
         if not slot_after["available"]:
             raise AssertionError("Vom Kunden abgesagter Zeitraum wurde nicht wieder freigegeben")
+
+    def phase14_booking_management() -> None:
+        database_file = Path(os.environ["STYLES4DOGS_TEST_DATABASE_FILE"])
+        auth_token = base64.b64encode(
+            f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
+        ).decode()
+        auth_headers = {"Authorization": f"Basic {auth_token}"}
+        form_headers = {
+            **auth_headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        admin_page_response = raw_request(request_text(
+            "GET", "/admin/bookings", auth_headers,
+        ).encode())
+        _, admin_page = assert_status(admin_page_response, "200 OK")
+        csrf_match = re.search(rb'name="csrf_token" value="([0-9a-f]+)"', admin_page)
+        if csrf_match is None:
+            raise AssertionError("Phase-14-Test erhält kein Admin-CSRF-Token")
+        csrf_token = csrf_match.group(1).decode("ascii")
+
+        def free_slot(service: str, first_day: int) -> tuple[str, str]:
+            for offset in range(first_day, first_day + 28):
+                date = (
+                    datetime.now(ZoneInfo("Europe/Berlin")) + timedelta(days=offset)
+                ).date().isoformat()
+                query = urlencode({"service": service, "from": date, "to": date})
+                response = raw_request(request_text(
+                    "GET", f"/api/availability?{query}",
+                ).encode())
+                _, body = assert_status(response, "200 OK")
+                payload = json.loads(body)
+                slots = [slot for slot in payload["days"][0]["slots"] if slot["available"]]
+                if slots:
+                    return date, slots[0]["start"]
+            raise AssertionError("Kein freier Termin für den Phase-14-Test vorhanden")
+
+        def create_booking(
+            first_name: str,
+            last_name: str,
+            email: str,
+            dog_name: str,
+            date: str,
+            start: str,
+            client_ip: str,
+        ) -> tuple[int, str]:
+            body = urlencode({
+                "first_name": first_name,
+                "last_name": last_name,
+                **email_contact(email),
+                "street_address": "Historienweg 14",
+                "postal_code": "26123",
+                "city": "Oldenburg",
+                "dog_name": dog_name,
+                "dog_size": "small",
+                "service": "claw_care",
+                "appointment_date": date,
+                "appointment_start": start,
+                "message": "Phase-14-Verwaltungstest",
+                "privacy_consent": "accepted",
+            })
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                proxy_headers(client_ip, {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }),
+                body,
+            ).encode())
+            _, response_body = assert_status(response, "201 Created")
+            match = re.search(rb'href="[^" ]*(/buchung/([0-9]+)/[0-9a-f]{64})"', response_body)
+            if match is None:
+                raise AssertionError("Phase-14-Buchung enthält keinen Kundenlink")
+            return int(match.group(2)), match.group(1).decode("ascii")
+
+        def accept_booking(booking_id: int) -> None:
+            response = raw_request(request_text(
+                "POST",
+                "/admin/bookings/accept",
+                form_headers,
+                urlencode({
+                    "csrf_token": csrf_token,
+                    "booking_id": str(booking_id),
+                }),
+            ).encode())
+            assert_status(response, "303 See Other")
+
+        original_date, original_start = free_slot("claw_care", 24)
+        booking_id, portal_path = create_booking(
+            "Phase", "Vierzehn", "phase14@example.invalid", "Momo",
+            original_date, original_start, "198.51.100.210",
+        )
+        accept_booking(booking_id)
+
+        target_date, target_start = free_slot("claw_care", 35)
+        edit_response = raw_request(request_text(
+            "GET", f"/admin/bookings/edit?id={booking_id}", auth_headers,
+        ).encode())
+        _, edit_page = assert_status(edit_response, "200 OK")
+        for expected in (
+            b"Buchungsdaten",
+            b"Interne Hundenotiz",
+            b"Kunden- und Hundehistorie",
+            b'action="/admin/bookings/update"',
+        ):
+            if expected not in edit_page:
+                raise AssertionError(f"Buchungsverwaltung enthält {expected!r} nicht")
+
+        update_payload = {
+            "csrf_token": csrf_token,
+            "booking_id": str(booking_id),
+            "first_name": "Phase",
+            "last_name": "Vierzehn",
+            "email": "phase14@example.invalid",
+            "phone_number": "",
+            "phone_kind": "",
+            "contact_channel": "email",
+            "contact_preference": "",
+            "street_address": "Historienweg 14",
+            "postal_code": "26123",
+            "city": "Oldenburg",
+            "dog_name": "Momo",
+            "dog_breed": "",
+            "dog_size": "small",
+            "service_code": "claw_care",
+            "appointment_date": target_date,
+            "appointment_start": target_start,
+            "message": "Phase-14-Verwaltungstest",
+            "admin_note": "Nur intern sichtbar",
+        }
+        update_response = raw_request(request_text(
+            "POST", "/admin/bookings/update", form_headers,
+            urlencode(update_payload),
+        ).encode())
+        update_headers, _ = assert_status(update_response, "303 See Other")
+        expected_redirect = f"/admin/bookings/edit?id={booking_id}&saved=rescheduled"
+        if update_headers.get("location") != expected_redirect:
+            raise AssertionError("Terminverschiebung leitet nicht korrekt zurück")
+
+        with sqlite3.connect(database_file) as connection:
+            updated = connection.execute(
+                "SELECT appointment_date,start_minute,status,decision_status,admin_note,"
+                "       customer_id,dog_id,dog_breed FROM bookings WHERE id=?",
+                (booking_id,),
+            ).fetchone()
+            reschedule_jobs = connection.execute(
+                "SELECT subject,body_text,ics_content FROM notification_jobs "
+                "WHERE booking_id=? AND event_type='booking_rescheduled'",
+                (booking_id,),
+            ).fetchall()
+            confirmation_ics = connection.execute(
+                "SELECT ics_content FROM notification_jobs "
+                "WHERE booking_id=? AND event_type='booking_confirmed' ORDER BY id LIMIT 1",
+                (booking_id,),
+            ).fetchone()
+            reschedule_events = connection.execute(
+                "SELECT old_value,new_value,actor_type FROM booking_events "
+                "WHERE booking_id=? AND event_type='booking_rescheduled'",
+                (booking_id,),
+            ).fetchall()
+        target_minute = int(target_start[:2]) * 60 + int(target_start[3:])
+        if (
+            updated is None
+            or updated[0:5] != (
+                target_date, target_minute, "bestätigt", "confirmed", "Nur intern sichtbar"
+            )
+            or updated[5] <= 0
+            or updated[6] <= 0
+            or updated[7] != ""
+        ):
+            raise AssertionError(f"Terminverschiebung wurde falsch gespeichert: {updated!r}")
+        if len(reschedule_jobs) != 1 or len(reschedule_events) != 1:
+            raise AssertionError(
+                f"Terminverschiebung erzeugte falsche Job-/Eventzahl: "
+                f"{len(reschedule_jobs)}/{len(reschedule_events)}"
+            )
+        original_date_display = datetime.strptime(original_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+        target_date_display = datetime.strptime(target_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+        if (
+            original_date_display not in reschedule_jobs[0][1]
+            or target_date_display not in reschedule_jobs[0][1]
+            or portal_path not in reschedule_jobs[0][1]
+        ):
+            raise AssertionError("Verschiebungsmail enthält alte, neue oder Portal-Daten nicht")
+        uid_pattern = re.compile(r"^UID:([^\r\n]+)", re.MULTILINE)
+        old_uid = uid_pattern.search(confirmation_ics[0] if confirmation_ics else "")
+        new_uid = uid_pattern.search(reschedule_jobs[0][2])
+        if old_uid is None or new_uid is None or old_uid.group(1) != new_uid.group(1):
+            raise AssertionError("Aktualisierte ICS-Datei verwendet keine stabile Termin-UID")
+        if reschedule_events[0][2] != "admin":
+            raise AssertionError("Terminverschiebung wurde nicht als Adminaktion protokolliert")
+
+        repeated_response = raw_request(request_text(
+            "POST", "/admin/bookings/update", form_headers,
+            urlencode(update_payload),
+        ).encode())
+        repeated_headers, _ = assert_status(repeated_response, "303 See Other")
+        if repeated_headers.get("location") != f"/admin/bookings/edit?id={booking_id}&saved=updated":
+            raise AssertionError("Idempotente Buchungsänderung wird falsch behandelt")
+        with sqlite3.connect(database_file) as connection:
+            repeated_counts = connection.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM notification_jobs WHERE booking_id=? AND event_type='booking_rescheduled'),"
+                "(SELECT COUNT(*) FROM booking_events WHERE booking_id=? AND event_type='booking_rescheduled')",
+                (booking_id, booking_id),
+            ).fetchone()
+        if repeated_counts != (1, 1):
+            raise AssertionError(f"Wiederholung erzeugte doppelte Verschiebungen: {repeated_counts!r}")
+
+        update_payload["city"] = "Oldenburg-Nord"
+        contact_update = raw_request(request_text(
+            "POST", "/admin/bookings/update", form_headers,
+            urlencode(update_payload),
+        ).encode())
+        contact_headers, _ = assert_status(contact_update, "303 See Other")
+        if contact_headers.get("location") != f"/admin/bookings/edit?id={booking_id}&saved=updated":
+            raise AssertionError("Reine Stammdatenänderung wird als Verschiebung behandelt")
+
+        with sqlite3.connect(database_file) as connection:
+            dog_id = connection.execute(
+                "SELECT dog_id FROM bookings WHERE id=?", (booking_id,),
+            ).fetchone()[0]
+        note_response = raw_request(request_text(
+            "POST", "/admin/bookings/dog-note", form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "booking_id": str(booking_id),
+                "dog_id": str(dog_id),
+                "dog_note": "Mag den Föhn nicht",
+            }),
+        ).encode())
+        assert_status(note_response, "303 See Other")
+        public_portal = raw_request(request_text("GET", portal_path).encode())
+        _, public_portal_body = assert_status(public_portal, "200 OK")
+        if b"Mag den F" in public_portal_body or b"Nur intern sichtbar" in public_portal_body:
+            raise AssertionError("Interne Notizen erscheinen im Kundenportal")
+
+        second_date, second_start = free_slot("claw_care", 46)
+        second_id, _ = create_booking(
+            "Konflikt", "Test", "konflikt@example.invalid", "Luna",
+            second_date, second_start, "198.51.100.211",
+        )
+        accept_booking(second_id)
+        conflict_payload = dict(update_payload)
+        conflict_payload.update({
+            "booking_id": str(second_id),
+            "first_name": "Konflikt",
+            "last_name": "Test",
+            "email": "konflikt@example.invalid",
+            "city": "Oldenburg",
+            "dog_name": "Luna",
+            "appointment_date": target_date,
+            "appointment_start": target_start,
+            "admin_note": "",
+        })
+        conflict_response = raw_request(request_text(
+            "POST", "/admin/bookings/update", form_headers,
+            urlencode(conflict_payload),
+        ).encode())
+        conflict_headers, _ = assert_status(conflict_response, "303 See Other")
+        if conflict_headers.get("location") != f"/admin/bookings/edit?id={second_id}&saved=conflict":
+            raise AssertionError("Terminkollision wird nicht verständlich zurückgemeldet")
+        with sqlite3.connect(database_file) as connection:
+            unchanged = connection.execute(
+                "SELECT appointment_date,start_minute FROM bookings WHERE id=?", (second_id,),
+            ).fetchone()
+        second_minute = int(second_start[:2]) * 60 + int(second_start[3:])
+        if unchanged != (second_date, second_minute):
+            raise AssertionError("Konflikt hat eine Teiländerung in der Datenbank hinterlassen")
+
+        history_date, history_start = free_slot("claw_care", 57)
+        history_id, _ = create_booking(
+            "Phase", "Vierzehn", "PHASE14@example.invalid", "Momo",
+            history_date, history_start, "198.51.100.212",
+        )
+        with sqlite3.connect(database_file) as connection:
+            identities = connection.execute(
+                "SELECT customer_id,dog_id FROM bookings WHERE id IN (?,?) ORDER BY id",
+                (booking_id, history_id),
+            ).fetchall()
+        if len(identities) != 2 or identities[0] != identities[1]:
+            raise AssertionError(f"Normalisierte E-Mail/Hund wurden falsch verknüpft: {identities!r}")
+
+        def create_phone_history_booking(
+            number: str,
+            date: str,
+            start: str,
+            client_ip: str,
+        ) -> int:
+            body = urlencode({
+                "first_name": "Telefon",
+                "last_name": "Historie",
+                **phone_contact(number, "mobile", "call"),
+                "street_address": "Telefonweg 14",
+                "postal_code": "26123",
+                "city": "Oldenburg",
+                "dog_name": "Rufus",
+                "dog_size": "medium",
+                "service": "claw_care",
+                "appointment_date": date,
+                "appointment_start": start,
+                "message": "Telefonische Historienzuordnung",
+                "privacy_consent": "accepted",
+            })
+            response = raw_request(request_text(
+                "POST",
+                "/booking",
+                proxy_headers(client_ip, {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                }),
+                body,
+            ).encode())
+            _, response_body = assert_status(response, "201 Created")
+            match = re.search(rb'/buchung/([0-9]+)/[0-9a-f]{64}', response_body)
+            if match is None:
+                raise AssertionError("Telefonische Historienbuchung enthält keinen Kundenlink")
+            return int(match.group(1))
+
+        phone_date_one, phone_start_one = free_slot("claw_care", 68)
+        phone_id_one = create_phone_history_booking(
+            "+49 170 5550123", phone_date_one, phone_start_one, "198.51.100.213",
+        )
+        phone_date_two, phone_start_two = free_slot("claw_care", 79)
+        phone_id_two = create_phone_history_booking(
+            "+49-170-5550123", phone_date_two, phone_start_two, "198.51.100.214",
+        )
+        with sqlite3.connect(database_file) as connection:
+            phone_identities = connection.execute(
+                "SELECT customer_id,dog_id FROM bookings WHERE id IN (?,?) ORDER BY id",
+                (phone_id_one, phone_id_two),
+            ).fetchall()
+        if len(phone_identities) != 2 or phone_identities[0] != phone_identities[1]:
+            raise AssertionError(
+                f"Normalisierte Telefonnummer/Hund wurden falsch verknüpft: {phone_identities!r}"
+            )
+
+        no_show_response = raw_request(request_text(
+            "POST", "/admin/bookings/no-show", form_headers,
+            urlencode({
+                "csrf_token": csrf_token,
+                "booking_id": str(booking_id),
+                "note": "Nicht zum Termin erschienen",
+            }),
+        ).encode())
+        no_show_headers, _ = assert_status(no_show_response, "303 See Other")
+        if no_show_headers.get("location") != f"/admin/bookings/edit?id={booking_id}&saved=no-show":
+            raise AssertionError("No-Show-Aktion leitet nicht korrekt zurück")
+        with sqlite3.connect(database_file) as connection:
+            no_show = connection.execute(
+                "SELECT status,decision_status,admin_note FROM bookings WHERE id=?", (booking_id,),
+            ).fetchone()
+            no_show_event = connection.execute(
+                "SELECT event_type,actor_type FROM booking_events "
+                "WHERE booking_id=? AND event_type='booking_no_show' ORDER BY id DESC LIMIT 1",
+                (booking_id,),
+            ).fetchone()
+            no_show_mail_count = connection.execute(
+                "SELECT COUNT(*) FROM notification_jobs WHERE booking_id=? "
+                "AND event_type NOT IN ('booking_received','admin_new_booking','booking_confirmed','booking_rescheduled')",
+                (booking_id,),
+            ).fetchone()[0]
+        if no_show != ("nicht_erschienen", "no_show", "Nicht zum Termin erschienen"):
+            raise AssertionError(f"No-Show-Status wurde falsch gespeichert: {no_show!r}")
+        if no_show_event != ("booking_no_show", "admin") or no_show_mail_count != 0:
+            raise AssertionError("No-Show wurde nicht korrekt protokolliert oder erzeugte eine Mail")
+
+        final_page_response = raw_request(request_text(
+            "GET", f"/admin/bookings/edit?id={booking_id}", auth_headers,
+        ).encode())
+        _, final_page = assert_status(final_page_response, "200 OK")
+        for expected in (
+            "Termin wurde verschoben",
+            "Buchungsdaten wurden geändert",
+            "Termin wurde als nicht erschienen markiert",
+            "Mag den Föhn nicht",
+            f"#{history_id}",
+        ):
+            if expected.encode("utf-8") not in final_page:
+                raise AssertionError(f"Verlauf oder Historie enthält {expected!r} nicht")
 
 
     def admin_message_templates() -> None:
@@ -2615,14 +3245,14 @@ def run_stateful_tests() -> int:
                 "/admin/bookings",
                 invalid_admin_headers,
             ).encode())
-            assert_status(response, "401 Unauthorized")
+            assert_status(response, "303 See Other")
 
         blocked_admin = raw_request(request_text(
             "GET",
             "/admin/bookings",
             invalid_admin_headers,
         ).encode())
-        assert_status(blocked_admin, "429 Too Many Requests")
+        assert_status(blocked_admin, "303 See Other")
 
         # Successful authentication clears earlier failures for that client.
         reset_ip = "198.51.100.202"
@@ -2636,7 +3266,7 @@ def run_stateful_tests() -> int:
                 "/admin/bookings",
                 reset_bad_headers,
             ).encode())
-            assert_status(response, "401 Unauthorized")
+            assert_status(response, "303 See Other")
 
         valid_token = base64.b64encode(
             f"{TEST_ADMIN_USERNAME}:{TEST_ADMIN_PASSWORD}".encode()
@@ -2658,14 +3288,14 @@ def run_stateful_tests() -> int:
                 "/admin/bookings",
                 reset_bad_headers,
             ).encode())
-            assert_status(response, "401 Unauthorized")
+            assert_status(response, "303 See Other")
 
         reset_blocked = raw_request(request_text(
             "GET",
             "/admin/bookings",
             reset_bad_headers,
         ).encode())
-        assert_status(reset_blocked, "429 Too Many Requests")
+        assert_status(reset_blocked, "303 See Other")
 
         # A separate global safety valve eventually rejects even requests from
         # rotating client addresses. Existing test requests already count, so
@@ -2703,6 +3333,7 @@ def run_stateful_tests() -> int:
     check("PLZ-API ergänzt den Wohnort", postal_code_lookup)
     check("Öffentlicher Kalender reserviert einen Pending-Termin", public_calendar_and_pending_booking)
     check("Einmaliges Admin-Setup und Basic Auth", first_run_admin_setup)
+    check("Sitzungsbasierte Admin-Anmeldung, CSRF und Logout", admin_session_workflow)
     check("Admin sieht das zentrale Dashboard", admin_dashboard_overview)
     check("Admin lädt Galeriebilder hoch und löscht sie", admin_gallery_workflow)
     check("Admin sortiert Galeriebilder dauerhaft", admin_gallery_reorder_workflow)
@@ -2715,6 +3346,7 @@ def run_stateful_tests() -> int:
     check("Freie Termine können automatisch bestätigt werden", automatic_confirmation)
     check("Admin individualisiert Bestätigungen, Absagen und bereinigt die Queue", admin_message_templates)
     check("Kunden sehen und stornieren ihre Buchung über einen sicheren Link", customer_portal_cancellation)
+    check("Phase 14 verwaltet Verschiebung, Historie, Stammdaten und No-Show", phase14_booking_management)
     check("Admin sieht Termine in Tages-, Wochen- und Monatsansicht", admin_appointments_workflow)
     check("Rate-Limits schützen PLZ-Abfrage, Buchung und Adminzugang", rate_limiting)
 
@@ -2756,41 +3388,41 @@ def main() -> int:
     add_status(cannon, "Nicht unterstützte HTTP-Version", "GET / HTTP/2.0\r\nHost: localhost\r\n\r\n", "400 Bad Request")
     add_status(cannon, "Nicht erlaubte Methode", request_text("PUT", "/"), "405 Method Not Allowed")
     add_status(cannon, "POST auf unbekannte Route", request_text("POST", "/unbekannt"), "404 Not Found")
-    add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "401 Unauthorized")
-    add_status(cannon, "Admin-Kalender ohne Zugangsdaten", request_text("GET", "/admin/calendar"), "401 Unauthorized")
-    add_status(cannon, "Admin-Terminkalender ohne Zugangsdaten", request_text("GET", "/admin/appointments"), "401 Unauthorized")
+    add_status(cannon, "Adminbereich ohne Zugangsdaten", request_text("GET", "/admin/bookings"), "303 See Other")
+    add_status(cannon, "Admin-Kalender ohne Zugangsdaten", request_text("GET", "/admin/calendar"), "303 See Other")
+    add_status(cannon, "Admin-Terminkalender ohne Zugangsdaten", request_text("GET", "/admin/appointments"), "303 See Other")
     add_status(cannon, "Admin-Galerie ohne Zugangsdaten", request_text(
         "GET",
         "/admin/gallery",
         proxy_headers("198.51.100.90"),
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Adminbereich mit ungültigem Basic Token", request_text(
         "GET", "/admin/bookings", {"Authorization": "Basic !!!"}
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Statusänderung ohne Zugangsdaten", request_text(
         "POST",
         "/admin/bookings/status",
         {"Content-Type": "application/x-www-form-urlencoded"},
         "booking_id=1&status=kontaktiert&csrf_token=invalid",
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Kalenderänderung ohne Zugangsdaten", request_text(
         "POST",
         "/admin/calendar/settings",
         {"Content-Type": "application/x-www-form-urlencoded"},
         "min_notice_hours=0&booking_horizon_days=90&slot_interval_minutes=15&pending_hold_hours=24&reminder_lead_hours=24&csrf_token=invalid",
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Terminannahme ohne Zugangsdaten", request_text(
         "POST",
         "/admin/bookings/accept",
         {"Content-Type": "application/x-www-form-urlencoded"},
         "booking_id=1&csrf_token=invalid",
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Leistung anlegen ohne Zugangsdaten", request_text(
         "POST",
         "/admin/calendar/service/add",
         {"Content-Type": "application/x-www-form-urlencoded"},
         "code=test&name=Test&duration_minutes=30&buffer_minutes=0&csrf_token=invalid",
-    ), "401 Unauthorized")
+    ), "303 See Other")
     add_status(cannon, "Setup-Seite beim ersten Start", request_text("GET", "/setup/admin"), "200 OK")
 
     missing_slot_booking = urlencode({

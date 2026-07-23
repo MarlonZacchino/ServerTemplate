@@ -58,6 +58,24 @@ int notification_queue_enqueue_booking_event(
 );
 
 /**
+ * @brief Reiht eine Terminverschiebung mit alten und neuen Termindaten ein.
+ * @param[in] booking_id Eindeutige ID der Buchung.
+ * @param[in] old_appointment_date Vorheriges Datum im Format YYYY-MM-DD.
+ * @param[in] old_start_minute Vorherige Startzeit in Minuten seit Mitternacht.
+ * @param[in] old_end_minute Vorherige Endzeit in Minuten seit Mitternacht.
+ * @param[in] dedupe_nonce Eindeutige Kennung der konkreten Änderung.
+ * @retval 0 Bei Erfolg oder wenn die Nachricht bereits eingereiht war.
+ * @retval -1 Bei einem internen Fehler.
+ */
+int notification_queue_enqueue_rescheduled(
+        int64_t booking_id,
+        const char *old_appointment_date,
+        int old_start_minute,
+        int old_end_minute,
+        const char *dedupe_nonce
+);
+
+/**
  * @brief Reiht fällige Terminerinnerungen dedupliziert ein.
  * @retval 0 Bei Erfolg.
  * @retval -1 Bei einem internen Fehler, sofern nicht anders beschrieben.

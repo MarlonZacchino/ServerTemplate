@@ -211,9 +211,14 @@ CONFIRMATION_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
     -name '*-booking_confirmed.eml' -print -quit)
 REMINDER_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
     -name '*-appointment_reminder.eml' -print -quit)
+RESCHEDULE_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
+    -name '*-booking_rescheduled.eml' -print -quit)
+CANCELLATION_MAIL=$(find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f \
+    -name '*-booking_cancelled.eml' -print -quit)
 
-if [[ -z "$CONFIRMATION_MAIL" || -z "$REMINDER_MAIL" ]]; then
-    echo "Fehler: Bestätigungs- oder Erinnerungs-E-Mail wurde im Dry-Run nicht erzeugt." >&2
+if [[ -z "$CONFIRMATION_MAIL" || -z "$REMINDER_MAIL" || \
+      -z "$RESCHEDULE_MAIL" || -z "$CANCELLATION_MAIL" ]]; then
+    echo "Fehler: Eine erwartete Termin-E-Mail wurde im Dry-Run nicht erzeugt." >&2
     find "$NOTIFICATION_OUTPUT_DIR" -maxdepth 1 -type f -print >&2
     exit 1
 fi
@@ -222,9 +227,28 @@ grep -Fq 'BEGIN:VCALENDAR' "$CONFIRMATION_MAIL"
 grep -Fq 'BEGIN:VCALENDAR' "$REMINDER_MAIL"
 grep -Fq 'DTSTART:' "$CONFIRMATION_MAIL"
 grep -Fq 'DTEND:' "$REMINDER_MAIL"
+grep -Fq 'BEGIN:VCALENDAR' "$RESCHEDULE_MAIL"
+grep -Fq 'Termin wurde geändert' "$RESCHEDULE_MAIL"
+grep -Fq 'bestätigen die Absage' "$CANCELLATION_MAIL"
+
+python3 - "$DATABASE_FILE" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as connection:
+    row = connection.execute(
+        "SELECT status, decision_status FROM bookings "
+        "WHERE customer_name = 'Phase Vierzehn' AND decision_status = 'no_show' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+if row != ("nicht_erschienen", "no_show"):
+    raise SystemExit(f"No-Show wurde vom Worker unzulässig verändert: {row!r}")
+PY
 
 echo "* Benachrichtigungs-Worker"
-echo "    Bestätigung, Erinnerung und ICS-Daten im Dry-Run: Ok"
+echo "    Bestätigung, Verschiebung, Absage, Erinnerung und ICS-Daten im Dry-Run: Ok"
+echo "    No-Show bleibt von der automatischen Erledigung ausgeschlossen: Ok"
 
 COUNT_BEFORE=$(python3 - "$DATABASE_FILE" <<'PY'
 import sqlite3

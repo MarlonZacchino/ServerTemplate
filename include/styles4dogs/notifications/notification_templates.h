@@ -36,7 +36,12 @@ typedef struct notification_template_context {
     const char *end_time; /**< Formatierte Endzeit. */
     const char *service_name; /**< Angezeigter Name der Leistung. */
     const char *dog_name; /**< Name des Hundes. */
-    const char *rejection_reason; /**< Optionaler Ablehnungs- oder Stornierungsgrund. */
+    const char *rejection_reason; /**< Optionaler Ablehnungsgrund. */
+    const char *cancellation_reason; /**< Optionaler Stornierungsgrund. */
+    const char *late_cancellation; /**< Verständlicher Hinweis zur Stornierungsfrist. */
+    const char *old_appointment_date; /**< Vorheriges Termindatum. */
+    const char *old_start_time; /**< Vorherige Startzeit. */
+    const char *old_end_time; /**< Vorherige Endzeit. */
     const char *salon_name; /**< Öffentlicher Salonname. */
     const char *salon_address; /**< Öffentliche Salonanschrift. */
     const char *salon_phone; /**< Öffentliche Salontelefonnummer. */

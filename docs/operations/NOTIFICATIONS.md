@@ -97,12 +97,16 @@ booking_rejected       Terminanfrage abgelehnt
 appointment_reminder   Erinnerung
 admin_new_booking      neue Anfrage für den Admin
 admin_booking_cancelled Kundenabsage für den Admin
+booking_rescheduled    Termin wurde verschoben
+booking_cancelled      Absagebestätigung für den Kunden
 ```
 
 Erlaubte Platzhalter:
 
 ```text
 {{customer_name}}      vollständiger Kundenname
+{{customer_first_name}} Vorname
+{{customer_last_name}}  Nachname
 {{booking_id}}         Buchungsnummer
 {{appointment_date}}   Termindatum
 {{start_time}}         Beginn
@@ -110,6 +114,11 @@ Erlaubte Platzhalter:
 {{service_name}}       gebuchte Leistung
 {{dog_name}}           Name des Hundes
 {{rejection_reason}}   optionaler Ablehnungsgrund
+{{old_appointment_date}} bisheriges Termindatum
+{{old_start_time}}     bisheriger Beginn
+{{old_end_time}}       bisheriges Ende
+{{cancellation_reason}} optionaler Absagegrund
+{{late_cancellation}} verständlicher Hinweis bei kurzfristiger Absage
 {{salon_name}}         Salonname aus server.env
 {{salon_address}}      Salonadresse aus server.env
 {{salon_phone}}        Salontelefon aus server.env
@@ -212,5 +221,5 @@ Die Adminseite bietet getrennte Wartungsaktionen:
 - **Abgeschlossene Historie leeren:** entfernt `sent` und `failed` gemeinsam.
 
 Jobs mit Status `pending` oder `processing` werden nie durch eine
-Bereinigungsaktion entfernt. Alle Aktionen sind mit Basic Auth und CSRF-Schutz
+Bereinigungsaktion entfernt. Alle Aktionen sind mit einer Admin-Sitzung und CSRF-Schutz
 geschützt und erfordern in der Oberfläche eine Bestätigung.

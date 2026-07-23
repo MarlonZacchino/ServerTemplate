@@ -483,6 +483,8 @@ calendar_public_result calendar_public_reserve_booking(
             .created_at_utc = snapshot.now_utc,
             .hold_expires_at_utc = hold_expires_at,
             .customer_name = booking->name,
+            .customer_first_name = booking->first_name,
+            .customer_last_name = booking->last_name,
             .contact = booking->contact,
             .contact_channel = booking->contact_channel,
             .email = booking->email,

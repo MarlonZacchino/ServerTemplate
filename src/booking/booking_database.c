@@ -216,13 +216,13 @@ static int create_schema(void)
             "CREATE TRIGGER trg_bookings_status_insert "
             "BEFORE INSERT ON bookings "
             "WHEN NEW.status NOT IN ("
-            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt'"
+            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt', 'nicht_erschienen'"
             ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
             "CREATE TRIGGER trg_bookings_status_update "
             "BEFORE UPDATE OF status ON bookings "
             "WHEN NEW.status NOT IN ("
-            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt'"
+            "    'neu', 'bestätigt', 'abgelehnt', 'abgesagt', 'erledigt', 'nicht_erschienen'"
             ") "
             "BEGIN SELECT RAISE(ABORT, 'invalid booking status'); END;"
             "CREATE TABLE IF NOT EXISTS app_metadata ("
@@ -988,7 +988,8 @@ int booking_database_for_each_filtered(
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
             "       decision_at, rejection_reason, service_name_snapshot, "
-            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed, "
+            "       COALESCE(cancellation_reason,''), COALESCE(admin_note,''), COALESCE(late_cancellation,0) "
             "FROM bookings "
             "WHERE (?1 = '' OR status = ?1) "
             "  AND (?2 = '%%' OR customer_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE "
@@ -1005,7 +1006,7 @@ int booking_database_for_each_filtered(
             "  CASE WHEN ?1 = 'bestätigt' AND appointment_date IS NULL THEN 1 ELSE 0 END ASC, "
             "  CASE WHEN ?1 = 'bestätigt' THEN appointment_date END ASC, "
             "  CASE WHEN ?1 = 'bestätigt' THEN start_minute END ASC, "
-            "  CASE WHEN ?1 IN ('abgelehnt', 'abgesagt', 'erledigt') "
+            "  CASE WHEN ?1 IN ('abgelehnt', 'abgesagt', 'erledigt', 'nicht_erschienen') "
             "       THEN COALESCE(decision_at, created_at) END DESC, "
             "  created_at DESC, id DESC;",
             -1,
@@ -1067,7 +1068,10 @@ int booking_database_for_each_filtered(
                 .service_duration_minutes_snapshot = sqlite3_column_type(statement, 27) == SQLITE_NULL
                         ? -1 : sqlite3_column_int(statement, 27),
                 .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 28) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 28)
+                        ? -1 : sqlite3_column_int(statement, 28),
+                .cancellation_reason = column_text_or_empty(statement, 30),
+                .admin_note = column_text_or_empty(statement, 31),
+                .late_cancellation = sqlite3_column_int(statement, 32) != 0
         };
 
         callback(&record, context);
@@ -1108,7 +1112,8 @@ int booking_database_for_each_appointment(
             "       appointment_date, start_minute, end_minute, decision_status, hold_expires_at, "
             "       contact_channel, email, phone_number, phone_kind, contact_preference, "
             "       decision_at, rejection_reason, service_name_snapshot, "
-            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed "
+            "       service_duration_minutes_snapshot, service_buffer_minutes_snapshot, dog_breed, "
+            "       COALESCE(cancellation_reason,''), COALESCE(admin_note,''), COALESCE(late_cancellation,0) "
             "FROM bookings "
             "WHERE appointment_date BETWEEN ?1 AND ?2 "
             "  AND decision_status IN ('pending', 'confirmed') "
@@ -1158,7 +1163,10 @@ int booking_database_for_each_appointment(
                 .service_duration_minutes_snapshot = sqlite3_column_type(statement, 27) == SQLITE_NULL
                         ? -1 : sqlite3_column_int(statement, 27),
                 .service_buffer_minutes_snapshot = sqlite3_column_type(statement, 28) == SQLITE_NULL
-                        ? -1 : sqlite3_column_int(statement, 28)
+                        ? -1 : sqlite3_column_int(statement, 28),
+                .cancellation_reason = column_text_or_empty(statement, 30),
+                .admin_note = column_text_or_empty(statement, 31),
+                .late_cancellation = sqlite3_column_int(statement, 32) != 0
         };
 
         callback(&record, context);
@@ -1193,7 +1201,8 @@ int booking_database_get_status_counts(booking_status_counts *counts)
             "       SUM(CASE WHEN status = 'bestätigt' THEN 1 ELSE 0 END), "
             "       SUM(CASE WHEN status = 'abgelehnt' THEN 1 ELSE 0 END), "
             "       SUM(CASE WHEN status = 'abgesagt' THEN 1 ELSE 0 END), "
-            "       SUM(CASE WHEN status = 'erledigt' THEN 1 ELSE 0 END) "
+            "       SUM(CASE WHEN status = 'erledigt' THEN 1 ELSE 0 END), "
+            "       SUM(CASE WHEN status = 'nicht_erschienen' THEN 1 ELSE 0 END) "
             "FROM bookings;",
             -1,
             &statement,
@@ -1216,6 +1225,7 @@ int booking_database_get_status_counts(booking_status_counts *counts)
     counts->rejected_count = (size_t)sqlite3_column_int64(statement, 3);
     counts->cancelled_count = (size_t)sqlite3_column_int64(statement, 4);
     counts->completed_count = (size_t)sqlite3_column_int64(statement, 5);
+    counts->no_show_count = (size_t)sqlite3_column_int64(statement, 6);
 
     sqlite3_finalize(statement);
     return 0;
@@ -1270,7 +1280,8 @@ booking_status_update_result booking_database_update_status(
             "    ELSE hold_expires_at END, "
             "rejection_reason = CASE "
             "    WHEN ?1 IN ('bestätigt', 'abgesagt') THEN '' "
-            "    ELSE rejection_reason END "
+            "    ELSE rejection_reason END, "
+            "last_actor_type='admin', last_actor_identifier='status_form' "
             "WHERE id = ?2;",
             -1,
             &statement,

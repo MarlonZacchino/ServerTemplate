@@ -41,7 +41,10 @@ typedef struct booking_record {
     const char *decision_status; /**< Technischer Entscheidungsstatus der Buchung. */
     const char *hold_expires_at; /**< Ablaufzeitpunkt einer vorläufigen Reservierung. */
     const char *decision_at; /**< Zeitpunkt der Adminentscheidung. */
-    const char *rejection_reason; /**< Optionaler Ablehnungs- oder Stornierungsgrund. */
+    const char *rejection_reason; /**< Optionaler Ablehnungsgrund. */
+    const char *cancellation_reason; /**< Optionaler Stornierungsgrund. */
+    const char *admin_note; /**< Interne Adminnotiz. */
+    bool late_cancellation; /**< Kennzeichnet eine kurzfristige Absage. */
     const char *service_name_snapshot; /**< Zum Buchungszeitpunkt gespeicherter Leistungsname. */
     int service_duration_minutes_snapshot; /**< Zum Buchungszeitpunkt gespeicherte Leistungsdauer in Minuten. */
     int service_buffer_minutes_snapshot; /**< Zum Buchungszeitpunkt gespeicherte Pufferzeit in Minuten. */
@@ -58,6 +61,7 @@ typedef struct booking_status_counts {
     size_t rejected_count; /**< Anzahl abgelehnter Buchungen. */
     size_t cancelled_count; /**< Anzahl abgesagter Buchungen. */
     size_t completed_count; /**< Anzahl erledigter Buchungen. */
+    size_t no_show_count; /**< Anzahl nicht wahrgenommener Termine. */
 } booking_status_counts; /**< Typalias für ::booking_status_counts. */
 
 /**
